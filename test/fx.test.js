@@ -687,6 +687,51 @@ test('spin turns each particle\'s symbol in 45° RotSprite steps from a seeded s
   assert.match(compileEffectsError(() => spinning(rock(200, 161))), /^fx\.effects\.burst\.emitters\[0\]\.spin: fx\.effects\.burst\.emitters\[0\]\.spin: spin turns rock in 45° steps, and turned 45° its visible 200 × 161 pixels would pass the 256 rows and columns a symbol may have; a spinning symbol's visible width plus height may be at most 360 pixels$/);
 });
 
+test('rest keeps a landed particle where it lands: no slide, sway or spin, and with bounce once a rebound is slow', () => {
+  const run = (emitter, frames = 8) => compileEffects(effects({ frames, emitters: [{ burst: 1, life: 40, shapes: ['dot'], ...emitter }] })).recipe;
+  const places = recipe => recipe.frames.map(frame => stampsAt(frame.ops.filter(op => op.symbol !== 'cool'))[0]);
+  // Thrown sideways, a particle lands on frame 3 and slides on along its floor; with rest it stops where it landed.
+  const thrown = { at: [4, 4], angle: 0, speed: 1, gravity: [0, 1], floor: 8 };
+  assert.deepEqual(places(run(thrown)), [[4, 4], [5, 5], [6, 7], [7, 8], [8, 8], [9, 8], [10, 8], [11, 8]]);
+  assert.deepEqual(places(run({ ...thrown, rest: true })), [[4, 4], [5, 5], [6, 7], [7, 8], [7, 8], [7, 8], [7, 8], [7, 8]]);
+  assert.deepEqual(run({ ...thrown, rest: false }), run(thrown));
+  // A swaying flake keeps rocking on its floor; at rest it holds the sway it had when it landed. ground works the same.
+  const flake = { at: [12, 4], gravity: [0, 1], floor: 8, sway: { amplitude: [2, 0], period: 8 } };
+  const swaying = places(run(flake, 12)), resting = places(run({ ...flake, rest: true }, 12));
+  assert.deepEqual(swaying.slice(0, 4), resting.slice(0, 4));
+  assert.ok(new Set(swaying.slice(3).map(String)).size > 1, String(swaying));
+  assert.deepEqual(new Set(resting.slice(3).map(String)), new Set([String(resting[3])]), String(resting));
+  assert.deepEqual(places(run({ at: [12, 4], gravity: [0, 1], ground: 4, sway: flake.sway, rest: true }, 12)), resting);
+  // A bouncing coin bounces while its rebounds are fast, then rests on the floor for good.
+  const coin = places(run({ at: [12, 0], gravity: [0, 1], floor: 12, bounce: 0.5, rest: true }, 16));
+  const landed = coin.findIndex(([, y]) => y === 12), still = coin.findLastIndex(([, y]) => y !== 12) + 1;
+  assert.ok(landed > 0 && still > landed + 1 && still < 16, String(coin));
+  assert.ok(coin.slice(still).every(([x, y]) => x === 12 && y === 12));
+  // Under strong gravity a rebound that can't lift it (slower than its gravity) rests it too, so it stops sliding.
+  const heavy = places(run({ at: [4, 0], angle: 0, speed: 1, gravity: [0, 2], floor: 12, bounce: 0.5, rest: true }, 16));
+  assert.ok(heavy.slice(-6).every(([x, y]) => x === heavy.at(-1)[0] && y === 12), String(heavy));
+  // A flake swaying up and down lies on its floor once it rests, never held above it.
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    const bobbing = compileEffects(effects({ frames: 16, seed, emitters: [{ at: [12, 4], burst: 1, life: 40, gravity: [0, 1], floor: 20, sway: { amplitude: [0, 2], period: 8 }, rest: true, shapes: ['dot'] }] })).recipe;
+    assert.ok(places(bobbing).slice(-8).every(([, y]) => y === 20), `seed ${seed}: ${places(bobbing)}`);
+  }
+  // A tumbling chip stops turning once it rests, and a looping flutter holds its step.
+  const chip = run({ at: [12, 4], gravity: [0, 1], floor: 8, spin: 45, rest: true, shapes: ['chip'] }).frames.map(frame => frame.ops[0].symbol);
+  assert.equal(new Set(chip.slice(3)).size, 1, String(chip));
+  const flutter = run({ at: [12, 4], gravity: [0, 1], floor: 8, rest: true, play: 'loop', shapes: [['dot', 'warm', 'cool']] }).frames.map(frame => frame.ops[0].symbol);
+  assert.equal(new Set(flutter.slice(4)).size, 1, String(flutter));
+  // Children it lands with (when: floor) inherit the landing's velocity, as without rest.
+  const splash = rest => compileEffects(effects({ frames: 10, emitters: [{ name: 'p', ...thrown, burst: 1, life: 40, ...(rest && { rest }), shapes: ['dot'] }, { from: 'p', when: 'floor', burst: 1, inherit: 1, life: 6, shapes: ['cool'] }] })).recipe.frames.map(frame => stampsAt(frame.ops.filter(op => op.symbol === 'cool')));
+  assert.deepEqual(splash(true), splash(false));
+  assert.ok(new Set(splash(true).flat().map(String)).size > 1, String(splash(true)));
+  // Children a resting parent trails spawn where it lies, not along the step it last moved.
+  const trailing = compileEffects(effects({ frames: 8, emitters: [{ name: 'p', ...thrown, burst: 1, life: 40, rest: true, shapes: ['dot'] }, { from: 'p', when: 'life', rate: 2, life: 1, shapes: ['cool'] }] })).recipe;
+  assert.deepEqual(stampsAt(trailing.frames.at(-1).ops.filter(op => op.symbol === 'cool')), [[7, 8], [7, 8]]);
+  // rest needs a floor or ground, and is true or false.
+  assert.throws(() => run({ at: [4, 4], rest: true }), error => error.path === 'fx.effects.burst.emitters[0].rest' && /floor or ground/.test(error.message));
+  assert.throws(() => run({ ...thrown, rest: 'yes' }), error => error.path === 'fx.effects.burst.emitters[0].rest' && /true or false/.test(error.message));
+});
+
 test('curve runs a path and keyed drift through a smooth curve that still passes every point', async () => {
   const { curveSample } = await import('../src/shapes.js');
   // Through every key, and level with its neighbours at a symmetric peak instead of turning a corner there.

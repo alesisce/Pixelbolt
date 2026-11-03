@@ -99,6 +99,14 @@ test('the installed skill reaches every guide, schema and example it names, and 
   // this copy has the files beside it and runs a pinned version, so it leaves that paragraph out.
   assert.match(shipped, /^In a copy of this file alone, as `npx skills add skulitom\/Pixelbolt` installs it, .*`npx -y pixelbolt@latest <command>`.*raw\.githubusercontent\.com\/skulitom\/Pixelbolt\/main\//m);
   assert.doesNotMatch(files.get('SKILL.md').toString('utf8'), /a copy of this file alone|pixelbolt@latest|github:skulitom|raw\.githubusercontent/);
+  // The same SKILL.md ships in the npm package, the Claude Code plugin and Studio, so that paragraph says where it
+  // doesn't apply, claims main only for the SKILL.md-only copy, and runs only released code: a package from npm,
+  // never a GitHub branch (P-073).
+  const alone = shipped.split(/\n{2,}/).find(paragraph => paragraph.startsWith('In a copy of this file alone,'));
+  assert.match(alone, /Skip this paragraph where `bin\/pixelbolt\.js` is two directories above this file/);
+  assert.match(alone, /That copy comes from Pixelbolt's main branch/);
+  assert.doesNotMatch(shipped, /This file follows Pixelbolt's main/);
+  assert.doesNotMatch(shipped, /\bgithub:|\bgit\+(?:https?|ssh):|npx (?:-y |--yes )?skulitom\//);
 });
 
 test('the installed skill\'s validate, inspect, render and gif commands work on a bundled example from the user\'s project, offline', async t => {

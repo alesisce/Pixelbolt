@@ -9,15 +9,47 @@ export class PixelError extends Error {
 // frame the format allows (a 256x256 frame of explicit pixel corrections serializes to about 2.5 MB).
 export const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
 const fail = (path, message) => { throw new PixelError(path, message); };
+// Several errors as one: the first, naming the others in its message and listing every one in `errors`. `stopped`
+// says checking stopped at the cap of ten. Recipes and compiled sources report broken parts this way.
+export function joinErrors(all, stopped = false) {
+  if (all.length === 1) return all[0];
+  const [first, ...rest] = all;
+  const combined = new PixelError(first.path, `${first.message.slice(first.path.length + 2)}; ${rest.length} more error${rest.length === 1 ? '' : 's'}${stopped ? ' (checking stopped at 10)' : ''}: ${rest.map(error => error.message).join('; ')}`);
+  combined.errors = all.map(error => ({ path: error.path, error: error.message }));
+  return combined;
+}
+
 const own = (obj, key) => Object.hasOwn(obj, key);
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+// Names agents often write for a field or operation the format names differently, offered as "did you mean".
+const FIELD_ALIASES = { width: 'w', height: 'h', x1: 'x', y1: 'y', x0: 'x', y0: 'y', colour: 'color', fill: 'filled', frame: 'from', name: 'symbol' };
+const OP_ALIASES = { circle: 'ellipse', oval: 'ellipse', rectangle: 'rect', square: 'rect', point: 'pixel', dot: 'pixel', flood: 'fill', floodfill: 'fill', erase: 'clear', label: 'text', print: 'text', sprite: 'stamp', image: 'grid', recolor: 'replace', recolour: 'replace', border: 'outline' };
+// One letter changed, added or removed: a typo of the other name.
+const oneEdit = (a, b) => {
+  if (Math.abs(a.length - b.length) > 1 || a === b) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  return a.slice(i + (a.length >= b.length ? 1 : 0)) === b.slice(i + (b.length >= a.length ? 1 : 0));
+};
+// The name in `names` that `key` most likely meant: a known alias, the same name in other case, or a one-letter typo.
+function meant(key, names, aliases) {
+  if (own(aliases, key) && names.includes(aliases[key])) return aliases[key];
+  const lower = key.toLowerCase();
+  return names.find(n => n.toLowerCase() === lower) ?? (key.length > 3 ? names.find(n => n.length > 3 && oneEdit(lower, n.toLowerCase())) : undefined);
+}
+function unknownName(kind, key, names, aliases = FIELD_ALIASES) {
+  const guess = meant(key, names, aliases);
+  const listed = kind === 'operation' ? 'operations' : 'fields here';
+  return `unknown ${kind}${kind === 'operation' ? ` ${JSON.stringify(key)}` : ''}${guess ? `; did you mean "${guess}"?` : ''}${names.length <= 24 ? (guess ? ` ${listed[0].toUpperCase()}${listed.slice(1)}` : `; ${listed}`) + `: ${names.join(', ')}` : ''}`;
+}
 function object(value, path, keys) {
   if (!isObject(value)) fail(path, 'expected an object');
   for (const key of Object.keys(value)) if (value[key] === null) fail(`${path}.${key}`, 'null is not supported; omit optional fields to use defaults');
-  if (keys) for (const key of Object.keys(value)) if (!keys.includes(key)) fail(`${path}.${key}`, 'unknown field');
+  if (keys) for (const key of Object.keys(value)) if (!keys.includes(key)) fail(`${path}.${key}`, unknownName('field', key, keys));
   return value;
 }
 function integer(value, path, min = -4096, max = 4096) {
+  if (value === undefined) fail(path, `missing; expected an integer from ${min} to ${max}`);
   if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected an integer from ${min} to ${max}`);
   return value;
 }
@@ -249,14 +281,7 @@ export function renderProject(spec, options = {}) {
     if (noted.length === 10) throw together();
   };
   // The first error, naming the others in its message and listing every one in `errors`.
-  const together = (last = null) => {
-    const all = last && !last.errors && !noted.includes(last) ? [...noted, last] : noted;
-    if (all.length === 1) return all[0];
-    const [first, ...rest] = all;
-    const combined = new PixelError(first.path, `${first.message.slice(first.path.length + 2)}; ${rest.length} more error${rest.length === 1 ? '' : 's'}${noted.length === 10 ? ' (checking stopped at 10)' : ''}: ${rest.map(error => error.message).join('; ')}`);
-    combined.errors = all.map(error => ({ path: error.path, error: error.message }));
-    return combined;
-  };
+  const together = (last = null) => joinErrors(last && !last.errors && !noted.includes(last) ? [...noted, last] : noted, noted.length === 10);
   const checked = run => { try { return run(); } catch (error) { throw noted.length && !error.errors ? together(error) : error; } };
   // Clipping is counted per source location so an agent can find the operation that overhangs.
   const clipped = new Map();
@@ -330,7 +355,7 @@ export function renderProject(spec, options = {}) {
         shade: ['x', 'y', 'w', 'h', 'steps', 'shape', 'density', 'direction', 'pattern', 'offset', 'seed', 'scale', 'over'],
         rewrite: ['x', 'y', 'w', 'h', 'rules', 'empty', 'steps', 'chance', 'limit', 'seed', 'rotate', 'mirror']
       };
-      if (typeof op.op !== 'string' || !own(fields, op.op)) fail(`${p}.op`, `unknown operation ${JSON.stringify(op.op)}`);
+      if (typeof op.op !== 'string' || !own(fields, op.op)) fail(`${p}.op`, typeof op.op === 'string' ? unknownName('operation', op.op, Object.keys(fields), OP_ALIASES) : `unknown operation ${JSON.stringify(op.op)}; operations: ${Object.keys(fields).join(', ')}`);
       object(op, p, ['op', ...fields[op.op]]);
       if (op.ground !== undefined && !sorted) fail(`${p}.ground`, 'ground orders a layer with sort "ground"; set sort on this layer, or remove ground');
       const x = integer(op.x ?? 0, `${p}.x`), y = integer(op.y ?? 0, `${p}.y`);

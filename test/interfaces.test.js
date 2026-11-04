@@ -114,6 +114,31 @@ test('CLI help describes its text output and commands for checkout and portable 
   assert.doesNotMatch(result.stdout, /All command results except the preview server are JSON|No installation needed:/);
 });
 
+test('CLI help topics print what pixel_help returns, and one section of a long guide', () => {
+  const help = (...args) => quietCLI('pixelbolt', ['help', ...args]);
+  const quick = help('quickstart');
+  assert.equal(quick.status, 0, quick.stderr);
+  assert.match(quick.stdout, /^# Pixelbolt quick start\n/);
+  // A long guide lists its sections with the shell's way to ask for one; a section prints alone under the title.
+  const workflow = help('workflow');
+  assert.match(workflow.stdout, /^# .*\n\n> \d+ KB in all\. To read one section, run pixelbolt help workflow "<heading>" .*Particle effects \(\d+ KB\)/);
+  const section = help('workflow', 'Particle', 'effects');
+  assert.equal(section.status, 0, section.stderr);
+  assert.match(section.stdout, /^# .*\n\n## Particle effects\n/);
+  assert.doesNotMatch(section.stdout, /\n## Fluid effects\n/);
+  assert.match(help('guide', 'oper').stdout, /\n## Operations\n/);
+  // JSON topics print their file, and presets read as the presets command does.
+  assert.equal(JSON.parse(help('fx').stdout).title, 'Pixelbolt particle effects');
+  assert.equal(JSON.parse(help('preset', 'smoke-puff').stdout).name, 'smoke-puff');
+  for (const [args, message] of [[['nope'], /Unknown help topic "nope"; topics: quickstart, guide, workflow/], [['workflow', 'no such part'], /has no section "no such part"; its sections are /], [['schema', 'x'], /only guide and workflow do/], [['preset'], /needs a preset name/]]) {
+    const out = help(...args);
+    assert.deepEqual([out.status, out.stdout], [1, ''], args.join(' '));
+    assert.match(JSON.parse(out.stderr).error, message);
+  }
+  // help with no topic, and --help after a topic, still print the command list.
+  assert.match(help('workflow', '--help').stdout, /pixelbolt help \[topic\] \[section\]/);
+});
+
 test('CLI consumes stdin, emits machine-readable diagnostics and handles unknown flags', () => {
   const result = quietCLI('pixelbolt', ['validate', '-'], JSON.stringify(tiny));
   assert.equal(result.status, 0); assert.equal(JSON.parse(result.stdout).frames, 1);
@@ -381,7 +406,8 @@ test('CLI replies stay small: render names its folder once, compile keeps metada
   await writeFile(path.join(dir, 'hero.poses.json'), await readFile(path.join(root, 'examples', 'hero.poses.json')));
   const compiled = cli('compile', 'hero.poses.json', '--out', 'hero.json');
   assert.equal(compiled.status, 0, compiled.stderr); assert.ok(compiled.stdout.length < 400, compiled.stdout);
-  assert.deepEqual(Object.keys(JSON.parse(compiled.stdout)), ['ok', 'recipe', 'hint']);
+  // warnings is always there, empty when there are none, so a clean compile reads as checked.
+  assert.deepEqual(Object.keys(JSON.parse(compiled.stdout)), ['ok', 'recipe', 'warnings', 'hint']);
   // Forty clipped operations: the warning counts them, the list keeps the first 16.
   const over = { version: 1, name: 'over', width: 4, height: 4, palette: { r: '#f00' }, frames: [{ name: 'a', ops: Array.from({ length: 40 }, (_, i) => ({ op: 'pixel', x: 4 + i, y: 0, color: 'r' })) }] };
   await writeFile(path.join(dir, 'over.json'), JSON.stringify(over));

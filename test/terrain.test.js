@@ -188,7 +188,8 @@ test('CLI autotile writes the test map with --preview and suggests it otherwise'
   assert.equal(run.status, 0, run.stderr || run.stdout);
   const reply = JSON.parse(run.stdout);
   assert.equal(reply.preview, path.join(dir, 'meadow-map.png'));
-  assert.equal(reply.warnings, undefined);
+  // No warnings is said, not left out, so an agent can tell a clean compile from a reply without the field.
+  assert.deepEqual(reply.warnings, []);
   const png = await readFile(reply.preview);
   assert.deepEqual([...png.subarray(1, 4)], [0x50, 0x4e, 0x47]);
   // A test map at twice the size: 768 pixels across fits two of its 320.

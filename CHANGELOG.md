@@ -4,6 +4,18 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Smoother for agents: fixes from hands-on trials
+
+Agents made a chest, a potion, a knight, a torch, poison spells and a farm tileset with scenes from the docs alone, and logged where Pixelbolt slowed them down. These are the quick fixes.
+
+- `expect.frames` takes a count per animation, `{"idle": 4, "walk": 8}`, where a name the recipe lacks is a mismatch. One count still applies to every animation, but a one-frame animation beside longer ones (a standing pose, a prop) is left out, with a note. When no animation plays the count but the animations' frames add up to it (the sheet's frames in all), the check gives one problem that says so and offers the per-animation form, instead of telling every animation to repeat names until it plays the total. A fix for too few frames asks for the missing poses and offers a repeated name only as a hold. When GIFs are a whole number of times the asked size, their fix also offers that `gifScale` (MCP `pixel_render` and `pixelbolt render`).
+- An unknown field or operation names the one most likely meant and lists what is accepted: `width` on a `rect` says `did you mean "w"?`, `circle` says `"ellipse"`, and one-letter typos (`elipse`, `durration`) and other cases (`Rect`) are caught. A required number that is absent is called missing.
+- A `pixelforge-fx` source reports every broken layer and emitter at once (up to ten, in `errors`), as recipes do, instead of one per compile. A child of a broken emitter gets no knock-on error.
+- `pixelbolt compile` and `autotile` always list `warnings`, empty when there are none, and the hint says what the unsaved metadata is.
+- `render`, `scene` and `sequence` refuse an `--out` named like a file (`scene.png`), which used to make a folder of that name, and say what to use instead (`--image`, or `pixelbolt gif`).
+- `pixelbolt help <topic> [section]` prints what MCP `pixel_help` returns: the quick start, a guide or one of its sections (`pixelbolt help workflow "Particle effects"`), a schema, the example or the presets. The skill tells shell agents to read the long guides a section at a time; the workflow passes 160 KB. The topics and sections live in `src/help.js`, shared with MCP.
+- In the scene schema, a placement's `repeat` and `step` and a tilemap's `tile` describe what they are (copies, spacing between them, the cell size) instead of a canvas position.
+
 ### Fixes
 
 - A recipe `tilemap` whose legend draws `symbol`s with `autotile: "corner"` is refused on an odd cell width or height and on an iso map, as corner templates and a scene's corner frames already were. With no error, an odd cell drew its tiles at half-pixel positions, and an iso map drew them on a grid corner tiles don't support. The agent guide says corner maps need an even, square cell.

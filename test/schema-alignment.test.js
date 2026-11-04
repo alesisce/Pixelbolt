@@ -7,7 +7,7 @@ import { compilePoses } from '../src/authoring.js';
 
 const read = async file => JSON.parse(await readFile(new URL(`../${file}`, import.meta.url), 'utf8'));
 // Runs `attempt` with one field present and reports whether the renderer rejected that field as unknown.
-const unknown = (attempt, where) => { try { attempt(); return false; } catch (error) { assert.ok(error instanceof PixelError, String(error)); return [`${where}: unknown field`, `${where}: unknown or null field`].includes(error.message); } };
+const unknown = (attempt, where) => { try { attempt(); return false; } catch (error) { assert.ok(error instanceof PixelError, String(error)); return [`${where}: unknown field`, `${where}: unknown or null field`].includes(error.message) || error.message.startsWith(`${where}: unknown field; `); } };
 
 test('pose structural fields in the schema match the compiler', async () => {
   const schema = await read('poses.schema.json');

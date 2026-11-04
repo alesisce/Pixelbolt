@@ -18,7 +18,13 @@ export function readExpect(expect) {
   for (const [key, value] of Object.entries(expect)) {
     if (key === 'transparent' || key === 'loop') { if (typeof value !== 'boolean') throw new PixelError(`expect.${key}`, 'expected true or false'); continue; }
     if (!Object.hasOwn(LIMITS, key)) throw new PixelError(`expect.${key}`, 'unknown field; use width, height, frames, colors, transparent, loop or gifScale');
-    if (!Number.isInteger(value) || value < 1 || value > LIMITS[key]) throw new PixelError(`expect.${key}`, `expected a whole number from 1 to ${LIMITS[key]}`);
+    // frames: one count for every animation, or a count per animation name.
+    if (key === 'frames' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      if (!Object.keys(value).length) throw new PixelError('expect.frames', 'expected a whole number, or animation names with their counts such as { "idle": 4, "walk": 8 }');
+      for (const [name, count] of Object.entries(value)) if (!Number.isInteger(count) || count < 1 || count > PLAYED) throw new PixelError(`expect.frames.${name}`, `expected a whole number from 1 to ${PLAYED}`);
+      continue;
+    }
+    if (!Number.isInteger(value) || value < 1 || value > LIMITS[key]) throw new PixelError(`expect.${key}`, `expected a whole number from 1 to ${LIMITS[key]}${key === 'frames' ? ' (the frames each animation plays), or a count per animation such as { "idle": 4, "walk": 8 }' : ''}`);
   }
   return expect;
 }
@@ -162,9 +168,13 @@ function framesFix(key, want, named, direction, project, recipe, total) {
     const options = [...(pingpong !== null ? [`list ${pingpong} names in animations.${key}.frames`] : []), ...(want <= NAMES ? [`set animations.${key}.direction to "forward" and list ${want} names`] : [])];
     return `"${key}" is pingpong, which plays 2n-2 frames for n names: ${options.join(', or ')}`;
   }
-  return want <= NAMES
-    ? `make "${key}" play ${want} frames: list ${want} names in animations.${key}.frames (a name may repeat; pixel_patch insert under frames only for new drawings), then render again`
-    : `one animation lists at most ${NAMES} names: set animations.${key}.direction to "pingpong" and list ${pingpong} names, which play ${want}`;
+  // More frames are new poses; a repeated name only holds one, so it is offered as a hold, not as the way to add frames.
+  const count = animations[key].frames.length;
+  return want > NAMES
+    ? `one animation lists at most ${NAMES} names: set animations.${key}.direction to "pingpong" and list ${pingpong} names, which play ${want}`
+    : want > count
+      ? `make "${key}" play ${want} frames: draw the ${want - count} more poses it needs (pixel_patch insert under frames, or more frames in the source it was compiled from) and list all ${want} names in animations.${key}.frames; repeat a name only for a deliberate hold, then render again`
+      : `make "${key}" play ${want} frames: list ${want} names in animations.${key}.frames, keeping evenly spaced poses, then render again`;
 }
 
 // Motion: the silhouettes of loops that look wrong in play: a body that leaves its ground row, frames that hop
@@ -424,7 +434,11 @@ export function checkDelivery(project, { recipe, gifs, expect, animation } = {})
           : `render again with "gif": { "scale": ${k} }${k === 1 ? ' or "gif": {}' : ''}`;
     if (expect.gifScale !== undefined && !scoped.length) problems.push({ file: 'gifs/', asked: { width: wantW, height: wantH }, got: 'no GIF', fix: gifFix });
     const wrong = sized ? scoped.filter(gif => gif.width !== wantW || gif.height !== wantH) : [];
-    if (wrong.length) problems.push({ file: gifFiles(wrong), asked: { width: wantW, height: wantH }, got: { width: wrong[0].width, height: wrong[0].height }, fix: gifFix });
+    // GIFs a whole number of times the asked size were most likely enlarged on purpose, for posting: offer the
+    // gifScale that says so beside the fix that makes them the asked size.
+    const times = wrong.length && expect.gifScale === undefined && wrong[0].width % wantW === 0 && wrong[0].width / wantW === wrong[0].height / wantH ? wrong[0].width / wantW : 1;
+    const enlarged = times > 1 ? `; or, if the user asked for GIFs ${times} times the frame size, add "gifScale": ${times} to expect` : '';
+    if (wrong.length) problems.push({ file: gifFiles(wrong), asked: { width: wantW, height: wantH }, got: { width: wrong[0].width, height: wrong[0].height }, fix: gifFix + enlarged });
     // A GIF background blends every pixel onto one colour, so GIFs can miss a request the frames meet. (Opaque frames
     // always make an opaque GIF, so only the transparent side needs a GIF check.)
     const opaque = expect.transparent === true && clearOpen.length === open.length ? scoped.filter(gif => !gif.transparent) : [];
@@ -434,10 +448,38 @@ export function checkDelivery(project, { recipe, gifs, expect, animation } = {})
   }
   // Every animation's played frames, counted once: framesFix weighs a change to one of them against the export.
   const total = expect.frames === undefined ? 0 : Object.values(animations).reduce((sum, item) => sum + item.frames.length, 0);
-  if (expect.frames !== undefined) for (const key of names) {
-    const count = animations[key].frames.length;
-    if (count === expect.frames) continue;
-    problems.push({ file: `animations/${key}.png`, asked: expect.frames, got: count, fix: framesFix(key, expect.frames, named, recipe?.animations?.[key]?.direction, project, recipe, total) });
+  const playing = key => animations[key].frames.length;
+  const framesProblem = (key, want) => ({ file: `animations/${key}.png`, asked: want, got: playing(key), fix: framesFix(key, want, named, recipe?.animations?.[key]?.direction, project, recipe, total) });
+  if (expect.frames !== null && typeof expect.frames === 'object') {
+    // A count per animation name: each named animation in scope is checked, and a missing one is a miss.
+    for (const [key, want] of Object.entries(expect.frames)) {
+      if (animation !== undefined && key !== animation) continue;
+      if (!Object.hasOwn(animations, key)) {
+        problems.push({ file: `animations/${key}.png`, asked: want, got: 'no such animation', fix: `the recipe has no animation "${key}" (it has ${list(Object.keys(animations))}): rename one, or add it with pixel_patch { "set": "animations.${key}", "value": { "frames": [${want} frame names] } }, then render again` });
+        continue;
+      }
+      if (playing(key) !== want) problems.push(framesProblem(key, want));
+    }
+  } else if (expect.frames !== undefined) {
+    // One count for every animation. A one-frame animation beside longer ones is a still (a standing pose, a prop),
+    // not a short animation, so it is left out, with a note.
+    const want = expect.frames, moving = names.filter(key => playing(key) > 1), judged = moving.length ? moving : names;
+    const misses = judged.filter(key => playing(key) !== want), matching = judged.filter(key => playing(key) === want);
+    const stills = names.filter(key => !judged.includes(key));
+    const distinct = new Set(names.flatMap(key => animations[key].frames)).size, sum = names.reduce((all, key) => all + playing(key), 0);
+    const inAll = names.length > 1 && !matching.length && (distinct === want || sum === want);
+    if (stills.length && !inAll) notes.push(`expect.frames counts the frames each animation plays; ${list(stills)} ${stills.length === 1 ? 'plays' : 'play'} one frame (a still beside the animations) and ${stills.length === 1 ? 'was' : 'were'} not counted. To check ${stills.length === 1 ? 'it' : 'them'}, give frames per animation, such as { ${JSON.stringify(stills[0])}: 1 }.`);
+    // No animation plays the count, but the animations' frames add up to it: the request was most likely the sheet's
+    // frames in all. Padding each animation to that count would spoil them, so say what the count means instead.
+    if (inAll) {
+      const counts = Object.fromEntries(names.slice(0, 16).map(key => [key, playing(key)]));
+      problems.push({ file: 'animations/', asked: want, got: counts,
+        fix: `expect.frames counts the frames each animation plays, and none plays ${want}, but the ${names.length} animations ${distinct === want ? `hold ${want} different frames` : `play ${want} frames between them`}. If the user asked for ${want} frames in all, check each animation instead${names.length <= 16 ? `: "expect": { "frames": ${JSON.stringify(counts)} }` : ' with frames per animation name'}. If they asked for one animation of ${want} frames, give that animation more poses (pixel_patch insert under frames, or more frames in its source) and list them in it, then render again` });
+    } else {
+      // Animations that already play the count suggest the request was about them alone.
+      const only = matching.length ? `; or, if the request was ${want} frames for ${list(matching)} only, check per animation: "frames": ${JSON.stringify(Object.fromEntries(matching.slice(0, 8).map(key => [key, want])))}` : '';
+      for (const key of misses) { const problem = framesProblem(key, want); problems.push(only ? { ...problem, fix: problem.fix + only } : problem); }
+    }
   }
   if (expect.colors !== undefined && colors.size > expect.colors) problems.push({ file: frameFiles, asked: `at most ${expect.colors} colours`, got: colors.size, fix: 'merge similar colours with pixel_patch recolor (or fewer palette entries), check with pixel_inspect diagnostics, then render again' });
   if (expect.transparent === true && clearOpen.length !== open.length) {

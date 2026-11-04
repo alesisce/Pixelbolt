@@ -25,6 +25,7 @@ import { importPNG } from './import.js';
 import { applyOverlay } from './overlays.js';
 import { resolveReferences, assertInside } from './resolve.js';
 import { listPresets, findPreset, loadPreset, compilePreset, presetNext } from './presets.js';
+import { TOPICS, SECTIONED, helpText, jsonTopic } from './help.js';
 
 const versions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const textContent = value => ({ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) });
@@ -76,35 +77,8 @@ export function parseTextArguments(args, properties) {
   }
   return { args, parsed };
 }
-// pixel_help returns the short quick start by default; each topic is one longer document, read only when needed: the
-// full guides, the recipe schema, a complete example, then the schema of each source format.
-const QUICK_START = '../docs/agent-quick-start.md';
-const HELP_TOPICS = {
-  guide: '../docs/agent-guide.md', workflow: '../docs/art-workflow.md', schema: '../schema.json', example: '../examples/forest-spirit.json',
-  poses: '../poses.schema.json', scenes: '../scene.schema.json', autotile: '../autotile.schema.json', fx: '../fx.schema.json', fluid: '../fluid.schema.json', wave: '../wave.schema.json', normals: '../normals.schema.json'
-};
-// The presets topics are built from examples/ when asked: every shipped source and looping recipe (presets.js).
-const TOPICS = [...Object.keys(HELP_TOPICS), 'presets', 'preset'];
-// The guide and the workflow are long (the workflow passes 150 KB, more than many clients keep of one reply), so each
-// opens with its sections and their sizes, and `name` returns one `## ` section under the document's title.
-const SECTIONED = new Set(['guide', 'workflow']);
-function helpDocument(topic, text, name) {
-  const lines = text.split('\n'), sections = [];
-  let fenced = false;
-  lines.forEach((line, index) => {
-    if (line.startsWith('```')) fenced = !fenced;
-    else if (!fenced && line.startsWith('## ')) sections.push({ heading: line.slice(3).trim(), index });
-  });
-  const end = i => sections[i + 1]?.index ?? lines.length;
-  if (name === undefined) {
-    const listed = sections.map((section, i) => `${section.heading} (${Math.ceil(Buffer.byteLength(lines.slice(section.index, end(i)).join('\n')) / 1024)} KB)`);
-    return [lines[0], '', `> ${Math.ceil(Buffer.byteLength(text) / 1024)} KB in all. To read one section, call pixel_help with topic "${topic}" and name set to its heading: ${listed.join('; ')}.`, ...lines.slice(1)].join('\n');
-  }
-  const wanted = name.trim().toLowerCase(), headings = sections.map(section => section.heading.toLowerCase());
-  const i = wanted ? (headings.includes(wanted) ? headings.indexOf(wanted) : headings.findIndex(heading => heading.startsWith(wanted))) : -1;
-  if (i < 0) throw new PixelError('name', `topic ${topic} has no section "${name}"; its sections are ${sections.map(section => section.heading).join(', ')}`);
-  return [lines[0], '', ...lines.slice(sections[i].index, end(i))].join('\n').trimEnd() + '\n';
-}
+// pixel_help returns the short quick start by default; each topic is one longer document, read only when needed
+// (help.js, which `pixelbolt help <topic>` shares).
 const COMPILERS = { 'pixelforge-poses': compilePoses, 'pixelforge-autotile': compileAutotile, 'pixelforge-fx': compileEffects, 'pixelforge-fluid': compileFluid, 'pixelforge-wave': compileWaves, 'pixelforge-normals': compileNormals };
 
 const sequenceSummary = info => ({ directory: 'sequence', pattern: info.pattern, first: info.first, frames: info.frames, fps: info.fps.label, seconds: info.seconds, width: info.width, height: info.height, alpha: info.alpha, placement: info.placement, loop: info.loop, notes: info.notes, ffmpeg: info.commands });
@@ -372,9 +346,8 @@ export function createToolRunner({ directory, root, version }) {
           const entry = await findPreset(args.name, 'name'), { source, inlined } = await loadPreset(entry);
           return { content: [textContent({ name: entry.name, file: `examples/${entry.file}`, ...(inlined.length && { inlined }), next: presetNext(entry), source })] };
         }
-        const file = args.topic === undefined ? QUICK_START : HELP_TOPICS[args.topic], text = await readFile(new URL(file, import.meta.url), 'utf8');
-        if (SECTIONED.has(args.topic)) return { content: [textContent(helpDocument(args.topic, text.replace(/\r\n/g, '\n'), args.name))] };
-        return { content: [textContent(file.endsWith('.json') ? JSON.parse(text) : text)] };
+        const text = await helpText(args.topic, args.name);
+        return { content: [textContent(jsonTopic(args.topic) ? JSON.parse(text) : text)] };
       } else if (name === 'pixel_validate') {
         const { recipe, resolved, sources } = await recipeFrom(spec, revision), project = renderProject(recipe);
         return { content: [textContent(withResolved({ ok: true, revision: await keep(recipe, sources), width: project.width, height: project.height, frames: project.frames.map(({ name, duration }) => ({ name, duration })), animations: project.animations, ...withRates(project, recipe), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }), ...(options.fps !== undefined && { frameGrid: frameGrid(project, options.fps) }) }, resolved))] };
@@ -559,7 +532,7 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
     offset: { type: 'array', items: { type: 'integer' }, minItems: 2, maxItems: 2, description: '[x, y] added to the aligned position.' },
     background: { type: 'string', description: 'Palette name or opaque hex. Default: transparent.' },
     loops: { type: 'integer', minimum: 1, maximum: 1000 }, seconds: { type: 'number', exclusiveMinimum: 0, maximum: 3600, description: 'Clip length instead of loops.' }
-  } }, share: { type: 'boolean', description: 'Also return a playground link that reopens this recipe in a browser.' }, embedRecipe: { type: 'boolean', description: 'Embed the recipe in the exported PNGs so they reopen in the playground.' }, expect: { type: 'object', properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, frames: { type: 'integer', minimum: 1 }, colors: { type: 'integer', minimum: 1 }, transparent: { type: 'boolean' }, loop: { type: 'boolean' }, gifScale: { type: 'integer', minimum: 1, maximum: 16 } }, additionalProperties: false, description: 'What the user asked for: frame size, frames per animation, at most colors, a transparent background, loop, GIF scale. The reply\'s check lists each miss and the call that fixes it.' }, saveAs: { type: 'object', additionalProperties: { type: 'string' }, description: 'Also write files where the user asked, relative to the server root: {"sheet"|"atlas"|"godot"|"tileset"|"tiled"|"recipe"|"gif"|"apng" or a listed file such as "gifs/walk.gif": "assets/hero.png"}. A GIF here implies gif: {}.' }, overwrite: { type: 'boolean', description: 'Let saveAs replace existing files. Default: refuse.' } } };
+  } }, share: { type: 'boolean', description: 'Also return a playground link that reopens this recipe in a browser.' }, embedRecipe: { type: 'boolean', description: 'Embed the recipe in the exported PNGs so they reopen in the playground.' }, expect: { type: 'object', properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, frames: { type: ['integer', 'object'], minimum: 1, additionalProperties: { type: 'integer', minimum: 1 }, description: 'Frames each animation plays, or per animation: {"idle": 4, "walk": 8}.' }, colors: { type: 'integer', minimum: 1 }, transparent: { type: 'boolean' }, loop: { type: 'boolean' }, gifScale: { type: 'integer', minimum: 1, maximum: 16 } }, additionalProperties: false, description: 'What the user asked for: frame size, frames per animation, at most colors, a transparent background, loop, GIF scale. The reply\'s check lists each miss and the call that fixes it.' }, saveAs: { type: 'object', additionalProperties: { type: 'string' }, description: 'Also write files where the user asked, relative to the server root: {"sheet"|"atlas"|"godot"|"tileset"|"tiled"|"recipe"|"gif"|"apng" or a listed file such as "gifs/walk.gif": "assets/hero.png"}. A GIF here implies gif: {}.' }, overwrite: { type: 'boolean', description: 'Let saveAs replace existing files. Default: refuse.' } } };
   const validateInput = { ...projectInput, properties: { ...source, fps: { type: ['number', 'string'], description: 'Also check timing against a video frame rate (24, 25, "29.97", 30, 60 or a fraction): frameGrid lists durations off the grid.' } } };
   const coordinate = (minimum, maximum) => ({ type: 'integer', minimum, maximum });
   const guides = { type: 'object', description: 'Perspective guides: {horizon: row, vanish: [[x, y], …up to 3], iso: {tile: [32, 16], at: [x, y]}}.' };

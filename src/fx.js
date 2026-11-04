@@ -7,7 +7,7 @@
 // shockwave rings, slashes, beams, lightning, magic circles, impact stars, fireballs) bake into one grid per frame
 // between `behind` particles and the rest. Browser-compatible and deterministic: seeded hashing and polynomial
 // trigonometry, no Math.random.
-import { PixelError, parseColor, renderProject, FRAME_AREA } from './core.js';
+import { PixelError, parseColor, renderProject, FRAME_AREA, joinErrors } from './core.js';
 import { fields, point, compilePoses } from './authoring.js';
 import { patternProblem, ditherThreshold, traceLine, random, hash, sinDeg, cosDeg, ease, EASINGS, rotateRows } from './craft.js';
 import { readShapes, renderShapes, tween, sample, sequenceFrame, atan2Deg, pathWalker } from './shapes.js';
@@ -137,8 +137,9 @@ function readEmitter(emitter, path, context, earlier) {
   if (emitter.blob !== undefined) {
     if (emitter.blob === null || typeof emitter.blob !== 'object' || Array.isArray(emitter.blob)) fail(`${path}.blob`, 'expected { look, radius }');
     fields(emitter.blob, ['look', 'radius', 'size', 'power'], `${path}.blob`);
-    const look = emitter.blob.look ?? (looks.length === 1 ? looks[0] : undefined);
-    if (!looks.includes(look)) fail(`${path}.blob.look`, emitter.blob.look === undefined ? `name the look this blob is drawn into: ${looks.join(', ')}` : `no look is named ${JSON.stringify(emitter.blob.look)}`);
+    // looks is null while the effect's layers have errors of their own: the look is checked once they read.
+    const look = emitter.blob.look ?? (looks?.length === 1 ? looks[0] : undefined);
+    if (looks !== null && !looks.includes(look)) fail(`${path}.blob.look`, emitter.blob.look === undefined ? `name the look this blob is drawn into: ${looks.join(', ')}` : `no look is named ${JSON.stringify(emitter.blob.look)}`);
     // power scales each disc's field over the particle's life: a hot drop climbs no higher than the look's dimmer bands
     // as it cools, from white through yellow to red, while its radius keys shrink it.
     blob = { look, radius: tween(emitter.blob.radius ?? 3, `${path}.blob.radius`, 0, 64), size: range(emitter.blob.size ?? 1, `${path}.blob.size`, 0.1, 8), power: emitter.blob.power === undefined ? null : tween(emitter.blob.power, `${path}.blob.power`, 0, 4) };
@@ -921,7 +922,16 @@ export function compileEffects(source) {
   // touching: the canvas sides each animation may draw on (its effect's edges, turned with a turned copy).
   const shapeWork = { spent: 0 }, pointed = new Set(), touching = new Map();
   let totalFrames = 0;
-  for (const [base, effect] of Object.entries(source.effects)) {
+  // A broken layer or emitter is noted and the rest of the source is still read, so one reply names every one (up to
+  // ten), as for recipes. An effect with a noted error is not simulated; anything else still stops at once.
+  const noted = [];
+  const note = (error, inside) => {
+    if (!(error instanceof PixelError) || error.errors || !inside(error.path)) throw error;
+    noted.push(error);
+    if (noted.length === 10) throw joinErrors(noted, true);
+  };
+  try {
+  effects: for (const [base, effect] of Object.entries(source.effects)) {
     const path = `fx.effects.${base}`;
     identifier(base, path);
     fields(effect, ['frames', 'duration', 'loop', 'seed', 'emitters', 'layers', 'looks', 'cleanup', 'turn', 'light', 'edges'], path);
@@ -950,18 +960,33 @@ export function compileEffects(source) {
       const seed = integer(effect.seed ?? 1, `${path}.seed`, 0, 2147483647), context = { frames: count, loop, seed, symbols, sequences, palette, width, height, path, view, spun, work: shapeWork };
       // Shape layers (rings, slashes, beams, bolts, glyphs, stars, bursts, auras, trails) draw between `behind` particles and
       // the rest. A trail that follows a point of an animation takes that point's place in each frame as its points.
-      const shapes = readShapes(Array.isArray(effect.layers) ? { ...effect, layers: effect.layers.map((layer, i) => turnLayer(followed(layer, `${path}.layers[${i}]`, count), view)) } : effect, path, context);
-      context.looks = shapes ? shapes.looks.map(look => look.name) : [];
+      const before = noted.length;
+      let shapes = null;
+      try { shapes = readShapes(Array.isArray(effect.layers) ? { ...effect, layers: effect.layers.map((layer, i) => turnLayer(followed(layer, `${path}.layers[${i}]`, count), view)) } : effect, path, context); }
+      catch (error) { note(error, at => at.startsWith(`${path}.`) && !at.startsWith(`${path}.emitters`)); }
+      // Layers that failed to read leave the looks unknown (null), and an effect with layers needs no emitters.
+      const layered = Boolean(shapes) || noted.length > before;
+      context.looks = shapes ? shapes.looks.map(look => look.name) : noted.length > before ? null : [];
       // Once per effect, not per turned copy: what a layer spanning the loop reads at the end of each frame must close.
       if (shapes && name === turnsOf(effect, base, path, width, height)[0].name) shapes.layers.forEach((layer, i) => {
         if (!layer.seams?.length) return;
         const keys = layer.seams.filter(key => key !== 'reveal');
         loopNotes.push(`${path}.layers[${i}]: this ${layer.kind} spans the loop, so ${[...(keys.length ? [`its ${keys.join(' and ')} keys must end where they start`] : []), ...(layer.seams.includes('reveal') ? ['a reveal draws it on again every cycle (leave reveal out)'] : [])].join(', and ')}; otherwise the loop jumps`);
       });
-      const list = effect.emitters ?? (shapes ? [] : undefined);
-      if (!Array.isArray(list) || (!list.length && (!shapes || effect.emitters !== undefined)) || list.length > LIMITS.emitters) fail(`${path}.emitters`, `expected 1–${LIMITS.emitters} emitters; leave emitters out for an effect of shape layers only`);
+      const list = effect.emitters ?? (layered ? [] : undefined);
+      try { if (!Array.isArray(list) || (!list.length && (!layered || effect.emitters !== undefined)) || list.length > LIMITS.emitters) fail(`${path}.emitters`, `expected 1–${LIMITS.emitters} emitters; leave emitters out for an effect of shape layers only`); }
+      catch (error) { note(error, at => at === `${path}.emitters`); continue effects; }
       const emitters = [];
-      list.forEach((emitter, i) => emitters.push(readEmitter(emitter, `${path}.emitters[${i}]`, context, emitters)));
+      list.forEach((emitter, i) => {
+        const at = `${path}.emitters[${i}]`;
+        try { emitters.push(readEmitter(emitter, at, context, emitters)); }
+        catch (error) {
+          note(error, where => where === at || where.startsWith(`${at}.`) || where.startsWith(`${at}[`));
+          // A stand-in keeps the failed emitter's name, so its children are read without a false "no parent" error.
+          emitters.push({ name: isObject(emitter) && typeof emitter.name === 'string' ? emitter.name : undefined });
+        }
+      });
+      if (noted.length > before) continue effects;
       // An emitter spanning a loop goes round its keys every cycle, so a path, sweep, throttle, keyed rate or ring grow
       // must end where it starts; otherwise new particles jump at the loop point. Once per effect, not per turned copy.
       if (loop && name === turnsOf(effect, base, path, width, height)[0].name) emitters.forEach((e, i) => {
@@ -1026,6 +1051,8 @@ export function compileEffects(source) {
       }
     }
   }
+  } catch (error) { throw noted.length && error instanceof PixelError && !error.errors ? joinErrors([...noted, error]) : error; }
+  if (noted.length) throw joinErrors(noted);
   if (frames.length > 256) fail('fx.effects', `the effects make ${frames.length} frames; a recipe holds at most 256`);
   for (const { name, rows } of spun.values()) symbols[name] = rows;
   const recipe = { version: 1, name: source.name, width, height, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: source.anchor }), frames, animations, ...(source.sheet !== undefined && { sheet: source.sheet }) };

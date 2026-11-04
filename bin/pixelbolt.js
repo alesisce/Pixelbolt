@@ -13,6 +13,10 @@ import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequ
 const HELP = `Pixelbolt — text to pixels, without dependencies
 
   pixelbolt init [file.json]               Create an editable example
+  pixelbolt help [topic] [section]         One reference, as MCP pixel_help gives it: quickstart, guide, workflow,
+                                           schema, example, presets, preset <name>, poses, scenes, autotile, fx,
+                                           fluid, wave or normals. guide and workflow list their sections first; name
+                                           one to print only it: help workflow "Particle effects"
   pixelbolt validate <file.json|-> [--fps 30]
                                            Validate and describe a project; --fps lists durations off that video frame grid
   pixelbolt inspect <file.json|-> [--out sheet.png] [--grid]
@@ -156,6 +160,10 @@ function inspectOptions({ frames, animation, region, grid, scale, background, vi
   return { ...(frames !== undefined && { frames: frames.split(',') }), ...(animation !== undefined && { animation }), ...(region !== undefined && { region: { x, y, w, h } }), ...(grid && { grid }), ...(scale !== undefined && { scale: Number(scale) }), ...(background !== undefined && { background }), ...(view !== undefined && { view }), ...(native && { native }), ...(diagnostics && { diagnostics }), ...(maxCells !== undefined && { maxCells: Number(maxCells) }), ...(step !== undefined && { step: Number(step) }), ...(offset !== undefined && { offset: Number(offset) }) };
 }
 // The named files a command reads (stdin aside), so its outputs can be kept off them.
+// A folder output named like a file (scene.png) is a mix-up that would make a folder of that name: name what to use.
+function folderOut(command, out, instead) {
+  if (/\.(?:png|apng|gif|jpe?g|webp|json|tres|tsx|tmx|mov|mp4)$/i.test(out)) throw new Error(`${command} --out takes a folder, and ${out} names a file: ${instead}`);
+}
 const filesRead = (...files) => files.filter(file => file !== undefined && file !== '-').map(file => path.resolve(file));
 // Checks every target before writing any, so a refused overwrite leaves nothing half-written. `inputs` are the files the
 // command read: even --force never writes over one, however the path is spelled (links, short names, letter case).
@@ -181,10 +189,36 @@ const COMPILERS = { 'pixelforge-poses': compilePoses, 'pixelforge-autotile': com
 const summary = (project, recipe) => ({ name: project.name, width: project.width, height: project.height, frames: project.frames.length, animations: Object.keys(project.animations), ...withRates(project, recipe), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }) });
 const referenced = input => input.resolution.files.length ? { resolved: input.resolution.files } : {};
 const engineVersion = async () => JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+// `presets [name]`, and `help presets` or `help preset <name>`: every preset, or one preset's source. A shell has no
+// time limit, so every preset is measured.
+async function presetsText(name) {
+  if (name === undefined) return JSON.stringify(await listPresets({ budget: Infinity }), null, 2);
+  const entry = await findPreset(name, 'name'), { source, inlined } = await loadPreset(entry);
+  return JSON.stringify({ name: entry.name, file: `examples/${entry.file}`, ...(inlined.length && { inlined }), next: presetNext(entry, true), source }, null, 2);
+}
+// `help <topic> [section]`: what MCP pixel_help returns for the topic, so a shell reads one section of a long guide
+// instead of the whole file. A section name may be quoted or not.
+async function helpTopic([topic, ...words]) {
+  const { TOPICS, SECTIONED, helpText } = await import('../src/help.js');
+  const name = words.length ? words.join(' ') : undefined;
+  if (['quickstart', 'quick-start', 'start'].includes(topic)) {
+    if (name !== undefined) throw new Error('the quick start has no sections; run pixelbolt help quickstart');
+    return helpText(undefined);
+  }
+  if (!TOPICS.includes(topic)) throw new Error(`Unknown help topic "${topic}"; topics: quickstart, ${TOPICS.join(', ')}`);
+  if (topic === 'presets' || topic === 'preset') {
+    if (topic === 'preset' && name === undefined) throw new Error('help preset needs a preset name: pixelbolt help preset smoke-puff (pixelbolt help presets lists them)');
+    if (topic === 'presets' && name !== undefined) throw new Error('help presets lists every preset; for one preset\'s source run pixelbolt help preset <name>');
+    return `${await presetsText(name)}\n`;
+  }
+  if (name !== undefined && !SECTIONED.has(topic)) throw new Error(`help ${topic} has no sections; only guide and workflow do`);
+  return helpText(topic, name, 'cli');
+}
 try {
   const [command = 'help', ...rest] = process.argv.slice(2);
   // `<command> --help` shows the same help, which lists every command's options (the quick start points agents there).
-  if (['help', '--help', '-h'].includes(command) || rest.includes('--help') || rest.includes('-h')) process.stdout.write(HELP);
+  if (command === 'help' && rest.length && !rest.includes('--help') && !rest.includes('-h')) process.stdout.write(await helpTopic(rest));
+  else if (['help', '--help', '-h'].includes(command) || rest.includes('--help') || rest.includes('-h')) process.stdout.write(HELP);
   else {
     const { positional, options } = parseArgs(rest);
     if (positional.length > 1) throw new Error('Too many positional arguments');
@@ -215,12 +249,7 @@ try {
       console.log(JSON.stringify({ ok: true, file }));
     } else if (command === 'schema') process.stdout.write(await readFile(new URL('../schema.json', import.meta.url), 'utf8'));
     else if (command === 'presets') {
-      // A shell has no time limit, so every preset is measured.
-      if (!positional.length) console.log(JSON.stringify(await listPresets({ budget: Infinity }), null, 2));
-      else {
-        const entry = await findPreset(positional[0], 'name'), { source, inlined } = await loadPreset(entry);
-        console.log(JSON.stringify({ name: entry.name, file: `examples/${entry.file}`, ...(inlined.length && { inlined }), next: presetNext(entry, true), source }, null, 2));
-      }
+      console.log(await presetsText(positional[0]));
     } else if (command === 'skill') {
       if (positional[0] !== 'install') throw new Error('Usage: pixelbolt skill install [--project | --dir <skills folder>] [--force]');
       const { installSkill } = await import('../src/skill.js');
@@ -280,7 +309,7 @@ try {
         const compiled = compile(input.document);
         // A plain recipe preset compiles to itself and has no metadata to save.
         if (options.metadata && compiled.metadata === undefined) throw new Error(`${options.preset} is a plain recipe preset, which has no metadata; omit --metadata`);
-        value = linkPalette(compiled.recipe, input, options.out); metadata = compiled.metadata; warnings = compiled.warnings; preview = compiled.preview;
+        value = linkPalette(compiled.recipe, input, options.out); metadata = compiled.metadata; warnings = compiled.warnings ?? []; preview = compiled.preview;
       } else if (command === 'overlay') {
         if (!options.changes) throw new Error('overlay requires --changes <edits.json>');
         if (positional[0] === '-' && options.changes === '-') throw new Error('Only one input can use stdin');
@@ -300,7 +329,7 @@ try {
       const reads = command === 'import' ? filesRead(positional[0], options.atlas) : [...inputsOf(input), ...filesRead(options.changes, options.selections)];
       const written = await writeOutputs({ recipe: [options.out, formatJSON(value)], ...(options.metadata && { metadata: [options.metadata, formatJSON(metadata)] }), ...(testMap && { preview: [options.preview, encodePNG(testMap.data, testMap.width, testMap.height)] }) }, options.force, reads);
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry.
-      console.log(JSON.stringify({ ok: true, ...written, ...(warnings && { warnings }), ...(((metadata && !options.metadata) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && 'The metadata was not saved; pass --metadata <new.json> to keep it.', preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) }, null, 2));
+      console.log(JSON.stringify({ ok: true, ...written, ...(warnings && { warnings }), ...(((metadata && !options.metadata) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) }, null, 2));
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');
@@ -314,6 +343,7 @@ try {
       console.log(JSON.stringify({ ok: true, name: input.document.name, width: frame.width, height: frame.height, duration: scene.duration, time, scale, view: mode, placements: frame.placements.length, ...(frame.depth && { depth: frame.depth }), ...(image.guides && { guides: image.guides }), ...(frame.lights && { lights: frame.lights }), ...(frame.shadows && { shadows: frame.shadows }), ...(frame.camera && { camera: frame.camera }), ...(frame.haze && { haze: frame.haze }), warnings: frame.warnings, ...written, ...referenced(input) }, null, 2));
     } else if (command === 'scene') {
       if (!options.out) throw new Error('scene requires --out <directory>, or --image <file.png> for one view');
+      folderOut('scene', options.out, 'for one image of the scene use --image <file.png>; --out writes a bundle folder');
       for (const key of ['time', 'view', 'scale', 'guides']) if (options[key] !== undefined) throw new Error(`--${key} goes with --image, which writes one view of the scene`);
       const input = await readResolved(positional[0]), bundle = await createSceneBundle(input.document);
       if (options['embed-recipe']) await embedBundleRecipe(bundle, input.document, await engineVersion());
@@ -356,6 +386,7 @@ try {
       console.log(JSON.stringify({ ok: true, name: after.name, edits, ...(applied.rebased && { rebased: true }), ...report, ...(written.image && { image: { ...drawn, scale: sheet.scale, file: written.image } }), ...(written.recipe && { recipe: written.recipe }), warnings: after.warnings, ...(after.clipping && { clipping: after.clipping }), ...(after.clippingOmitted && { clippingOmitted: after.clippingOmitted }) }, null, 2));
     } else if (command === 'sequence') {
       if (!options.out) throw new Error('sequence requires --out <new folder>');
+      folderOut('sequence', options.out, 'name a new folder for the numbered frames; for one GIF use pixelbolt gif --out <new.gif>');
       if (options.fps === undefined) throw new Error('sequence requires --fps, for example 24, 25, 29.97, 30 or 60');
       const input = await readResolved(positional[0]);
       // Pose, autotile, effect and fluid sources become the recipe they compile to; a scene is rendered moment by moment.
@@ -384,6 +415,7 @@ try {
       if (command === 'validate') { const project = renderProject(input.document); console.log(JSON.stringify({ ok: true, ...summary(project, input.document), ...(options.fps !== undefined && { frameGrid: frameGrid(project, options.fps) }), ...referenced(input) })); }
       else {
         if (!options.out) throw new Error('render requires --out <directory>');
+        folderOut('render', options.out, 'name a new folder: the sheet, atlas and animations are written inside it (the sheet as <name>.png); for one GIF use pixelbolt gif --out <new.gif>');
         if (positional[0] === '-' && options.expect === '-') throw new Error('Only one input can use stdin');
         const expect = options.expect === undefined ? undefined : readExpect(await readExpectOption(options.expect));
         // The check runs before anything is written, so an unknown --animation writes nothing. render writes no GIFs.

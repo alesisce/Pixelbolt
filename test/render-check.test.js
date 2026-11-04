@@ -93,13 +93,16 @@ test('the render check fixes sheet.scale with whole multiples, from either side 
 });
 
 test('the render check sees frame counts, pingpong, loops, recipes without animations and backgrounds', () => {
+  // "gone" plays one frame beside the two-frame "flash": a still, left out of one count for every animation, with a note.
   const tile = check(small, { expect: { frames: 2, loop: true, transparent: true } });
   assert.deepEqual(tile.problems.map(problem => [problem.file, problem.asked, problem.got]), [
-    ['animations/gone.png', 2, 1],
     ['tile.png, frames/ and animations/', 'a transparent background', 'no transparent pixel in "a"'],
     ['animations/flash.png', 'a loop', 'one play']
   ]);
-  assert.deepEqual(quoted(tile.problems[2].fix), { set: 'animations.flash.loop', value: true });
+  assert.match(tile.notes.at(-1), /^expect\.frames counts the frames each animation plays; "gone" plays one frame .* \{ "gone": 1 \}\.$/);
+  assert.deepEqual(quoted(tile.problems[1].fix), { set: 'animations.flash.loop', value: true });
+  // A count per animation checks the still too.
+  assert.deepEqual(check(small, { expect: { frames: { gone: 2 } } }).problems.map(problem => [problem.file, problem.asked, problem.got]), [['animations/gone.png', 2, 1]]);
   // With one animation named, only its frames count: "c" is not in flash.
   assert.equal(check(small, { expect: { transparent: false }, animation: 'flash' }).problems[0].got, 'transparent pixels in "b"');
   assert.equal(check(small, { expect: { transparent: false } }).problems[0].got, 'transparent pixels in "b", "c"');
@@ -113,6 +116,40 @@ test('the render check sees frame counts, pingpong, loops, recipes without anima
   const change = quoted(loose.problems[1].fix.replace('the recipe has no animations field: ', ''));
   assert.deepEqual(change, { set: 'animations', value: { default: { frames: ['a', 'b', 'c'], loop: false } } });
   assert.equal(check(patchRecipe(bare, [change]).recipe, { expect: { loop: false } }).ok, true);
+});
+
+test('expect.frames takes a count per animation, and a count that only the whole sheet makes says so', () => {
+  // spirit: idle plays 7, bob 4 (pingpong of 3 names), blink 3 once.
+  assert.deepEqual(readExpect({ frames: { idle: 7, bob: 4 } }), { frames: { idle: 7, bob: 4 } });
+  assert.equal(check(spirit, { expect: { frames: { idle: 7, bob: 4, blink: 3 } } }).ok, true);
+  const per = check(spirit, { expect: { frames: { idle: 8, walk: 4 } } });
+  assert.deepEqual(per.problems.map(problem => [problem.file, problem.asked, problem.got]), [['animations/idle.png', 8, 7], ['animations/walk.png', 4, 'no such animation']]);
+  assert.match(per.problems[1].fix, /no animation "walk" \(it has "idle", "bob", "blink"\)/);
+  // With one animation named, only its entry is checked.
+  assert.equal(check(spirit, { expect: { frames: { idle: 8, blink: 3 } }, animation: 'blink' }).ok, true);
+  // One count that no animation plays, while the animations hold that many different frames: one problem that explains
+  // the count, never a fix that pads each animation to the sheet's total.
+  const knight = { version: 1, name: 'knight', width: 2, height: 2, palette: { r: '#ff0000' },
+    frames: Array.from({ length: 6 }, (_, i) => ({ name: `f${i}`, ops: [{ op: 'pixel', x: i % 2, y: i >> 2, color: 'r' }] })),
+    animations: { idle: { frames: ['f0', 'f1'] }, walk: { frames: ['f2', 'f3', 'f4', 'f5'] } } };
+  const total = check(knight, { expect: { frames: 6 } });
+  assert.deepEqual(total.problems.map(problem => [problem.file, problem.asked, problem.got]), [['animations/', 6, { idle: 2, walk: 4 }]]);
+  assert.match(total.problems[0].fix, /^expect\.frames counts the frames each animation plays, and none plays 6, but the 2 animations hold 6 different frames\. .*"expect": \{ "frames": \{"idle":2,"walk":4\} \}/);
+  assert.doesNotMatch(total.problems[0].fix, /repeat/);
+  assert.equal(check(knight, { expect: { frames: { idle: 2, walk: 4 } } }).ok, true);
+  // A sheet of stills (props, one frame each) asked for its number of frames gets the same explanation.
+  const props = { ...knight, animations: Object.fromEntries(knight.frames.slice(0, 3).map(frame => [frame.name, { frames: [frame.name] }])) };
+  assert.deepEqual(check(props, { expect: { frames: 3 } }).problems.map(problem => problem.got), [{ f0: 1, f1: 1, f2: 1 }]);
+  // A count some animations play: the others' fixes also offer checking just those.
+  const some = check(knight, { expect: { frames: 4 } });
+  assert.deepEqual(some.problems.map(problem => problem.file), ['animations/idle.png']);
+  assert.match(some.problems[0].fix, /; or, if the request was 4 frames for "walk" only, check per animation: "frames": \{"walk":4\}$/);
+});
+
+test('GIFs a whole number of times the asked size also offer gifScale', () => {
+  const project = renderProject(spirit), fix = check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24 }, animation: 'idle' }).problems[0].fix;
+  assert.equal(fix, 'render again with "gif": { "scale": 1 } or "gif": {}; or, if the user asked for GIFs 8 times the frame size, add "gifScale": 8 to expect');
+  assert.equal(check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24, gifScale: 8 }, animation: 'idle' }).ok, true);
 });
 
 // The changes a size fix quotes as a JSON array, after `pixel_patch ` or `(or `.
@@ -201,7 +238,9 @@ test('the render check\'s fixes stay inside the format\'s limits, and applying t
   assert.match(check(bare, { expect: { frames: 1025 } }).problems[0].fix, /^no animation plays 1025 frames: .*play 1024 or 1026$/);
   assert.match(check(spirit, { expect: { frames: 1500 }, animation: 'idle' }).problems[0].fix, /set animations\.idle\.direction to "pingpong" and list 751 names, which play 1500$/);
   assert.equal(check(spirit, { expect: { frames: 2046 }, animation: 'bob' }).problems[0].fix, '"bob" is pingpong, which plays 2n-2 frames for n names: list 1024 names in animations.bob.frames');
-  assert.match(check(spirit, { expect: { frames: 9 }, animation: 'idle' }).problems[0].fix, /^make "idle" play 9 frames: list 9 names in animations\.idle\.frames \(a name may repeat/);
+  // More frames than an animation plays are new poses; a repeated name is offered only as a hold.
+  assert.match(check(spirit, { expect: { frames: 9 }, animation: 'idle' }).problems[0].fix, /^make "idle" play 9 frames: draw the 2 more poses it needs \(pixel_patch insert under frames.*list all 9 names in animations\.idle\.frames; repeat a name only for a deliberate hold, then render again$/);
+  assert.equal(check(spirit, { expect: { frames: 5 }, animation: 'idle' }).problems[0].fix, 'make "idle" play 5 frames: list 5 names in animations.idle.frames, keeping evenly spaced poses, then render again');
   // expect.frames reaches the longest pingpong: 514 names play 1,026 frames.
   assert.equal(check({ ...bare, animations: { default: { frames: Array(514).fill('a'), direction: 'pingpong' } } }, { expect: { frames: 1026 } }).ok, true);
   assert.deepEqual(readExpect({ frames: 2046 }), { frames: 2046 });
@@ -209,7 +248,7 @@ test('the render check\'s fixes stay inside the format\'s limits, and applying t
 
 test('expect is refused by name when it is malformed', () => {
   assert.equal(readExpect(undefined), undefined);
-  for (const [expect, where] of [[null, 'expect'], [[], 'expect'], [{ size: 32 }, 'expect.size'], [{ width: 0 }, 'expect.width'], [{ frames: 1.5 }, 'expect.frames'], [{ frames: 2047 }, 'expect.frames'], [{ width: 4097 }, 'expect.width'], [{ gifScale: 17 }, 'expect.gifScale'], [{ loop: 'yes' }, 'expect.loop']]) {
+  for (const [expect, where] of [[null, 'expect'], [[], 'expect'], [{ size: 32 }, 'expect.size'], [{ width: 0 }, 'expect.width'], [{ frames: 1.5 }, 'expect.frames'], [{ frames: 2047 }, 'expect.frames'], [{ frames: {} }, 'expect.frames'], [{ frames: { walk: 0 } }, 'expect.frames.walk'], [{ frames: { walk: '8' } }, 'expect.frames.walk'], [{ frames: [8] }, 'expect.frames'], [{ frames: null }, 'expect.frames'], [{ width: 4097 }, 'expect.width'], [{ gifScale: 17 }, 'expect.gifScale'], [{ loop: 'yes' }, 'expect.loop']]) {
     assert.throws(() => readExpect(expect), error => error instanceof PixelError && error.path === where, JSON.stringify(expect));
   }
 });

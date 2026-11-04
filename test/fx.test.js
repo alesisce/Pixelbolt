@@ -88,6 +88,25 @@ test('effect sources fail early with paths an agent can act on', () => {
   assert.throws(() => compileEffects({ ...effects({ frames: 200, emitters: [{ at: [1, 1], burst: 1, shapes: ['dot'] }] }), effects: { a: { frames: 200, emitters: [{ at: [1, 1], burst: 1, shapes: ['dot'] }] }, b: { frames: 100, emitters: [{ at: [1, 1], burst: 1, shapes: ['dot'] }] } } }), /at most 256/);
 });
 
+test('an effect source names every broken layer and emitter in one error, without knock-on errors', () => {
+  const ok = { at: [12, 12], burst: 1, life: 2, shapes: ['dot'] };
+  const errorOf = source => { try { compileEffects(source); } catch (error) { return error; } assert.fail('expected an error'); };
+  // Two emitters of one effect and an emitter of another, each broken in its own way.
+  const both = errorOf({ ...effects({ frames: 2, emitters: [{ ...ok, speed: 'fast' }, { ...ok, area: [1.5, 2] }] }), effects: { burst: { frames: 2, emitters: [{ ...ok, speed: 'fast' }, { ...ok, area: [1.5, 2] }] }, other: { frames: 2, emitters: [{ ...ok, life: 0 }] } } });
+  assert.deepEqual(both.errors.map(item => item.path), ['fx.effects.burst.emitters[0].speed', 'fx.effects.burst.emitters[1].area', 'fx.effects.other.emitters[0].life']);
+  assert.equal(both.path, 'fx.effects.burst.emitters[0].speed');
+  assert.match(both.message, /; 2 more errors: fx\.effects\.burst\.emitters\[1\]\.area: /);
+  // A broken layer and a broken emitter of the same effect.
+  const layered = errorOf(effects({ frames: 2, layers: [{ kind: 'ring', at: [12, 12], scale: 1.5 }], emitters: [{ ...ok, area: [1.5, 2] }] }));
+  assert.deepEqual(layered.errors?.map(item => item.path).at(-1), 'fx.effects.burst.emitters[0].area');
+  // A child of a broken parent is read without a false "no earlier emitter" error.
+  const child = errorOf(effects({ frames: 2, emitters: [{ ...ok, name: 'spark', speed: 'fast' }, { from: 'spark', burst: 1, life: 2, shapes: ['dot'] }] }));
+  assert.deepEqual([child.path, child.errors], ['fx.effects.burst.emitters[0].speed', undefined]);
+  // One error stays a single error, and a source-wide error still stops at once.
+  assert.equal(errorOf(effects({ frames: 2, emitters: [{ ...ok, speed: 'fast' }] })).errors, undefined);
+  assert.equal(errorOf({ ...effects({ frames: 2, emitters: [{ ...ok, speed: 'fast' }] }), width: 0 }).path, 'fx.width');
+});
+
 const stampsAt = ops => ops.filter(op => op.op === 'stamp').map(op => [op.x, op.y]);
 const sorted = points => points.map(p => p.join(',')).sort();
 

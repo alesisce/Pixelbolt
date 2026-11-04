@@ -41,6 +41,26 @@ test('validation names every miscounted row, and every broken operation, in one 
   const many = make(Array.from({ length: 30 }, () => ({ op: 'pixel', x: 0, y: 0, color: 'nope' })));
   assert.throws(() => renderProject(many), error => error.errors.length === 10 && /9 more errors \(checking stopped at 10\)/.test(error.message));
 });
+test('an unknown field or operation names the one most likely meant and what is accepted; a missing number says so', () => {
+  const message = op => { try { renderProject(make([op])); } catch (error) { return error.message; } return null; };
+  assert.equal(message({ op: 'rect', x: 0, y: 0, width: 2, h: 2, color: 'r' }), 'project.frames[0].ops[0].width: unknown field; did you mean "w"? Fields here: op, x, y, w, h, color, filled, ground');
+  assert.match(message({ op: 'line', x1: 0, y: 0, x2: 3, y2: 3, color: 'r' }), /\.x1: unknown field; did you mean "x"\?/);
+  // No likely match: only the accepted fields.
+  assert.equal(message({ op: 'pixel', x: 0, y: 0, color: 'r', zz: 1 }), 'project.frames[0].ops[0].zz: unknown field; fields here: op, x, y, color, ground');
+  // Operations: a common other name, a one-letter typo and another case.
+  assert.match(message({ op: 'circle', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /\.op: unknown operation "circle"; did you mean "ellipse"\? Operations: pixel, rect, ellipse, /);
+  assert.match(message({ op: 'elipse', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /did you mean "ellipse"\?/);
+  assert.match(message({ op: 'Rect', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /did you mean "rect"\?/);
+  assert.match(message({ op: 'polygon' }), /unknown operation "polygon"; operations: pixel, /);
+  assert.match(message({ op: 7 }), /unknown operation 7; operations: pixel, /);
+  // Recipe and frame fields get the same help.
+  assert.throws(() => renderProject(make([], { animation: {} })), { message: /^project\.animation: unknown field; did you mean "animations"\?/ });
+  assert.throws(() => renderProject(make([], { frames: [{ name: 'a', durration: 100 }] })), { message: /^project\.frames\[0\]\.durration: unknown field; did you mean "duration"\?/ });
+  // A required number that is absent is called missing; one out of range keeps the plain message.
+  assert.equal(message({ op: 'rect', x: 0, y: 0, color: 'r' }), 'project.frames[0].ops[0].w: missing; expected an integer from 1 to 512');
+  assert.equal(message({ op: 'rect', x: 0, y: 0, w: 0, h: 1, color: 'r' }), 'project.frames[0].ops[0].w: expected an integer from 1 to 512');
+});
+
 test('non-square stamp rotates clockwise and flips before rotation', () => {
   const p = renderProject(make([{ op: 'stamp', symbol: 's', rotate: 90 }], { symbols: { s: ['rg', 'b.','r.'] } }));
   assert.deepEqual(pixel(p.frames[0], 0, 0), [255, 0, 0, 255]);

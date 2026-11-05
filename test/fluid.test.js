@@ -50,8 +50,11 @@ const GOLDEN = {
   hourglass: 'd9664a2973600387217e81bdfe73b8df130ebe20febde720fcc56543c4f16d06',
   'sand-gate': 'b5ad55de68dee6c0ade0aa225ea8f094a2fe1bb421beac1adc023e043f92cf6d',
   'sand-plough': 'd3854405dd7e42d64a3ca694e405acb6d57d23fefe6358dcddc820254ec64971',
-  'crate-splash': '063053dc5ab48873d1a081b5b0ae2b88897e7d52ce47f499ffd7509ee6223435',
-  'sand-slide': '21e428a2d2d64caf61a869b1734e553f1628af061f95be21c4a31ebcf02729b3'
+  'crate-splash': 'cfa8380f28682964f084ae98d1a4dba3a6df09e39b877ca8c102c56dc082f8cd',
+  'sand-slide': '7767cf078e115f03790c438d32f604408acbbc0efe16ed947bc0a443b18685fb',
+  'water-wheel': '3efdeb0c6188725d2d5696a33a87824a6b0396f387e3efb43381fb16e876c96f',
+  'hot-stone': 'e6e864c866c6f708b4185cdb033c00c30e7f38a9b4f62324d499c9c76e81363f',
+  'plank-tip': '848231d1e726c985b1a59eefbde75881e813875b00a81eda6cdab07f9dc05937'
 };
 const examples = new Map();
 const example = async name => {

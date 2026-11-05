@@ -85,7 +85,7 @@
           "size": [8, 8],
           "at": [17, 13],
           "density": 0.8,
-          "friction": 0.6,
+          "friction": 1.2,
           "fill": "h",
           "outline": "O"
         },

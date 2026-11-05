@@ -219,7 +219,7 @@
             },
             "maxItems": 2,
             "minItems": 2,
-            "description": "Liquid: acceleration [x, y]; default [0, 0.3]."
+            "description": "Liquid: acceleration [x, y]; default [0, 0.3]. Gas: only with bodies, the pull on them (the gas itself rises by buoyancy); default [0, 0.3]."
           },
           "flip": {
             "type": "number",
@@ -1461,7 +1461,7 @@
                   "type": "number",
                   "minimum": -3600,
                   "maximum": 3600,
-                  "description": "Degrees clockwise. Default 0. Drawn in steps the body's size can show (under 6 pixels across, always square); collisions use the exact angle."
+                  "description": "Degrees clockwise. Default 0. Drawn to the whole degree with straight, even sides (under 6 pixels across, always square); collisions use the exact angle."
                 },
                 "velocity": {
                   "type": "array",
@@ -1556,7 +1556,7 @@
                 },
                 "symbol": {
                   "type": "string",
-                  "description": "Draw this symbol instead of fill and outline, centred on the body and turned with it (in steps its size reads at: an 8-pixel sprite in quarter turns)."
+                  "description": "Draw this symbol instead of fill and outline, centred on the body and turned with it to the whole degree, its outline kept a closed line (under 6 pixels across, in quarter turns)."
                 },
                 "trail": {
                   "type": "object",
@@ -1648,6 +1648,12 @@
                     "step"
                   ],
                   "additionalProperties": false
+                },
+                "temperature": {
+                  "type": "number",
+                  "minimum": -16,
+                  "maximum": 16,
+                  "description": "With heat (a gas, or a liquid with heat): the temperature the body keeps, warming or chilling what it touches as a hot obstacle does, so a red-hot stone boils the water it lands in. Default none."
                 }
               },
               "required": [
@@ -1658,7 +1664,7 @@
             },
             "maxItems": 64,
             "minItems": 1,
-            "description": "Liquid, one-shot, without heat: rigid bodies in the liquid, the entries a pixelforge-bodies effect takes (pixel_help topic bodies), with the liquid's gravity, walls and obstacles. Each is a moving solid that shoves the liquid aside; water floats it by its density (1 is water's: 0.5 floats half out) and drags it, and resting sand holds it up as ground. They are drawn over the liquid, and the metadata gives their paths."
+            "description": "Rigid bodies in the fluid, the entries a pixelforge-bodies effect takes (pixel_help topic bodies), with the fluid's gravity, walls and obstacles. Each is a moving solid that shoves the fluid aside, a turning one stirring it; water floats it by its density (1 is water's: 0.5 floats half out) and drags it, what rests on it weighs on it, resting sand holds it up as ground, and a gas pushes and drags it. In a loop the closing frames bring them back to where the cycle starts; with heat a body keeps its temperature. They are drawn over the fluid, and the metadata gives their paths."
           },
           "granular": {
             "type": "object",

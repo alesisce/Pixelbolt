@@ -15,7 +15,7 @@
 // and iteration counts, and bodies, contacts and pixels visited in a fixed order.
 import { PixelError, renderProject } from './core.js';
 import { fields } from './authoring.js';
-import { sinDeg, cosDeg, traceLine, rotateRows } from './craft.js';
+import { sinDeg, cosDeg, traceLine, turnRows } from './craft.js';
 import { atan2Deg } from './shapes.js';
 
 export const BODY_SHAPES = ['circle', 'box', 'polygon', 'hoop'];
@@ -108,7 +108,7 @@ function readMaterial(value, path, fixed) {
   };
 }
 
-const BODY_FIELDS = ['name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'outline', 'symbol', 'trail', 'ring', 'grid'];
+const BODY_FIELDS = ['temperature', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'outline', 'symbol', 'trail', 'ring', 'grid'];
 
 // One entry of `bodies`: a body, or copies of it laid out on a ring or a grid. Returns the bodies it makes.
 function readBody(entry, path, context) {
@@ -125,6 +125,9 @@ function readBody(entry, path, context) {
   const velocity = entry.velocity === undefined ? [0, 0] : pair(entry.velocity, `${path}.velocity`, -MAX_SPEED, MAX_SPEED);
   const spin = number(entry.spin ?? 0, `${path}.spin`, -MAX_SPIN, MAX_SPIN);
   const material = readMaterial(entry, path, fixed);
+  // A body keeps its temperature in a fluid with heat, as an obstacle does: a red-hot stone boils the water it lands in.
+  if (entry.temperature !== undefined && !context.heat) fail(`${path}.temperature`, 'a body has a temperature in a pixelforge-fluid effect with heat, where it warms or chills what it touches');
+  const temperature = entry.temperature === undefined ? null : number(entry.temperature, `${path}.temperature`, -16, 16);
   // Geometry in the body's own frame, centred on its centre of mass.
   let parts, area, inertia, size;
   if (shape === 'circle') {
@@ -216,7 +219,7 @@ function readBody(entry, path, context) {
     shape, parts, size, fixed, x, y, angle: a, vx: velocity[0], vy: velocity[1], spin,
     invMass: fixed ? 0 : 1 / mass, invInertia: fixed || shape === 'hoop' ? 0 : 1 / (mass * inertia),
     bounce: material.bounce, friction: material.friction, drag: material.drag, spinDrag: material.spinDrag,
-    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, fills, outline, symbol, trail
+    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, fills, outline, symbol, trail
   }));
 }
 
@@ -300,7 +303,7 @@ function traceObstacles(effect, width, height) {
     const convexA = !at(Math.floor(ax - dx * 0.5 - nx * 0.5), Math.floor(ay - dy * 0.5 - ny * 0.5));
     const convexB = !at(Math.floor(bx + dx * 0.5 - nx * 0.5), Math.floor(by + dy * 0.5 - ny * 0.5));
     const m = material(cell[0], cell[1]);
-    segments.push({ ax, ay, bx, by, nx, ny, convexA, convexB, bounce: m.bounce, friction: m.friction,
+    segments.push({ ax, ay, bx, by, nx, ny, convexA, convexB, bounce: m.bounce, friction: m.friction, soft: !!m.soft,
       part: polygonPart([[ax, ay], [bx, by]]) });
   };
   // Horizontal faces at y = j, between cell (i, j − 1) above and (i, j) below.
@@ -557,7 +560,7 @@ export function createBodyWorld(effect, context) {
         const s = world.segments[index];
         a.world.forEach((pa, ia) => {
           const m = partSegment(pa, s, margin);
-          if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction) });
+          if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), soft: s.soft });
         });
       }
     }
@@ -582,7 +585,9 @@ export function createBodyWorld(effect, context) {
         const [dvx, dvy] = relative(contact, point), vn = dvx * nx + dvy * ny;
         let target;
         if (point.sep > 0) target = point.sep * invDt;
-        else if (bias) target = Math.max(BIAS * Math.min(0, point.sep + SLOP) * invDt, -MAX_PUSH);
+        // Soft ground (a fluid's resting sand) stops a body sinking into it but never shoves one out of it, so sand that runs
+        // in under a plank doesn't jack it up.
+        else if (bias && !contact.soft) target = Math.max(BIAS * Math.min(0, point.sep + SLOP) * invDt, -MAX_PUSH);
         else target = 0;
         const old = point.normal, next = Math.max(old - point.normalMass * (vn + target), 0), impulse = next - old;
         point.normal = next; point.most = Math.max(point.most, next);
@@ -716,7 +721,7 @@ export function createBodyWorld(effect, context) {
       const [x0, y0, x1, y1] = b.box;
       if (!b.fixed && (x1 < -GONE || y1 < -GONE || x0 > width + GONE || y0 > height + GONE)) { b.gone = true; stats.escaped.push({ body: b.name ?? b.path, frame: f }); }
       b.history.push([b.x, b.y]);
-      if (b.name !== null && !b.fixed) stats.paths[b.name].push(b.gone ? null : [round(b.x), round(b.y)]);
+      if (b.name !== null && !b.fixed) stats.paths[b.name].push(b.gone ? null : [round(b.x), round(b.y), round(atan2Deg(b.s, b.c))]);
       if (b.history.length > 18) b.history.shift();
     }
     if (stats.rest === null && f > 0 && bodies.every(b => b.gone || b.fixed && !moving(b) || b.asleep)) stats.rest = f;
@@ -845,20 +850,15 @@ function cover(b, x, y) {
     }
     if (covered >= 8) out.push([px, py]);
   }
-  // A turned shape's corners can leave a lone pixel hanging on by one side; trim those nubs.
-  if (Math.min(b.size[0], b.size[1]) < 3 || drawnDegrees(b) % 90 === 0) return out;
-  const inside = new Set(out.map(([px, py]) => py * 65536 + px));
-  return out.filter(([px, py]) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => inside.has((py + dy) * 65536 + px + dx)).length > 1);
+  return out;
 }
 
-// The angle a body is drawn at: its own, in steps its size can show. A 4-pixel box turned 30 degrees is a pinwheel in
-// pixels and at 45 a plus sign, so a body under 6 pixels across is always drawn square; from 6 it turns in 45-degree
-// steps, from 8 in 30, from 10 in 22.5 and finer as it grows. The physics keeps the exact angle.
-// A symbol has detail that turning smears, so it turns in steps twice as coarse: an 8-pixel crate tumbles in quarter
-// turns, a 12-pixel one in eighths.
-const turnStep = (size, detailed) => 90 / Math.max(1, Math.floor((Math.min(size[0], size[1]) - 2) / (detailed ? 4 : 2)));
-function drawnDegrees(b, size = b.size, detailed = false) {
-  const step = turnStep(size, detailed), exact = atan2Deg(b.s, b.c);
+// The angle a body is drawn at: its own, to the whole degree, so a turning box turns smoothly (its picture turned, see
+// paintBodies). A body under 6 pixels every way is always drawn square: a 4-pixel box turned 30 degrees is a pinwheel in
+// pixels and at 45 a plus sign. The physics keeps the exact angle.
+const turnStep = size => (Math.max(size[0], size[1]) < 6 ? 90 : 1);
+function drawnDegrees(b, size = b.size) {
+  const step = turnStep(size), exact = atan2Deg(b.s, b.c);
   let degrees = Math.round(exact / step) * step;
   if (degrees >= 360) degrees -= 360;
   const memory = b.held ??= {}, key = `turn:${step}`, was = memory[key];
@@ -871,10 +871,30 @@ function drawnDegrees(b, size = b.size, detailed = false) {
 }
 function drawnTurn(b) { const degrees = drawnDegrees(b); return [cosDeg(degrees), sinDeg(degrees)]; }
 
+// A box or polygon upright: its cells at angle 0 around its middle, the edge in its outline's key and the rest in its
+// fill (the fill it has now, for a body that changes colour at each hit).
+const uprights = new Map();
+function uprightRows(b) {
+  const [w, h] = b.size, fill = b.fills[b.colour], key = `${b.shape}:${b.size}:${b.parts[0].vx.join()}:${b.parts[0].vy.join()}:${fill}:${b.outline ?? ''}`;
+  if (uprights.has(key)) return uprights.get(key);
+  const flat = { ...b, c: 1, s: 0, held: undefined, x: w / 2, y: h / 2 }, cells = cover(flat, flat.x, flat.y), inside = new Set(cells.map(([x, y]) => y * 65536 + x));
+  const rows = Array.from({ length: h }, () => Array(w).fill('.'));
+  for (const [x, y] of cells) {
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    const edge = !inside.has(y * 65536 + x - 1) || !inside.has(y * 65536 + x + 1) || !inside.has((y - 1) * 65536 + x) || !inside.has((y + 1) * 65536 + x);
+    rows[y][x] = b.outline && edge ? b.outline : fill;
+  }
+  const out = rows.map(row => row.join(''));
+  uprights.set(key, out);
+  return out;
+}
+
+// A picture turned (craft.js turnRows: its sides turned to whole pixel steps, so it stays crisp and keeps its shape, and
+// its outline and frame stay closed lines), cached by picture and angle.
 const sprites = new Map();
 function sprite(rows, degrees) {
   const key = `${rows.join('/')}@${degrees}`;
-  if (!sprites.has(key)) sprites.set(key, degrees === 0 ? { rows, pivot: [Math.floor(rows[0].length / 2), Math.floor(rows.length / 2)] } : rotateRows(rows, degrees, [Math.floor(rows[0].length / 2), Math.floor(rows.length / 2)]));
+  if (!sprites.has(key)) sprites.set(key, turnRows(rows, degrees));
   return sprites.get(key);
 }
 
@@ -902,12 +922,19 @@ export function paintBodies(bodies, grid, width, height, symbols) {
   }
   for (const b of bodies) {
     if (b.gone) continue;
-    if (b.symbol) {
-      const rows = context.symbols[b.symbol], degrees = b.shape === 'circle' ? 0 : Math.round(drawnDegrees(b, [rows[0].length, rows.length], true)) % 360;
-      const { rows: turned, pivot } = sprite(rows, b.shape === 'circle' ? 0 : degrees);
+    // A box or polygon is drawn as its upright picture, fill and outline, turned by turnRows (as a symbol is): its sides
+    // turned to whole pixel steps, straight and even, and its outline kept a closed line, so it stays the same crisp shape
+    // as it turns. (Drawn afresh from the pixels it covered it swelled into a blob; resampled as RotSprite does it rounded
+    // off and grew spikes; resampled exactly it grew a nub at each corner.) Under 6 pixels across it is drawn square: no
+    // picture that small shows a turn without a pinwheel.
+    const upright = !b.symbol && (b.shape === 'box' || b.shape === 'polygon') && Math.max(b.size[0], b.size[1]) >= 6 ? uprightRows(b) : null;
+    if (b.symbol || upright) {
+      const rows = upright ?? context.symbols[b.symbol], degrees = b.shape === 'circle' ? 0 : Math.round(drawnDegrees(b, [rows[0].length, rows.length])) % 360;
+      const { rows: turned, origin } = sprite(rows, b.shape === 'circle' ? 0 : degrees);
+      // Turned about its centre, which sits on the body's drawn centre (the picture's top-left at angle 0 a whole pixel);
+      // the turned picture lies there to the nearest pixel.
       const w = rows[0].length, h = rows.length, cx = held(b, 0, w), cy = held(b, 1, h);
-      // The pivot pixel lands where the sprite's own middle pixel sits at angle 0.
-      const left = Math.floor(cx - w / 2 + 1e-9) + Math.floor(w / 2) - pivot[0], top = Math.floor(cy - h / 2 + 1e-9) + Math.floor(h / 2) - pivot[1];
+      const left = Math.round(cx - w / 2 + origin[0]), top = Math.round(cy - h / 2 + origin[1]);
       turned.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] !== '.' && row[i] !== ' ') put(left + i, top + j, row.charCodeAt(i)); });
       continue;
     }

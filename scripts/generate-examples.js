@@ -686,7 +686,8 @@ for (const [name, source] of Object.entries(plasmaPresets)) authored[`${name}.fl
 for (const [name, source] of Object.entries(sandPresets)) authored[`${name}.fluid`] = source;
 // Rigid bodies: balls and blocks that bounce, topple and rest (scripts/bodies-presets.mjs).
 for (const [name, source] of Object.entries(bodiesPresets)) authored[`${name}.bodies`] = source;
-// Bodies in a liquid: crates that splash and float, a crate that rides sand down (scripts/fluid-body-presets.mjs).
+// Bodies in a fluid: crates that splash and float, a crate that rides sand down, a paddle wheel that stirs a pool, a hot
+// stone that boils one and a plank that sand tips (scripts/fluid-body-presets.mjs).
 for (const [name, source] of Object.entries(fluidBodyPresets)) authored[`${name}.fluid`] = source;
 const compiled = { effects: compileEffects(effects).recipe, swing: compilePoses(swing).recipe, 'forest-spirit-normal': compileNormals({ ...spiritNormals, recipe: forest }).recipe };
 // Compact, as compiled files are: whatever fits in 120 columns stays on one line and grids keep one row per line, so

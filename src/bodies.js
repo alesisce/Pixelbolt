@@ -898,10 +898,78 @@ function sprite(rows, degrees) {
   return sprites.get(key);
 }
 
+// The bodies drawn into a frame of their own, cropped: a grid operation and its pixel count. A fluid draws its bodies
+// so when they are finer than its pixels.
+export const drawBodies = (bodies, width, height, symbols, subpixels) => draw(bodies, width, height, { symbols, subpixels });
 function draw(bodies, width, height, context) {
-  const grid = new Uint16Array(width * height);
-  paintBodies(bodies, grid, width, height, context.symbols);
-  return crop(grid, width, height);
+  const n = context.subpixels ?? 1, grid = new Uint16Array(width * n * height * n);
+  if (n > 1) paintBodiesFine(bodies, grid, width, height, context.symbols, n);
+  else paintBodies(bodies, grid, width, height, context.symbols);
+  return crop(grid, width * n, height * n);
+}
+
+// A body's own picture: its symbol, or its fill and outline drawn at angle 0 as the bodies are drawn at whole pixels,
+// with where its centre lies in it ([x, y], in the picture's pixels). Cached by shape, size, fill and outline.
+const pictures = new Map();
+function pictureOf(b, symbols) {
+  if (b.symbol) { const rows = symbols[b.symbol]; return { rows, cx: rows[0].length / 2, cy: rows.length / 2 }; }
+  const part = b.parts[0], fill = b.fills[b.colour];
+  const key = `${b.shape}:${b.size}:${part.r ?? ''}:${part.vx ? part.vx.join() : ''}:${part.vy ? part.vy.join() : ''}:${fill}:${b.outline ?? ''}`;
+  if (pictures.has(key)) return pictures.get(key);
+  // Drawn upright about a centre far from the picture's edges, then cropped to what it covers.
+  const R = 2 + Math.ceil(Math.max(b.size[0], b.size[1], ...(part.vx ? part.vx.map(Math.abs).map(v => 2 * v) : []), ...(part.vy ? part.vy.map(Math.abs).map(v => 2 * v) : [])));
+  const flat = { ...b, c: 1, s: 0, held: undefined, x: -1, y: -1 }, cells = cover(flat, R, R), inside = new Set(cells.map(([x, y]) => y * 65536 + x));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of cells) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const rows = Array.from({ length: y1 - y0 + 1 }, () => Array(x1 - x0 + 1).fill('.'));
+  for (const [x, y] of cells) {
+    const edge = !inside.has(y * 65536 + x - 1) || !inside.has(y * 65536 + x + 1) || !inside.has((y - 1) * 65536 + x) || !inside.has((y + 1) * 65536 + x);
+    rows[y - y0][x - x0] = b.outline && edge ? b.outline : fill;
+  }
+  const picture = { rows: rows.map(row => row.join('')), cx: snap(R, b.size[0]) - x0, cy: snap(R, b.size[1]) - y0 };
+  pictures.set(key, picture);
+  return picture;
+}
+
+/**
+ * Draws the bodies `n` times finer than the world's pixels (a source's `subpixels`) into `grid` (character codes,
+ * width × n by height × n): each body is its own picture, every pixel of it a square n fine pixels across, turned
+ * exactly with the body and placed where the body is to a fraction of a pixel, so it turns and moves smoothly and never
+ * changes shape. A circle's picture doesn't turn, as at whole pixels; a hoop is drawn as at whole pixels, enlarged.
+ */
+export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
+  const W = width * n, H = height * n;
+  const put = (x, y, code) => { if (x >= 0 && y >= 0 && x < W && y < H) grid[y * W + x] = code; };
+  // Trails first, under every body: a disc a pixel narrower than the body, along where it was in recent frames.
+  for (const b of bodies) {
+    if (b.gone || !b.trail || b.history.length < 2) continue;
+    const code = b.trail.color.charCodeAt(0), points = b.history.slice(-1 - b.trail.length), d = Math.max(1, Math.min(b.size[0], b.size[1]) - 1) * n, cells = disc(d);
+    for (let k = 0; k + 1 < points.length; k++) {
+      const [ax, ay] = points[k], [bx, by] = points[k + 1], steps = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) * n));
+      for (let s = 0; s < steps; s++) {
+        const left = Math.round((ax + (bx - ax) * s / steps) * n - d / 2), top = Math.round((ay + (by - ay) * s / steps) * n - d / 2);
+        for (const [i, j] of cells) put(left + i, top + j, code);
+      }
+    }
+  }
+  for (const b of bodies) {
+    if (b.gone) continue;
+    if (b.shape === 'hoop') {
+      const code = b.fills[b.colour].charCodeAt(0);
+      for (const [x, y] of cover(b, b.x, b.y)) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) put(x * n + i, y * n + j, code);
+      continue;
+    }
+    const { rows, cx, cy } = pictureOf(b, symbols), w = rows[0].length, h = rows.length, turns = b.shape !== 'circle', c = turns ? b.c : 1, s = turns ? b.s : 0;
+    const rx = Math.max(cx, w - cx), ry = Math.max(cy, h - cy), reach = turns ? Math.sqrt(rx * rx + ry * ry) : Math.max(rx, ry);
+    const i0 = Math.max(0, Math.floor((b.x - reach) * n)), i1 = Math.min(W - 1, Math.ceil((b.x + reach) * n)), j0 = Math.max(0, Math.floor((b.y - reach) * n)), j1 = Math.min(H - 1, Math.ceil((b.y + reach) * n));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      // Where this fine pixel's centre lies in the picture, turned back by the body's angle.
+      const px = (i + 0.5) / n - b.x, py = (j + 0.5) / n - b.y, u = Math.floor(px * c + py * s + cx), v = Math.floor(py * c - px * s + cy);
+      if (u < 0 || v < 0 || u >= w || v >= h) continue;
+      const ch = rows[v][u];
+      if (ch !== '.' && ch !== ' ') put(i, j, ch.charCodeAt(0));
+    }
+  }
 }
 
 /** Draws the bodies into `grid` (character codes, width × height): trails first, then each body in order. */
@@ -958,6 +1026,21 @@ function crop(grid, width, height) {
 }
 
 // ---- Compiling --------------------------------------------------------------------------------------------------------
+// A source's `subpixels`: how many times finer than the world's pixels its bodies are drawn (1, the default, draws them
+// at whole pixels). The recipe's canvas is that many times larger, at most 256 a side for an animation.
+export function readSubpixels(value, path, width, height) {
+  if (value === undefined) return 1;
+  const n = integer(value, `${path}.subpixels`, 1, 8);
+  if (Math.max(width, height) * n > 256) fail(`${path}.subpixels`, `a ${width}×${height} canvas drawn ${n} times finer is ${width * n}×${height * n}; an animation is at most 256 a side, so use subpixels of at most ${Math.floor(256 / Math.max(width, height))}`);
+  return n;
+}
+// The frames a recipe drawn n times finer holds: their pixels together at most 4,194,304, the exporter's limit.
+export function framesFit(frames, width, height, n, path) {
+  const pixels = frames * width * n * height * n;
+  if (n > 1 && pixels > 4194304) fail(`${path}.subpixels`, `${frames} frames of ${width * n}×${height * n} are ${pixels} pixels, more than the 4,194,304 a recipe's frames share; lower subpixels to ${Math.max(1, Math.floor(Math.sqrt(4194304 / (frames * width * height))))} or use fewer frames`);
+}
+export const scaleAnchor = (anchor, n) => (n > 1 && Array.isArray(anchor) && anchor.length === 2 && anchor.every(Number.isInteger) ? [anchor[0] * n, anchor[1] * n] : anchor);
+
 // About how many pair tests and contact updates a simulation needs, so a source can't ask for minutes of work.
 const work = effect => {
   const n = effect.bodies.length;
@@ -1037,11 +1120,12 @@ export const startCells = b => { const placed = { ...b, c: cosDeg(b.angle), s: s
 
 /** A version-1 pixelforge-bodies source → { recipe, metadata, warnings? }. One-shot: bodies don't loop. */
 export function compileBodies(source) {
-  fields(source, ['format', 'version', 'name', 'width', 'height', 'palette', 'symbols', 'anchor', 'sheet', 'effects'], 'bodies');
+  fields(source, ['format', 'version', 'name', 'width', 'height', 'subpixels', 'palette', 'symbols', 'anchor', 'sheet', 'effects'], 'bodies');
   if (source.format !== 'pixelforge-bodies' || source.version !== 1) fail('bodies', 'expected version-1 pixelforge-bodies');
   const palette = source.palette ?? {};
   if (!isObject(palette)) fail('bodies.palette', 'expected a palette object');
   const width = integer(source.width, 'bodies.width', 4, 256), height = integer(source.height, 'bodies.height', 4, 256);
+  const n = readSubpixels(source.subpixels, 'bodies', width, height);
   const symbols = source.symbols ?? {};
   if (!isObject(symbols)) fail('bodies.symbols', 'expected named symbols for obstacles and sprites');
   for (const [name, rows] of Object.entries(symbols)) {
@@ -1049,7 +1133,7 @@ export function compileBodies(source) {
     if (!Array.isArray(rows) || !rows.length || rows.length > 256 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string' || row.length !== rows[0].length)) fail(`bodies.symbols.${name}`, 'expected 1–256 equal-width text rows');
   }
   if (!isObject(source.effects) || !Object.keys(source.effects).length || Object.keys(source.effects).length > LIMITS.effects) fail('bodies.effects', `expected 1–${LIMITS.effects} named effects`);
-  const shell = { version: 1, name: source.name, width, height, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: source.anchor }) };
+  const shell = { version: 1, name: source.name, width: width * n, height: height * n, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: scaleAnchor(source.anchor, n) }) };
   // The renderer's palette, symbol and name checks, before any simulating.
   renderProject({ ...shell, frames: [{ name: 'check' }] });
   const frames = [], animations = {}, seen = new Set(), metadata = { format: 'pixelforge-bodies-metadata', version: 1, effects: {} }, warnings = [];
@@ -1061,13 +1145,14 @@ export function compileBodies(source) {
     seen.add(name.toLowerCase());
     const effect = readEffect(value, path, { width, height, palette, symbols });
     if (frames.length + effect.frames > LIMITS.frames) fail('bodies.effects', `the effects make more than ${LIMITS.frames} frames; a recipe holds at most ${LIMITS.frames}`);
+    framesFit(frames.length + effect.frames, width, height, n, 'bodies');
     total += work(effect);
     if (total > LIMITS.work) fail(path, `the simulations need about ${Math.round(total / 1e6)} million updates, more than ${LIMITS.work / 1e6} million; lower frames, substeps, iterations or the number of bodies`);
-    const run = simulate(effect, { width, height, symbols });
-    const stamps = where => effect.obstacles.filter(o => o.draw === where).map(o => ({ op: 'stamp', symbol: o.symbol, x: o.x, y: o.y }));
+    const run = simulate(effect, { width, height, symbols, subpixels: n });
+    const stamps = where => effect.obstacles.filter(o => o.draw === where).map(o => ({ op: 'stamp', symbol: o.symbol, x: o.x * n, y: o.y * n, ...(n > 1 && { scale: n }) }));
     const under = stamps('under'), over = stamps('over'), names = [];
     run.drawn.forEach((frame, i) => {
-      const ops = [...(effect.background ? [{ op: 'rect', x: 0, y: 0, w: width, h: height, color: effect.background }] : []), ...under, ...(frame.op ? [frame.op] : []), ...over];
+      const ops = [...(effect.background ? [{ op: 'rect', x: 0, y: 0, w: width * n, h: height * n, color: effect.background }] : []), ...under, ...(frame.op ? [frame.op] : []), ...over];
       frames.push({ name: `${name}-${i}`, duration: effect.duration, ...(ops.length && { ops }) });
       names.push(`${name}-${i}`);
     });

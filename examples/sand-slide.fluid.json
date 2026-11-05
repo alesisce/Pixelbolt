@@ -4,6 +4,7 @@
   "name": "sand-slide",
   "width": 72,
   "height": 44,
+  "subpixels": 3,
   "palette": {
     "a": "#f6dc9c",
     "b": "#ddb46a",

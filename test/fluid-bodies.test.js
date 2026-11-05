@@ -53,7 +53,7 @@ test('water floats a body by its density, a stone sinks to the bottom, and they 
   assert.ok(end('light') > 16 && end('light') < 24, `the light crate floats mostly out of the water at ${end('light')}`);
   assert.ok(end('heavy') > 22 && end('heavy') < 32, `the heavy crate floats mostly under at ${end('heavy')}`);
   assert.equal(end('stone'), 38, 'the stone rests on the bottom');
-  const crate = fluidBodyPresets['crate-splash'], still = changes(crate, 'hosSkr', 100);
+  const crate = fluidBodyPresets['crate-splash'], still = changes(crate, 'hosSkr', 104);
   assert.ok(still.every(n => n === 0), `the bodies on the settled pool hold still: ${still.join(' ')}`);
 });
 
@@ -139,4 +139,22 @@ test('the live runner steps the bodies with the fluid, a push moves them, and th
   assert.ok(pushed.x > crate.x + 3, `a push drives it along: ${pushed.x} against ${crate.x}`);
   const again = createLiveFluid(source).step(20).push({ x: 24, y: 24, radius: 6, vx: 4, vy: 0 }).step(10).bodies[0];
   assert.deepEqual(again, pushed, 'the same pushes, the same run');
+});
+
+test('bodies drawn finer than the liquid sit over it, and the water a turning paddle leaves shows no fresh surface', () => {
+  const fine = { ...pool([{ name: 'crate', shape: 'box', size: [6, 6], at: [24, 18], angle: 20, density: 0.3, fill: 'h' }], { frames: 12 }), subpixels: 2 };
+  const { recipe } = compileFluid(fine), ops = recipe.frames[5].ops;
+  assert.deepEqual([recipe.width, recipe.height], [96, 80]);
+  const water = ops.findIndex(op => op.op === 'grid' && op.scale === 2), crate = ops.findIndex(op => op.op === 'grid' && op.scale === undefined);
+  assert.ok(water >= 0 && crate > water, 'the liquid is drawn in blocks of two, the crate after it at the finer pixels');
+  // The water wheel's deep water (below row 30) is drawn only in the deepest colour in every frame: no cell a paddle has
+  // just left starts a fresh, pale surface there.
+  const source = fluidBodyPresets['water-wheel'], n = source.subpixels, project = renderProject(compileFluid(source).recipe), [animation] = Object.values(project.animations);
+  const pale = ['w', 'c', 'b'].map(key => parseColor(source.palette[key]).slice(0, 3).join());
+  for (const f of animation.frames) {
+    const d = project.frames[f].data;
+    let count = 0;
+    for (let y = 30 * n; y < project.height; y++) for (let x = 0; x < project.width; x++) { const i = (y * project.width + x) * 4; if (pale.includes(`${d[i]},${d[i + 1]},${d[i + 2]}`)) count++; }
+    assert.equal(count, 0, `frame ${f}: ${count} pale pixels in the deep`);
+  }
 });

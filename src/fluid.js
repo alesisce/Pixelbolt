@@ -17,7 +17,7 @@ import { fields } from './authoring.js';
 import { patternProblem, ditherThreshold, cleanupIds, traceLine, random, sinDeg, cosDeg } from './craft.js';
 import { atan2Deg } from './shapes.js';
 import { readElectric, readElectrode, createElectric, stepElectric, electricFields, electricWork, ELECTRODE_FIELDS, MATTER } from './electric.js';
-import { readBodies, createBodyWorld, bodyCells, startCells, paintBodies, areaBeyond } from './bodies.js';
+import { readBodies, createBodyWorld, bodyCells, startCells, paintBodies, drawBodies, areaBeyond, readSubpixels, framesFit, scaleAnchor } from './bodies.js';
 
 export const FLUID_KINDS = ['gas', 'liquid'];
 export const FLUID_FIELDS = ['density', 'temperature', 'speed', 'depth', 'light', 'shadow', 'strand', 'ionization', 'current'];
@@ -3586,6 +3586,42 @@ function renderFields(effect, base, width, height, drawn = null) {
       if (density[c] < LEVEL) density[c] = LEVEL;
     }
     wet = outline;
+    // A little pocket a body leaves in the deep, sealed off by the liquid and the bodies (no way to the open air), is drawn
+    // as liquid too: the liquid closes it within a frame or two, and drawn empty it started a fresh surface, a pale block
+    // in the deep, under a turning paddle. Only pockets that touch a body: sealed air of its own (a bottle glugging) shows.
+    if (see) {
+      const POCKET = 24, reached = new Uint8Array(N), stack = [];
+      const free = c => !wet[c] && !solid[c] && !see[c];
+      const reach = c => { if (!reached[c] && free(c)) { reached[c] = 1; stack.push(c); } };
+      for (let i = 0; i < width; i++) { if (!effect.walls.top) reach(i); if (!effect.walls.bottom) reach((height - 1) * width + i); }
+      for (let j = 0; j < height; j++) { if (!effect.walls.left) reach(j * width); if (!effect.walls.right) reach(j * width + width - 1); }
+      while (stack.length) {
+        const c = stack.pop(), i = c % width, j = (c - i) / width;
+        if (i > 0) reach(c - 1); if (i < width - 1) reach(c + 1); if (j > 0) reach(c - width); if (j < height - 1) reach(c + width);
+      }
+      for (let start = 0; start < N; start++) {
+        if (reached[start] || !free(start)) continue;
+        // One sealed pocket: its cells, and whether a body's cell borders it.
+        const pocket = [start];
+        let near = false;
+        reached[start] = 1;
+        for (let k = 0; k < pocket.length; k++) {
+          const c = pocket[k], i = c % width, j = (c - i) / width;
+          for (const [ok, d] of [[i > 0, -1], [i < width - 1, 1], [j > 0, -width], [j < height - 1, width]]) {
+            if (!ok) continue;
+            if (see[c + d]) near = true;
+            if (!reached[c + d] && free(c + d)) { reached[c + d] = 1; pocket.push(c + d); }
+          }
+        }
+        if (!near || pocket.length > POCKET) continue;
+        for (const c of pocket) {
+          wet[c] = 1;
+          if (!filled) { filled = []; density = Float64Array.from(density); }
+          filled.push(c);
+          if (density[c] < LEVEL) density[c] = LEVEL;
+        }
+      }
+    }
   }
   const covered = new Uint8Array(N);
   for (let i = 0; i < width; i++) {
@@ -4347,7 +4383,7 @@ function simulate(effect, context) {
   const bubbling = loop && makesBubbles(effect);
   const shown = loop && (boilTail(effect) || bubbling) ? p => p.born === undefined || (p.born >= begin && p.born < begin + frames) : null, done = (effect.warmup + 1) * frames + sparkTail(effect);
   const tail = loop ? Array.from({ length: blend }, () => all.map(() => new Float64Array(N))) : [];
-  const chars = Array.from({ length: frames }, () => null), drawn = Array.from({ length: frames }, () => []);
+  const chars = Array.from({ length: frames }, () => null), drawn = Array.from({ length: frames }, () => []), n = context.subpixels ?? 1, fine = [];
   const peak = { density: 0, temperature: 0, speed: 0, ...(effect.electric && { ionization: 0, current: 0 }) }, figures = Array.from({ length: frames }, () => null), layouts = Array.from({ length: frames }, () => effect.layout);
   // A loop's bodies, where they were in the warm-up's closing frames, which its own closing frames are drawn blended toward.
   const poses = crowd && loop ? Array.from({ length: blend }, () => null) : null;
@@ -4402,7 +4438,9 @@ function simulate(effect, context) {
     // were, as its fields are), then pulled by it and stepped to the next.
     if (crowd) {
       const k = frame - (frames - blend), shownBodies = poses && k >= 0 && poses[k] ? blendPoses(crowd, poses[k], smooth((k + 1) / blend)) : crowd.bodies;
-      paintBodies(shownBodies, chars[frame], width, height, effect.bodies.symbols);
+      // Finer than the fluid's pixels (subpixels), they are drawn on their own over it; else into its pixels.
+      if (n > 1) fine[frame] = drawBodies(shownBodies, width, height, effect.bodies.symbols, n);
+      else paintBodies(shownBodies, chars[frame], width, height, effect.bodies.symbols);
       onward();
     }
   }
@@ -4419,8 +4457,10 @@ function simulate(effect, context) {
       for (let y = top; y <= bottom; y++) { let row = ''; for (let x = left; x <= right; x++) { const ch = grid[y * width + x]; row += ch ? String.fromCharCode(ch) : '.'; if (ch) pixels++; } rows.push(row); }
       ops.push({ op: 'grid', x: left, y: top, rows });
     }
+    if (fine[i]?.op) { ops.push(fine[i].op); pixels += Math.round(fine[i].pixels / (n * n)); }
     ops.push(...stampsOf(effect, layouts[i], 'over', width, height));
-    return { ops, pixels };
+    // Drawn n times finer, the fluid and its obstacles are enlarged to the bodies' pixels.
+    return { ops: n > 1 ? ops.map(op => (op === fine[i]?.op ? op : { ...op, x: op.x * n, y: op.y * n, scale: n })) : ops, pixels };
   });
   const round = value => Math.floor(value * 1000 + 0.5) / 1000;
   const { totals } = run;
@@ -4437,11 +4477,12 @@ function simulate(effect, context) {
 // compileFluid makes before simulating, with the same paths and messages, except the work budget: compileFluid counts
 // every frame of every effect before simulating it, while a live runner steps one frame at a time and bounds its warm-up.
 function buildRecipe(source, each) {
-  fields(source, ['format', 'version', 'name', 'width', 'height', 'palette', 'symbols', 'anchor', 'effects', 'sheet'], 'fluid');
+  fields(source, ['format', 'version', 'name', 'width', 'height', 'subpixels', 'palette', 'symbols', 'anchor', 'effects', 'sheet'], 'fluid');
   if (source.format !== 'pixelforge-fluid' || source.version !== 1) fail('fluid', 'expected version-1 pixelforge-fluid');
   const palette = source.palette ?? {};
   if (!isObject(palette)) fail('fluid.palette', 'expected a palette object');
   const width = integer(source.width, 'fluid.width', 4, 128), height = integer(source.height, 'fluid.height', 4, 128);
+  const subpixels = readSubpixels(source.subpixels, 'fluid', width, height);
   const symbols = source.symbols ?? {};
   if (!isObject(symbols)) fail('fluid.symbols', 'expected named symbols for obstacles');
   for (const [name, rows] of Object.entries(symbols)) {
@@ -4458,14 +4499,15 @@ function buildRecipe(source, each) {
     seen.add(name.toLowerCase());
     const effect = readEffect(value, path, { width, height, palette, symbols });
     if (frames.length + effect.frames > 256) fail('fluid.effects', `the effects make more than 256 frames; a recipe holds at most 256`);
-    const ops = each(name, effect, { width, height, path });
+    framesFit(frames.length + effect.frames, width, height, subpixels, 'fluid');
+    const ops = each(name, effect, { width, height, path, subpixels });
     const names = effect.durations.map((duration, i) => {
       frames.push({ name: `${name}-${i}`, duration, ...(ops?.[i].length && { ops: ops[i] }) });
       return `${name}-${i}`;
     });
     animations[name] = { frames: names, ...(!effect.loop && { loop: false }) };
   }
-  const recipe = { version: 1, name: source.name, width, height, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: source.anchor }), frames, animations, ...(source.sheet !== undefined && { sheet: source.sheet }) };
+  const recipe = { version: 1, name: source.name, width: width * subpixels, height: height * subpixels, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: scaleAnchor(source.anchor, subpixels) }), frames, animations, ...(source.sheet !== undefined && { sheet: source.sheet }) };
   renderProject(recipe);
   return recipe;
 }

@@ -4,6 +4,7 @@
   "name": "water-wheel",
   "width": 56,
   "height": 44,
+  "subpixels": 4,
   "palette": {
     "B": "#1d3f7a",
     "b": "#2f6fc0",
@@ -31,8 +32,7 @@
       "emitters": [],
       "look": [
         { "field": "density", "colors": ["b"], "thresholds": [0.5], "dither": 0 },
-        { "field": "depth", "colors": ["w", "c", "b", "B"], "thresholds": [1, 2, 5, 10], "dither": 0 },
-        { "field": "speed", "colors": ["b", "c"], "thresholds": [0.7, 1.4], "dither": 0.6, "pattern": "noise" }
+        { "field": "depth", "colors": ["w", "c", "b", "B"], "thresholds": [1, 2, 5, 10], "dither": 0 }
       ],
       "bodies": [
         { "shape": "box", "size": [2, 20], "at": [28, 27], "fixed": true, "spin": 4.5, "fill": "s", "outline": "S" },

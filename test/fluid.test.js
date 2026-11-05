@@ -50,11 +50,11 @@ const GOLDEN = {
   hourglass: 'd9664a2973600387217e81bdfe73b8df130ebe20febde720fcc56543c4f16d06',
   'sand-gate': 'b5ad55de68dee6c0ade0aa225ea8f094a2fe1bb421beac1adc023e043f92cf6d',
   'sand-plough': 'd3854405dd7e42d64a3ca694e405acb6d57d23fefe6358dcddc820254ec64971',
-  'crate-splash': 'cfa8380f28682964f084ae98d1a4dba3a6df09e39b877ca8c102c56dc082f8cd',
-  'sand-slide': '7767cf078e115f03790c438d32f604408acbbc0efe16ed947bc0a443b18685fb',
-  'water-wheel': '3efdeb0c6188725d2d5696a33a87824a6b0396f387e3efb43381fb16e876c96f',
-  'hot-stone': 'e6e864c866c6f708b4185cdb033c00c30e7f38a9b4f62324d499c9c76e81363f',
-  'plank-tip': '848231d1e726c985b1a59eefbde75881e813875b00a81eda6cdab07f9dc05937'
+  'crate-splash': 'a3caf4f7c63e3de41a30076b2af2a59c9e5d8024206dfca3068418d79ba3afbb',
+  'sand-slide': '70ec7f31f498d2d75768625ffaa200d9c4d3200f68da5fde1e46a92dca75670a',
+  'water-wheel': '573a29b06472fc32d383b764489f0299ea0ebddad36661857de19bb11abdb7ff',
+  'hot-stone': '9db9945a194275ff0bba0e4fb9e86011572b6201a77f14711a5a47a22c8b7559',
+  'plank-tip': 'd2295b6538c70985a52152532b35325290660e85adf06e766f4e25384446cdab'
 };
 const examples = new Map();
 const example = async name => {
@@ -111,7 +111,8 @@ test('looping examples close their loop and one-shot examples end empty or at re
       const { source } = await example(name), vapour = Object.values(source.effects)[0].vapour, misty = new Set();
       if (vapour) for (const layer of vapour.look ?? []) for (const key of layer.colors) misty.add(parseColor(source.palette[key]).join());
       const clear = frame => (misty.size ? { data: frame.data.map((value, i) => (misty.has(Array.from(frame.data.subarray(i - (i % 4), i - (i % 4) + 4)).join()) ? 0 : value)) } : frame);
-      const last = animation.frames.slice(-5).map(index => clear(project.frames[index])), moves = last.slice(1).map((frame, k) => changed(last[k], frame));
+      // Counted in the world's pixels: a source drawn finer (subpixels) has that many squared to each.
+      const fine = source.subpixels ?? 1, last = animation.frames.slice(-5).map(index => clear(project.frames[index])), moves = last.slice(1).map((frame, k) => Math.round(changed(last[k], frame) / (fine * fine)));
       assert.ok(moves.reduce((a, b) => a + b, 0) / moves.length <= 16, `${name} still moves ${moves.join(', ')} pixels a frame at the end`);
     }
   }

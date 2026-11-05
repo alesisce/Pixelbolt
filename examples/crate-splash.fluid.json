@@ -4,6 +4,7 @@
   "name": "crate-splash",
   "width": 64,
   "height": 48,
+  "subpixels": 3,
   "palette": {
     "B": "#1d3f7a",
     "b": "#2f6fc0",

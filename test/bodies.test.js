@@ -17,7 +17,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': '36cfa2f7e34d5b53bed515c81b95a4e9d6b976cd6d0a84992f1d6d231ff06e54'
+  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': 'b74d28539797396da501d776c9220f9114967fdb0eb6786c0cf7b83b1ac9fa93'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -168,4 +168,25 @@ test('MCP and the CLI compile bodies sources and presets', async t => {
   const cli = spawnSync(process.execPath, [path.join(root, 'bin/pixelbolt.js'), 'compile', file, '--out', out], { encoding: 'utf8' });
   assert.equal(cli.status, 0, cli.stderr);
   assert.equal(JSON.parse(await readFile(out, 'utf8')).frames.length, 12);
+});
+
+test('bodies drawn finer than the world turn as rigid pictures, within the canvas limits', () => {
+  const source = (subpixels, extra = {}) => ({ format: 'pixelforge-bodies', version: 1, name: 'fine', width: 32, height: 24, subpixels, palette, symbols: { post: ['ss', 'ss'] },
+    effects: { e: { frames: 24, gravity: [0, 0], obstacles: [{ symbol: 'post', x: 2, y: 2 }], bodies: [{ shape: 'box', size: [8, 8], at: [16, 12], fixed: true, spin: 3.75, fill: 'w', outline: 'k' }], ...extra } } });
+  const { recipe } = compileBodies(source(4)), fill = { w: 0, k: 0 };
+  assert.deepEqual([recipe.width, recipe.height], [128, 96]);
+  // The world is drawn in blocks of four: the post's stamp is enlarged and placed four times further out.
+  assert.deepEqual(recipe.frames[0].ops.find(op => op.op === 'stamp'), { op: 'stamp', symbol: 'post', x: 8, y: 8, scale: 4 });
+  // Every frame draws the same picture turned: 8 × 8 pixels of 4 × 4, the outline a ring 4 fine pixels wide.
+  for (const frame of recipe.frames) {
+    const grid = frame.ops.find(op => op.op === 'grid'), count = { w: 0, k: 0 };
+    for (const row of grid.rows) for (const ch of row) if (ch in count) count[ch]++;
+    assert.ok(Math.abs(count.w + count.k - 1024) <= 40, `${frame.name}: ${count.w + count.k} fine pixels for 1024`);
+    assert.ok(Math.abs(count.w - 576) <= 40 && Math.abs(count.k - 448) <= 40, `${frame.name}: fill ${count.w} and outline ${count.k}, for 576 and 448`);
+    fill.w += count.w; fill.k += count.k;
+  }
+  assert.equal(renderProject(recipe).frames.length, 24);
+  refused({ ...source(9) }, 'bodies.subpixels', /from 1 to 8/);
+  refused({ ...source(4), width: 72 }, 'bodies.subpixels', /at most 256 a side, so use subpixels of at most 3/);
+  refused({ ...source(4, { frames: 100 }), width: 64, height: 48 }, 'bodies.subpixels', /4,194,304.*lower subpixels to 3/);
 });

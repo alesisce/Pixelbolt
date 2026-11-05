@@ -540,12 +540,14 @@ const body = object({
   ring: object({ radius: num(1, 256), count: int(2, 256), from: num(-3600, 3600, 'Degrees of the first copy. Default 0.'), to: num(-3600, 3600, 'Degrees of the last; default a full turn, spaced evenly.') }, ['radius', 'count']),
   grid: object({ count: { ...pairOf(int(1, 256)), description: '[columns, rows].' }, step: { ...pairOf(num(-256, 256)), description: '[x, y] between copies.' }, stagger: num(-256, 256, 'Shifts odd rows across. Default 0.') }, ['count', 'step'])
 }, ['shape', 'at']);
+// A source's subpixels: bodies drawn finer than the world's pixels.
+const subpixels = world => int(1, 8, `Draw the bodies this many times finer than the world's pixels: each pixel of a body's picture turns as a square and the body sits where it is to a fraction of a pixel, so it turns and moves smoothly without changing shape; ${world} are drawn in blocks this size. The recipe's canvas is width and height times this, at most 256 a side and 4,194,304 pixels over its frames. Default 1, bodies at whole pixels.`);
 // In a fluid a body can also have a temperature, where the fluid has heat (a gas always does).
 const fluidBody = { ...body, properties: { ...body.properties, temperature: num(-16, 16, 'With heat (a gas, or a liquid with heat): the temperature the body keeps, warming or chilling what it touches as a hot obstacle does, so a red-hot stone boils the water it lands in. Default none.') } };
 const fluid = {
   $schema: schema.$schema, title: 'Pixelbolt fluid effects',
   description: 'Start fire, smoke, explosions and splashes from a preset (pixel_help topic presets, then pixel_compile with preset); for fewer frames keep N evenly spaced frames with one pixel_patch call (the quick start shows it), never by lowering frames in the source, which stops the simulation early. A deterministic fluid simulation compiled into an ordinary recipe: one frame sequence and animation per effect (frames <effect>-0, <effect>-1…), each frame a palette grid operation, with obstacles stamped from symbols. Gases (smoke, fire, steam, explosions, magic) run stable fluids with buoyancy, vorticity confinement, dissipation and cooling; liquids (splashes, waterfalls, drips, potions) run FLIP particles on the same grid. Either may be viscous (honey, syrup, tar), and a liquid may have a yield stress (mud, slime). Look layers map fields onto palette ramps through ordered dither, so no colour outside the palette can appear. Looping effects warm up for whole cycles and blend their closing frames toward the frames before frame 0, so the last frame flows into the first. The same source gives the same recipe on every machine.',
-  ...object({ format: { const: 'pixelforge-fluid' }, version: { const: 1 }, name: id, width: int(4, 128, 'Canvas width in pixels; the grid has one cell per pixel.'), height: int(4, 128), palette: schema.properties.palette,
+  ...object({ format: { const: 'pixelforge-fluid' }, version: { const: 1 }, name: id, width: int(4, 128, 'Canvas width in pixels; the grid has one cell per pixel.'), height: int(4, 128), subpixels: subpixels('the liquid and its obstacles'), palette: schema.properties.palette,
     symbols: { type: 'object', propertyNames: id, additionalProperties: ref('rows'), description: 'Named rows for obstacles: braziers, logs, pipes, flasks, rocks.' }, anchor: schema.properties.anchor,
     effects: { type: 'object', minProperties: 1, maxProperties: 16, propertyNames: id, additionalProperties: object({
       kind: { enum: FLUID_KINDS, description: 'gas (default): smoke, fire, steam, explosions, magic. liquid: water, potions, honey and slime as FLIP particles.' },
@@ -656,7 +658,7 @@ const bodies = {
   $schema: schema.$schema, title: 'Pixelbolt rigid bodies',
   description: 'Rigid bodies (balls, boxes, convex polygons, fixed or spinning hoops) with gravity, walls and pixel obstacles, simulated and baked into editable palette grids: they bounce, slide, roll, stack, knock each other about and come to rest. Units: pixels and frames. One-shot; deterministic.',
   ...object({ format: { const: 'pixelforge-bodies' }, version: { const: 1 }, name: id,
-    width: int(4, 256), height: int(4, 256), palette: schema.properties.palette, anchor: point, sheet: schema.properties.sheet,
+    width: int(4, 256), height: int(4, 256), subpixels: subpixels('the obstacles and background'), palette: schema.properties.palette, anchor: point, sheet: schema.properties.sheet,
     symbols: { type: 'object', propertyNames: { ...id, maxLength: 60 }, additionalProperties: { ...array({ type: 'string', minLength: 1, maxLength: 256 }, 256), minItems: 1 }, description: 'Named rows of palette keys for obstacles and body sprites; dot or space is empty.' },
     effects: { type: 'object', minProperties: 1, maxProperties: 16,
       propertyNames: { ...id, maxLength: 60 }, description: 'Names become animations and frame names; unique ignoring case. At most 256 frames in all.',

@@ -25,6 +25,12 @@
       "minimum": 4,
       "maximum": 256
     },
+    "subpixels": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8,
+      "description": "Draw the bodies this many times finer than the world's pixels: each pixel of a body's picture turns as a square and the body sits where it is to a fraction of a pixel, so it turns and moves smoothly without changing shape; the obstacles and background are drawn in blocks this size. The recipe's canvas is width and height times this, at most 256 a side and 4,194,304 pixels over its frames. Default 1, bodies at whole pixels."
+    },
     "palette": {
       "type": "object",
       "maxProperties": 257,

@@ -42,13 +42,13 @@ const sandSlide = fluidSource('sand-slide', SW, SH, { ...sand, p: '#8a5a36', P: 
 }, { ground: shapeRows(SW, 3, (x, y) => (y ? 'K' : 'G')), board: shapeRows(2, 28, x => (x ? 'P' : 'p')) });
 
 
-// Water wheel: a paddle cross turns in a pool for ever and stirs it: the water it drives is drawn lighter by its speed,
-// and a duck and a crate float on the current. A loop: the cross turns half a turn a cycle (its own symmetry), the
+// Water wheel: a paddle cross turns in a pool for ever and stirs it, and a duck and a crate ride the current. (Drawn
+// lighter by its speed through a noise dither, the stirred water speckled from frame to frame; it reads cleaner plain.) A loop: the cross turns half a turn a cycle (its own symmetry), the
 // floaters run through the warm-up, and the closing frames blend toward the warm-up's, as the water does.
 const waterWheel = fluidSource('water-wheel', 56, 44, { ...water, s: '#8a8f99', S: '#5d626b', y: '#ffd23f', k: '#14141c', h: '#c98c4f', o: '#3b2414' }, {
   kind: 'liquid', frames: 40, duration: 60, loop: true, warmup: 3, seed: 3, walls: ['left', 'right', 'bottom'], flip: 0.6, drag: 0.03,
   fill: [{ x: 0, y: 16, w: 56, h: 28 }], emitters: [],
-  look: [...waterLook, { field: 'speed', colors: ['b', 'c'], thresholds: [0.7, 1.4], dither: 0.6, pattern: 'noise' }],
+  look: waterLook,
   bodies: [
     { shape: 'box', size: [2, 20], at: [28, 27], fixed: true, spin: 4.5, fill: 's', outline: 'S' },
     { shape: 'box', size: [20, 2], at: [28, 27], fixed: true, spin: 4.5, fill: 's', outline: 'S' },
@@ -81,4 +81,7 @@ const plankTip = fluidSource('plank-tip', 64, 40, { ...sand, h: '#c98c4f', O: '#
   bodies: [{ name: 'plank', shape: 'box', size: [34, 3], at: [32, 29.5], density: 0.6, friction: 0.7, asleep: true, fill: 'h', outline: 'O' }]
 }, { peg: shapeRows(4, 8, () => 'k'), ground: shapeRows(64, 1, () => 'k') });
 
-export const fluidBodyPresets = { 'crate-splash': crateSplash, 'sand-slide': sandSlide, 'water-wheel': waterWheel, 'hot-stone': hotStone, 'plank-tip': plankTip };
+// Drawn finer than the liquid's pixels (subpixels: as fine as a recipe's frames allow), the bodies turn and move
+// smoothly, each pixel of their pictures turning as a square.
+const finer = (source, subpixels) => { const { format, version, name, width, height, ...rest } = source; return { format, version, name, width, height, subpixels, ...rest }; };
+export const fluidBodyPresets = { 'crate-splash': finer(crateSplash, 3), 'sand-slide': finer(sandSlide, 3), 'water-wheel': finer(waterWheel, 4), 'hot-stone': finer(hotStone, 4), 'plank-tip': finer(plankTip, 3) };

@@ -49,13 +49,14 @@ const spinningHoop = bodiesSource('spinning-hoop', 72, 72,
   { floor: shapeRows(72, 3, (x, y) => (y ? 's' : 'f')) });
 
 // Crate topple: a heavy ball thrown in an arc into a pyramid of crates. The crates rest asleep until they are hit; the
-// pyramid falls apart, crates tumble (drawn turned, in steps their size reads at) and everything comes to rest.
+// pyramid falls apart, crates tumble and everything comes to rest (by frame 117). Drawn twice as fine as the world's
+// pixels (subpixels), the crates turn as rigid pictures; 190 frames keep the finer recipe within its frames' pixels.
 const crate = ['oooooooo', 'ohhhhhho', 'ohcccdho', 'ohccdcho', 'ohcdccho', 'ohdcccho', 'ohhhhhho', 'oooooooo'];
 const FLOOR = 45;
 const crateTopple = bodiesSource('crate-topple', 112, 48,
   { o: '#3b2414', h: '#c98c4f', c: '#a5683a', d: '#6e4223', m: '#b4bdd8', k: '#14141c', s: '#4a5068', f: '#6f7896' },
   {
-    frames: 200, duration: 40, gravity: [0, 0.14], walls: ['left', 'right'],
+    frames: 190, duration: 40, gravity: [0, 0.14], walls: ['left', 'right'],
     obstacles: [{ symbol: 'ground', x: 0, y: FLOOR }],
     bodies: [
       { name: 'ball', shape: 'circle', radius: 4, at: [6, 30], velocity: [3.4, -1.3], density: 6, bounce: 0.2, friction: 0.6, fill: 'm', outline: 'k' },
@@ -69,4 +70,5 @@ const crateTopple = bodiesSource('crate-topple', 112, 48,
     ground: shapeRows(112, 3, (x, y) => (y ? 's' : 'f'))
   });
 
-export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': crateTopple };
+const finer = (source, subpixels) => { const { format, version, name, width, height, ...rest } = source; return { format, version, name, width, height, subpixels, ...rest }; };
+export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2) };

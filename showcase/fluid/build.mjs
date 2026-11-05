@@ -18,7 +18,9 @@ export async function buildFluidGIFs(recipes = {}) {
     const recipe = recipes[name] ?? compileFluid(JSON.parse(await readFile(path.join(root, 'examples', `${name}.fluid.json`), 'utf8'))).recipe;
     const compiled = performance.now() - started, project = renderProject(recipe), [animation] = Object.values(project.animations);
     const frames = animation.frames.map((index, position) => ({ data: project.frames[index].data, duration: project.frames[index].duration + (!animation.loop && position === animation.frames.length - 1 ? HOLD : 0) }));
-    const gif = encodeGIF(frames, project.width, project.height, { scale: SCALE, background: BACKDROP });
+    // A source drawn finer than its pixels (subpixels) is enlarged less, so its world's pixels stay about SCALE across.
+    const source = JSON.parse(await readFile(path.join(root, 'examples', `${name}.fluid.json`), 'utf8')), scale = Math.max(1, Math.round(SCALE / (source.subpixels ?? 1)));
+    const gif = encodeGIF(frames, project.width, project.height, { scale, background: BACKDROP });
     files.set(`showcase/fluid/${name}.gif`, Buffer.from(gif.data));
     report.push({ name, frames: frames.length, loop: animation.loop, width: gif.width, height: gif.height, colors: gif.colors, bytes: gif.data.length, compileMs: Math.round(compiled) });
   }

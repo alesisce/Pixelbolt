@@ -4,6 +4,7 @@
   "name": "crate-topple",
   "width": 112,
   "height": 48,
+  "subpixels": 2,
   "palette": {
     "o": "#3b2414",
     "h": "#c98c4f",
@@ -33,7 +34,7 @@
   },
   "effects": {
     "crate-topple": {
-      "frames": 200,
+      "frames": 190,
       "duration": 40,
       "gravity": [0, 0.14],
       "walls": ["left", "right"],

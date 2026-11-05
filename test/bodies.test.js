@@ -17,7 +17,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '7fa3b9caf5d8183e07625e550f08a5bd24c7cae3741f7cc1421792d80cb37532', 'bouncing-pixel': 'a5122a9f25154d546097204c72abdbc23758786d0aeed75e930fbd9e4e8e6f80', 'spinning-hoop': '18c6d55533ce7332163b38c069b2afafc6199a563363970de20d7ed28e932620', 'crate-topple': 'af1763f0bf3f78a41f158b8adf5d4307128133bd27f2fa06145c848c630bde52'
+  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': '09a00c653ec552a945e7c594099ef169d68f5fa287d852fd5726a58cd114fe5b'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };

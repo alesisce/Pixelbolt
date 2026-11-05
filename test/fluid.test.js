@@ -49,7 +49,9 @@ const GOLDEN = {
   'lightning-pond': 'dee0e23425128864e02a5f14135db3f9c7f2f86cd082e4bed3518abd985e6263',
   hourglass: 'd9664a2973600387217e81bdfe73b8df130ebe20febde720fcc56543c4f16d06',
   'sand-gate': 'b5ad55de68dee6c0ade0aa225ea8f094a2fe1bb421beac1adc023e043f92cf6d',
-  'sand-plough': 'd3854405dd7e42d64a3ca694e405acb6d57d23fefe6358dcddc820254ec64971'
+  'sand-plough': 'd3854405dd7e42d64a3ca694e405acb6d57d23fefe6358dcddc820254ec64971',
+  'crate-splash': '063053dc5ab48873d1a081b5b0ae2b88897e7d52ce47f499ffd7509ee6223435',
+  'sand-slide': '21e428a2d2d64caf61a869b1734e553f1628af061f95be21c4a31ebcf02729b3'
 };
 const examples = new Map();
 const example = async name => {
@@ -1573,7 +1575,10 @@ test('a live puff adds or takes away smoke and water, and a boost scales an emit
 
 test('live frames use only palette colours, and keys name each pixel\'s colour', async () => {
   for (const name of FLUID_SHOWCASE) {
-    const { source } = await example(name), live = createLiveFluid(source, { warmup: 6 }), { width, height } = live, colours = new Map();
+    const { source } = await example(name);
+    // The live runner doesn't step bodies yet, and refuses a liquid with them (test/fluid-bodies.test.js).
+    if (Object.values(source.effects).some(effect => effect.bodies)) continue;
+    const live = createLiveFluid(source, { warmup: 6 }), { width, height } = live, colours = new Map();
     for (const [key, value] of Object.entries(source.palette)) colours.set(key, parseColor(value).join());
     live.push({ x: width / 2, y: height / 2, vx: 1.5, vy: -1, radius: 6 }).step(2).puff({ x: width / 3, y: height / 3, radius: 3 }).step(3);
     const { rgba, keys } = live.render();

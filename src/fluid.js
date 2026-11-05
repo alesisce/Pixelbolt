@@ -16,6 +16,7 @@ import { PixelError, renderProject, parseColor } from './core.js';
 import { fields } from './authoring.js';
 import { patternProblem, ditherThreshold, cleanupIds, traceLine, random, sinDeg, cosDeg } from './craft.js';
 import { readElectric, readElectrode, createElectric, stepElectric, electricFields, electricWork, ELECTRODE_FIELDS, MATTER } from './electric.js';
+import { readBodies, createBodyWorld, bodyCells, startCells, paintBodies, areaBeyond } from './bodies.js';
 
 export const FLUID_KINDS = ['gas', 'liquid'];
 export const FLUID_FIELDS = ['density', 'temperature', 'speed', 'depth', 'light', 'shadow', 'strand', 'ionization', 'current'];
@@ -295,8 +296,20 @@ function showsOnCanvas(rows, x, y, width, height) {
   return !!part && rows.slice(part.sy, part.sy + part.h).some(row => /[^. ]/.test(row.slice(part.sx, part.sx + part.w)));
 }
 // Where every obstacle is on frame `cycle` of the effect's cycle.
-const placementsAt = (obstacles, cycle) => obstacles.map(o => (o.track ? o.track[cycle] : { x: o.x, y: o.y, show: true }));
-const layoutKey = places => places.map(p => (p.show ? `${p.x},${p.y}` : '-')).join(';');
+const placementsAt = (obstacles, cycle) => obstacles.map(o => o.live ?? (o.track ? o.track[cycle] : { x: o.x, y: o.y, show: true }));
+// A body's cells change as it turns, so its shape is part of the key.
+const layoutKey = places => places.map(p => (p.show ? `${p.x},${p.y}${p.shape ?? ''}` : '-')).join(';');
+// A body as an obstacle of the liquid (docs/physics-model.md, section 13): the cells it draws, as a symbol at its place,
+// moving at its velocity. `cx`, `cy` is its centre, which liquid it lands on while only turning is shoved straight out from.
+function bodyPlace(cells, b) {
+  if (!cells.length) return { rows: ['.'], live: { x: 0, y: 0, show: false, jump: false, vx: 0, vy: 0, dx: 0, dy: 0, shape: '', cx: b.x, cy: b.y } };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of cells) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const grid = Array.from({ length: y1 - y0 + 1 }, () => Array(x1 - x0 + 1).fill('.'));
+  for (const [x, y] of cells) grid[y - y0][x - x0] = 'x';
+  const rows = grid.map(row => row.join(''));
+  return { rows, live: { x: x0, y: y0, show: true, jump: false, vx: b.fixed || !b.asleep ? b.vx : 0, vy: b.fixed || !b.asleep ? b.vy : 0, dx: 0, dy: 0, shape: rows.join('/'), cx: b.x, cy: b.y } };
+}
 // The obstacles at these places as cell masks: what is solid, what is drawn over the fluid, which solid cells are smooth,
 // and which obstacle (the first listed) covers each cell. Decorations are only drawn. What hangs off the canvas is left out.
 function buildLayout(obstacles, width, height, places) {
@@ -437,7 +450,7 @@ function readVapour(value, path, context) {
 
 function readEffect(effect, path, source) {
   const { width, height, palette, symbols } = source;
-  fields(effect, ['kind', 'frames', 'duration', 'loop', 'seed', 'warmup', 'blend', 'substeps', 'iterations', 'buoyancy', 'weight', 'vorticity', 'dissipation', 'cooling', 'drag', 'wind', 'advection', 'viscosity', 'yield', 'slip', 'gravity', 'flip', 'apic', 'tension', 'adhesion', 'fill', 'walls', 'obstacles', 'emitters', 'look', 'whitewater', 'air', 'light', 'outline', 'cleanup', 'keys', 'electric', 'heat', 'vapour', 'ice', 'granular'], path);
+  fields(effect, ['kind', 'frames', 'duration', 'loop', 'seed', 'warmup', 'blend', 'substeps', 'iterations', 'buoyancy', 'weight', 'vorticity', 'dissipation', 'cooling', 'drag', 'wind', 'advection', 'viscosity', 'yield', 'slip', 'gravity', 'flip', 'apic', 'tension', 'adhesion', 'fill', 'walls', 'obstacles', 'emitters', 'look', 'whitewater', 'air', 'light', 'outline', 'cleanup', 'keys', 'electric', 'heat', 'vapour', 'ice', 'granular', 'bodies'], path);
   const kind = effect.kind ?? 'gas';
   if (!FLUID_KINDS.includes(kind)) fail(`${path}.kind`, 'expected gas (smoke, fire, steam, magic) or liquid (water, potions)');
   const liquid = kind === 'liquid';
@@ -502,12 +515,24 @@ function readEffect(effect, path, source) {
     if (electric && unwired) fail(`${op}.${electric.conductor ? 'conductor' : 'voltage'}`, WETS);
     obstacles.push({ symbol: obstacle.symbol, x, y, draw, blocks, smooth: surface === 'smooth', rows, track, props: { ...readSurface(obstacle, op, context, blocks), voltage: electric ? electric.voltage : null, conductor: electric ? electric.conductor : null }, ...(electric && { electric }) });
   });
+  // Bodies (bodies.js) in the liquid: each is a moving solid in the solid layer, an obstacle of its own after those
+  // listed, placed each frame where the bodies' solver put it (docs/physics-model.md, section 13).
+  let bodies = null;
+  if (effect.bodies !== undefined) {
+    if (!liquid) fail(`${path}.bodies`, 'bodies float, sink and splash in a liquid; give the effect kind: "liquid" (a pixelforge-bodies source drops them through air)');
+    if (loop) fail(`${path}.loop`, 'bodies fall, splash and come to rest once, so they never come back round to where they started; give a liquid with bodies loop: false');
+    if (heat) fail(`${path}.heat`, 'bodies don\'t take heat yet; leave heat off a liquid with bodies');
+    const list = readBodies(effect.bodies, `${path}.bodies`, { palette, symbols }), first = obstacles.length;
+    const statics = obstacles.map(o => ({ rows: o.rows, x: o.x, y: o.y, solid: o.blocks, track: o.track, bounce: 0, friction: 0.5 }));
+    list.forEach((b, k) => obstacles.push({ symbol: null, x: 0, y: 0, draw: 'none', blocks: true, smooth: false, track: null, body: k, props: { adhesion: null, temperature: null, voltage: null, conductor: null }, ...bodyPlace(startCells(b), b) }));
+    bodies = { list, first, statics, symbols };
+  }
   // Electricity: settings of its own, defaults when only an obstacle has a voltage or conducts. Over a liquid its plasma
   // burns in the vapour's gas, which the vapour's look draws.
   const electric = effect.electric === undefined && !obstacles.some(o => o.electric) ? null : readElectric(effect.electric ?? {}, `${path}.electric`, obstacles, liquid);
   context.electric = !!electric;
   const vapour = effect.vapour === undefined ? null : readVapour(effect.vapour, `${path}.vapour`, context);
-  const moving = obstacles.some(o => o.track), layout = buildLayout(obstacles, width, height, placementsAt(obstacles, 0));
+  const moving = obstacles.some(o => o.track) || !!bodies, layout = buildLayout(obstacles, width, height, placementsAt(obstacles, 0));
   const { solid, front, smooth, owner } = layout;
   const walls = listed(effect.walls, 'walls', 4).map((edge, i) => {
     if (!FLUID_WALLS.includes(edge)) fail(`${path}.walls[${i}]`, `expected ${FLUID_WALLS.join(', ')}`);
@@ -557,6 +582,7 @@ function readEffect(effect, path, source) {
   const warnings = sourceWarnings({ path, width, height, frames, liquid, seed, emitters, fills, gravity: pull, solid, smooth, owner, walls: Object.fromEntries(FLUID_WALLS.map(edge => [edge, walls.includes(edge)])), layoutAt, adhesive: most.adhesion > 0 });
   // An obstacle that shows but has no visible pixel on the canvas whenever it does blocks and draws nothing.
   obstacles.forEach((o, i) => {
+    if (o.body !== undefined) return;
     const shown = (o.track ?? [{ x: o.x, y: o.y, show: true }]).filter(at => at.show);
     if (shown.length && !shown.some(at => showsOnCanvas(o.rows, at.x, at.y, width, height))) warnings.push(`${path}.obstacles[${i}] has no visible pixel on the canvas whenever it shows, so it ${!o.blocks ? 'draws' : o.draw === 'none' ? 'blocks' : 'blocks and draws'} nothing: move its x and y (or its keys) onto the ${width} × ${height} canvas`);
   });
@@ -580,7 +606,7 @@ function readEffect(effect, path, source) {
     tension: number(effect.tension ?? (granular ? 0 : 0.5), `${path}.tension`, 0, 4), adhesion, schedule, most, electric, granular,
     outline: effect.outline === undefined ? 0 : paletteKey(effect.outline, `${path}.outline`, palette).charCodeAt(0),
     air: liquid && effect.air !== undefined ? readAir(effect.air, `${path}.air`, context) : null,
-    heat, vapour, iceLook, warm: !liquid && obstacles.some(o => o.props.temperature !== null)
+    heat, vapour, iceLook, warm: !liquid && obstacles.some(o => o.props.temperature !== null), bodies
   };
 }
 // Grains (see grainFriction): `repose` is the steepest slope, in degrees, a heap of them holds, at any height, and
@@ -3772,6 +3798,13 @@ function moveObstacles(run, cycle) {
     });
   });
   const passed = c => swept[c] >= 0 && !layout.solid[c] && !before.solid[c], solid = P ? P.mask : layout.solid;
+  // A body that turned onto liquid without moving a whole pixel shoves it straight out from its centre.
+  const outward = (o, x, y) => {
+    const at = places[o];
+    if (effect.obstacles[o].body === undefined || !at.show) return null;
+    const dx = x - at.cx, dy = y - at.cy, d = Math.sqrt(dx * dx + dy * dy);
+    return d > 1e-9 ? [dx / d, dy / d] : [0, -1];
+  };
   // The first open cell along a move from (x, y), passing only through cells the same obstacle has just covered or
   // passed over; -1 where another solid or the canvas edge comes first.
   const landing = (x, y, o, s) => {
@@ -3789,7 +3822,7 @@ function moveObstacles(run, cycle) {
     for (let k = state.n - 1; k >= 0; k--) {
       const x = state.x[k], y = state.y[k], c = Math.floor(y) * W + Math.floor(x);
       if (!covered(c) && !passed(c)) continue;
-      const o = covered(c) ? owner[c] : swept[c], s = shift[o], to = s ? landing(x, y, o, s) : -1;
+      const o = covered(c) ? owner[c] : swept[c], s = shift[o] ?? outward(o, x, y), to = s ? landing(x, y, o, s) : -1;
       if (to < 0) { removeParticle(state, k); continue; }
       // Into the open cell the walk reached, just past the obstacle, moving at least as fast as it does.
       const length = Math.sqrt(s[0] * s[0] + s[1] * s[1]), ux = s[0] / length, uy = s[1] / length, tx = to % W, ty = (to - tx) / W;
@@ -4027,9 +4060,140 @@ function measureFrame(chars, base, solid, width, height, particles) {
 const columns = list => Object.fromEntries(Object.keys(list[0]).map(key => [key, list.map(figure => figure[key])]));
 
 // Runs one effect and returns its frames' operations plus figures for the metadata.
+// ---- Bodies in a liquid ----------------------------------------------------------------------------------------------
+// The liquid's pull on each body after a frame's steps (docs/physics-model.md, section 13). Submerged: the rows of a body
+// (across gravity) with liquid beside them; their weight in liquid lifts it, at their centre, so a light body floats and
+// a boat rights itself. Every face against liquid drags it toward that liquid's velocity, solved implicitly so any drag is
+// stable, and half its submerged liquid joins its mass. Drag changes a body's velocity before its frame; buoyancy is a
+// force through the frame (the bodies' `push`), as their gravity is, so a floating body balances exactly and one resting
+// on the bottom or on sand doesn't hop. Grains don't float a body: resting sand holds it up as ground (groundBodies), and
+// moving sand drags it hard along with it.
+// Water drag grows with the speed between the body and the water (QUADRATIC per pixel a frame), as real drag does, so a
+// body slows hard as it hits the water and a light one rises out of it without leaping.
+const WATER_DRAG = 0.3, QUADRATIC = 1.5, VISCOUS_DRAG = 0.6, GRAIN_DRAG = 40, ADDED_MASS = 0.5, BODY_WAKE = 0.06;
+// Sand slower than this (pixels a frame) is at rest, and bodies stand on it.
+const SAND_REST = 0.2;
+function liquidForces(run, crowd) {
+  const { effect, state, base } = run, { g } = state, { W, H } = g, X = W + 1, solid = run.view.solid, density = base[0];
+  const [gx, gy] = effect.gravity, across = Math.abs(gy) >= Math.abs(gx), heavy = effect.granular ? 0 : 1;
+  const drag = WATER_DRAG * (1 + VISCOUS_DRAG * effect.viscosity);
+  crowd.bodies.forEach((b, k) => {
+    const o = effect.obstacles[effect.bodies.first + k], at = o.live;
+    if (b.fixed || b.gone || !at.show) return;
+    const inside = new Set();
+    o.rows.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] !== '.') { const x = at.x + i, y = at.y + j; if (x >= 0 && y >= 0 && x < W && y < H) inside.add(y * W + x); } });
+    const lanes = new Map();
+    let K = 0, Ku = 0, Kv = 0, Kr = 0, T = 0;
+    for (const c of inside) {
+      const i = c % W, j = (c - i) / W, key = across ? j : i;
+      if (!lanes.has(key)) lanes.set(key, { wet: false, n: 0, x: 0, y: 0 });
+      const lane = lanes.get(key);
+      lane.n++; lane.x += i + 0.5; lane.y += j + 0.5;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ni = i + di, nj = j + dj;
+        if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+        const n = nj * W + ni;
+        if (inside.has(n) || solid[n] || density[n] < LEVEL) continue;
+        if ((across ? dj : di) === 0) lane.wet = true;
+        // The liquid a body drags toward is a cell past the one it touches: that one moves with the body (its faces are the
+        // body's walls), and dragged toward its own wake a body pumps itself up and down. No liquid there is still liquid.
+        const fi = ni + di, fj = nj + dj, far = fi >= 0 && fj >= 0 && fi < W && fj < H && !solid[fj * W + fi] && density[fj * W + fi] >= LEVEL;
+        let ux = far ? (g.u[fj * X + fi] + g.u[fj * X + fi + 1]) / 2 : 0, uy = far ? (g.v[fj * W + fi] + g.v[(fj + 1) * W + fi]) / 2 : 0;
+        // Sand slower than SAND_REST is at rest: a body sinking into it stirs it that fast, and dragged along with what it
+        // stirs, the body would sink for ever. Only sand that really moves (an avalanche, a pour) carries a body.
+        if (effect.granular && ux * ux + uy * uy < SAND_REST * SAND_REST) { ux = 0; uy = 0; }
+        const rx = (i + ni + 1) / 2 - b.x, ry = (j + nj + 1) / 2 - b.y, ex = ux - (b.vx - b.w * ry), ey = uy - (b.vy + b.w * rx);
+        const grip = effect.granular ? GRAIN_DRAG : drag * (1 + QUADRATIC * Math.sqrt(ex * ex + ey * ey));
+        K += grip; Ku += grip * ux; Kv += grip * uy; Kr += grip * (rx * rx + ry * ry);
+        T += grip * (rx * (uy - b.vy) - ry * (ux - b.vx));
+      }
+    }
+    let sub = 0, sx = 0, sy = 0;
+    if (heavy) [sub, sx, sy] = submerged(b, inside, lanes, run, across, across ? gy : gx);
+    if (!K && !sub) { b.push = null; return; }
+    const m = 1 / b.invMass, added = ADDED_MASS * heavy * sub, fall = b.weightless ? 0 : 1, lift = heavy * sub;
+    const vx = ((m + added) * b.vx + Ku) / (m + added + K), vy = ((m + added) * b.vy + Kv) / (m + added + K);
+    const tau = sub ? (sx - b.x) * -lift * gy - (sy - b.y) * -lift * gx : 0, inertia = b.invInertia ? 1 / b.invInertia : 0;
+    const w = inertia ? (inertia * b.w + T) / (inertia + Kr) : b.w;
+    // Buoyancy, less what the added mass takes of the body's own weight, over its mass and the added mass.
+    // Sand grips what it touches: its drag holds against the body's own weight too, so a body that has landed in sand, or
+    // stands on a slope of it, stays where it is until the sand itself moves.
+    const grip = effect.granular ? K / (m + K) : 0;
+    const push = [(-lift * gx - added * gx * fall) / (m + added) - grip * gx * fall, (-lift * gy - added * gy * fall) / (m + added) - grip * gy * fall, inertia ? tau / inertia : 0];
+    // A sleeping body stays asleep in still liquid: what holds it (its buoyancy, the ground or the bottom under it) holds
+    // it as before. Liquid flowing past it faster than BODY_WAKE, or rising or falling a row against it, wakes it.
+    if (b.asleep) {
+      const flow = K ? Math.sqrt(Ku * Ku + Kv * Kv) / K : 0;
+      b.restSub ??= sub;
+      if (flow < BODY_WAKE && Math.abs(sub - b.restSub) < Math.max(2, inside.size / 6)) return;
+      b.asleep = false; b.sleepy = 0;
+    }
+    b.restSub = undefined;
+    b.vx = vx; b.vy = vy; b.w = w; b.push = push;
+  });
+}
+// The obstacles the bodies meet, where they are on frame `cycle`.
+const staticsAt = (statics, cycle) => statics.map(o => { const at = o.track ? o.track[cycle] : { x: o.x, y: o.y, show: true }; return { ...o, x: at.x, y: at.y, solid: o.solid && at.show }; });
+// How much of a body is under the liquid, and the centre of that part: [area, x, y]. The level is read in the columns
+// just beside the body (rows, for gravity along x): the top of the liquid that reaches its lowest row, to a fraction of a
+// pixel by how full the top cell is, averaged over the sides that have liquid. The body's exact shape past that level is
+// what is under, so the lift grows smoothly as it sinks; counted in whole rows it jumped a row at a time and a light
+// crate bobbed for ever. Liquid over a body with none beside it (in a well) covers it all; none at all, none of it.
+function submerged(b, inside, lanes, run, across, down) {
+  const { base, state } = run, { W, H } = state.g, solid = run.view.solid, density = base[0], sign = down >= 0 ? 1 : -1;
+  let low = Infinity, high = -Infinity, near = Infinity, far = -Infinity;
+  for (const c of inside) { const i = c % W, j = (c - i) / W, a = across ? j : i, o = across ? i : j; if (a < low) low = a; if (a > high) high = a; if (o < near) near = o; if (o > far) far = o; }
+  const deepest = sign > 0 ? high : low, wet = (o, a) => { const i = across ? o : a, j = across ? a : o; if (i < 0 || j < 0 || i >= W || j >= H) return 0; const c = j * W + i; return !solid[c] && density[c] >= LEVEL ? density[c] : 0; };
+  let levels = 0, count = 0;
+  for (const o of [near - 1, far + 1]) {
+    if (!wet(o, deepest)) continue;
+    let top = deepest;
+    while (wet(o, top - sign)) top -= sign;
+    const full = Math.min(1, wet(o, top));
+    levels += sign > 0 ? top + (1 - full) : top + full; count++;
+  }
+  if (!count) {
+    let covered = 0, cells = 0;
+    for (const lane of lanes.values()) if (lane.wet) { covered += lane.n; }
+    for (const lane of lanes.values()) cells += lane.n;
+    return covered >= cells && cells ? areaBeyond(b, across ? 1 : 0, -Infinity, sign) : [0, b.x, b.y];
+  }
+  return areaBeyond(b, across ? 1 : 0, levels / count, sign);
+}
+// Each body's place this frame, as its obstacle; keyed obstacles the bodies meet are retraced when they move.
+function placeBodies(run, crowd, cycle) {
+  const { effect } = run, { first, statics } = effect.bodies;
+  crowd.bodies.forEach((b, k) => { Object.assign(effect.obstacles[first + k], bodyPlace(bodyCells(b), b)); });
+  if (!effect.granular && statics.some(o => o.track)) {
+    const placed = staticsAt(statics, cycle), key = layoutKey(placed.map(o => ({ ...o, show: o.solid })));
+    if (key !== run.staticsKey) { run.staticsKey = key; crowd.retrace(placed); }
+  }
+}
+
+// Sand at rest is ground to the bodies (docs/physics-model.md, section 13): each frame the cells of it slower than
+// SAND_REST are traced, with the obstacles, as what they stand on. A cell stays ground until its sand moves twice that
+// fast or leaves it, so the ground under a body doesn't come and go with the sand's smallest stirrings.
+function groundBodies(run, crowd, cycle) {
+  const { effect, state, base } = run, { g } = state, { W, H } = g, X = W + 1, solid = run.view.solid, density = base[0], rows = [];
+  const ground = run.ground ??= new Uint8Array(W * H);
+  for (let j = 0; j < H; j++) {
+    let row = '';
+    for (let i = 0; i < W; i++) {
+      const c = j * W + i, ux = (g.u[j * X + i] + g.u[j * X + i + 1]) / 2, uy = (g.v[c] + g.v[c + W]) / 2, speed = ux * ux + uy * uy;
+      ground[c] = solid[c] || density[c] < LEVEL ? 0 : speed < SAND_REST * SAND_REST ? 1 : speed < 4 * SAND_REST * SAND_REST ? ground[c] : 0;
+      row += ground[c] ? 'x' : '.';
+    }
+    rows.push(row);
+  }
+  crowd.retrace([...staticsAt(effect.bodies.statics, cycle), { rows, x: 0, y: 0, solid: true, bounce: 0, friction: 0.8 }]);
+}
 function simulate(effect, context) {
+  // Bodies move their obstacles each frame, so a run works on its own copies of them.
+  if (effect.bodies) effect = { ...effect, obstacles: effect.obstacles.map(o => (o.body === undefined ? o : { ...o })) };
   const { width, height, path } = context, { frames, loop, liquid } = effect, N = width * height;
   const run = createRun(effect, width, height, path), { state, base } = run, all = run.fields;
+  const crowd = effect.bodies ? createBodyWorld({ substeps: 8, iterations: 6, gravity: effect.gravity, walls: effect.walls, obstacles: effect.bodies.statics, bodies: effect.bodies.list }, { width, height }) : null;
+  if (crowd) crowd.advance(0);
   // A loop warms up for whole cycles under its periodic forcing, keeps the fields of the last cycle's closing frames,
   // and blends its own closing frames toward them: the last frame then flows into frame 0 as that cycle's did.
   const begin = effect.warmup * frames, total = simulatedFrames(effect), blend = effect.blend;
@@ -4048,7 +4212,7 @@ function simulate(effect, context) {
     if (shown && t >= done && !run.sparks.some(p => p.born !== undefined && shown(p))) break;
     run.clock = t;
     const cycle = loop ? t % frames : t, out = t - begin, recording = !loop || (out >= 0 && out < frames);
-    if (effect.moving) moveObstacles(run, cycle);
+    if (effect.moving) { if (crowd) placeBodies(run, crowd, cycle); moveObstacles(run, cycle); }
     const here = emitFrame(run, t, cycle);
     solveFrame(run, cycle);
     if (liquid && state.full) crowded(path);
@@ -4085,6 +4249,11 @@ function simulate(effect, context) {
     figures[frame] = measureFrame(chars[frame], base, run.view.solid, width, height, liquid ? state.n : null);
     if (state.heat) Object.assign(figures[frame], heatAmounts(run));
     layouts[frame] = run.layout;
+    // Bodies are drawn where the liquid met them this frame, then pulled by it and stepped to the next.
+    if (crowd) {
+      paintBodies(crowd.bodies, chars[frame], width, height, effect.bodies.symbols);
+      if (t + 1 < total) { liquidForces(run, crowd); if (effect.granular) groundBodies(run, crowd, cycle); crowd.advance(t + 1); }
+    }
   }
   // Sparks draw over the fluid; obstacles drawn over it sit in front of both.
   const output = chars.map((grid, i) => {
@@ -4105,6 +4274,7 @@ function simulate(effect, context) {
   const round = value => Math.floor(value * 1000 + 0.5) / 1000;
   const { totals } = run;
   return {
+    ...(crowd && { bodies: { hits: crowd.stats.hits, escaped: crowd.stats.escaped, rest: crowd.stats.rest, ...(Object.keys(crowd.stats.paths).length && { paths: crowd.stats.paths }) } }),
     output, steps: ran * effect.substeps, peak: { density: round(peak.density), ...(!liquid && { temperature: round(peak.temperature) }), speed: round(peak.speed), ...(effect.electric && { ionization: round(peak.ionization), current: round(peak.current) }) },
     ...(liquid && { particles: run.maxParticles }), sparks: { spawned: totals.spawned, maxAlive: totals.maxAlive }, figures: columns(figures)
   };
@@ -4164,7 +4334,7 @@ export function compileFluid(source) {
     metadata.effects[name] = {
       kind: effect.kind, frames: effect.frames, loop: effect.loop, seed: effect.seed, steps: run.steps, ...(effect.loop && { warmup: effect.warmup, blend: effect.blend }),
       peak: run.peak, ...(run.particles !== undefined && { particles: run.particles }), sparks: run.sparks,
-      pixels: run.output.map(frame => frame.pixels), ...(!effect.loop && { residue: run.output.at(-1).pixels }), figures: run.figures, ...(effect.warnings.length && { warnings: effect.warnings })
+      pixels: run.output.map(frame => frame.pixels), ...(!effect.loop && { residue: run.output.at(-1).pixels }), figures: run.figures, ...(run.bodies && { bodies: run.bodies }), ...(effect.warnings.length && { warnings: effect.warnings })
     };
     return run.output.map(frame => frame.ops);
   });
@@ -4208,6 +4378,7 @@ export function createLiveFluid(source, options = {}) {
   });
   if (!chosen) fail('live.effect', `no effect named ${JSON.stringify(options.effect)}; the source has ${names.join(', ')}`);
   const { effect, width, height, path } = chosen, { emitters, liquid, seed } = effect, N = width * height;
+  if (effect.bodies) fail(`${path}.bodies`, 'the live runner doesn\'t step bodies yet; compile a liquid with bodies with compileFluid');
   const warmup = options.warmup === undefined ? effect.frames : integer(options.warmup, 'live.warmup', 0, 2048);
   // The warm-up runs before the runner returns, so it keeps compileFluid's work budget; stepping afterwards has none.
   const frameWork = N * effect.substeps * stepWork(effect);

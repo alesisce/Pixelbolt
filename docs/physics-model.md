@@ -149,6 +149,7 @@ Each shared piece has one session that builds it; the others use it rather than 
 | Electric layer, ionization; uses the heat scale and solid properties | plasma |
 | Grains: friction from pressure, rigid pieces (section 10a) | grains (2026-11-04) |
 | Rigid bodies, and bodies in a liquid (section 13) | rigid bodies (2026-11-05) |
+| Teams, painted ground and power-ups (section 13a) | territory (2026-11-05) |
 | Rest and cleanliness (sections 0 and 1) | everyone; the cohesion work set the bar |
 
 Landing order: sticky liquids and bubbles land first, in whichever order they are ready. Phase changes builds on both. Plasma's gas-only part can land any time, as long as it uses this heat scale and the solid layer's surface properties. Plasma meeting liquids comes after phase changes. Then the features meet (2026-11-01): arcs into water, heat through keyed and smooth solids, bubbles gathering into pockets and sealed bodies of liquid, each built on the pieces above rather than beside them.
@@ -170,3 +171,13 @@ Bodies meet a fluid (water, a thick liquid, sand, or a gas) as `bodies` in an ef
 - **Loops.** In a looping effect the bodies run through the warm-up with the fluid, and the closing `blend` frames draw them blended toward where they were in the warm-up's closing frames, as the fields are, so the last frame flows into the first. A fixed body that turns other than a whole number of its own symmetric turns a cycle (a box's half turn, a hoop's side) is warned about.
 - **The live runner** steps the bodies a frame at a time with the fluid; a push moves the bodies it reaches as well as the fluid.
 - **Not yet:** a body neither warms nor cools itself, nothing floats in a gas, and fluid inside a hollow body (a hoop holding water) doesn't weigh on it.
+
+### 13a. Teams, painted ground and power-ups
+
+A bodies effect may lay a **territory** over its canvas: a grid of square cells, each owned by one team (or by none), drawn in its team's colour. It is ground in the solid layer's sense (section 6), but whose ground it is depends on who meets it:
+
+- **Teams.** A body with a `team` passes through cells its team owns and meets every other team's cells as a wall, with the cells' bounce and friction; a body without a team meets every owned cell. Bodies meet each other as they always do, teams or not. Pixel obstacles and closed edges stay walls to everyone.
+- **Painting.** A cell a team's body really hits (the solver had to push it off the cell, as a hit counts in section 13) becomes the body's team's at the end of that substep, and the walls are traced again before the next one. The cell is the one behind the face it hit, so a ball that strikes a corner takes the corner cell. A count of each team's cells is kept every frame: the score, which the metadata reports and a heads-up text can show.
+- **Held speed.** A body with `speed` is set back to that speed, along its own direction of travel, at the end of every substep: an open art cheat, as `tireless` is, so a ball crossing a board in zero gravity never tires and never runs away. A body that has stopped dead keeps no direction and is left alone.
+- **Power-ups.** A pickup is a square at a place, there from one frame to another, taken by the first body (in body order) whose shape reaches it, and a scripted event is the same power given to a named body at a frame. A power acts at the end of a frame, between the bodies' steps, and only through the body's own state: `split` makes copies of the taker turned evenly about its heading, `grow` scales a ball's radius (its mass and inertia follow its area) for some frames, `speed` scales its held speed for some frames, `warp` moves it to a place, and `magnet` pulls bodies of the other teams toward a point with a steady force (as gravity does, through the substeps) for some frames. Nothing is random: the taker, the copies' headings and the order of powers on one frame are fixed by the source.
+- **Long matches.** A match may run past a recipe's 256 frames when it is written as numbered video frames: the same world stepped frame after frame, each frame drawn and kept as an image, never a recipe.

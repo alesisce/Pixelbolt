@@ -4,6 +4,13 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Steadier spells and waves
+
+- Shape looks hold their bands from frame to frame (`hold`, a share of the gap between thresholds, default 0.3). A pixel enters a new band as soon as the field crosses into it, but goes back to the band it just left only once the field has passed the threshold by that margin, so rippling beams, boiling bursts, noisy rings and lit rims no longer flip pixels back and forth every frame. A still field, and one that only rises or only falls, draws exactly as before; lit and shade bands hold too; and a loop's bands are settled round its seam, so every loop still closes exactly. Counting pixels drawn in the same colour a frame before and after but changed in between, the shipped effects flip over a third fewer: the fire projectile 7.8% of its pixels a frame to 2.7%, the fireball 7.2% to 3.0%, the lightning area 10.6% to 2.5%. `hold: 0` draws each frame on its own.
+- Wave looks hold the same way (`look.hold`), so the interference and portal loops have no flipping pixels left (0.7% and 0.1% before); `hold: 0` keeps each frame a function of its time alone.
+- `dissolve` lays its pattern where a particle stands as it starts to dissolve and moves it with the particle, so a rising ember fades out once instead of blinking as it crosses a pattern fixed to the canvas, while particles that stay put still thin out in step. Tidewatch's `fx` recipe and atlas are recompiled for it (only the poof changes).
+- The lightning buff's ground ring crackles with boiling noise instead of strobing between two rings every other frame (26.7% of its pixels flipping a frame to 4.6%), and the water buff's swirl drifts round its ring in swelling drops instead of jumping a lump's width a frame (14.2% to 3.7%). `test/fx-steady.test.js` holds these bounds.
+
 ### Rigid bodies
 
 - A new source format, `pixelforge-bodies` (`src/bodies.js`, `bodies.schema.json`, `pixel_help` topic `bodies`), simulates rigid bodies and bakes them into palette grids: circles (radius 0.5 is one pixel), boxes, convex polygons and fixed hoops with a gap, with gravity, walls and pixel obstacles. Bodies bounce (`bounce`), slide (`friction`), roll, stack, shove each other by `density`, and come to rest: a slow body falls asleep and holds exactly still, and a knock wakes it and every sleeping body resting against it. Sequential impulses in substeps with speculative contacts, so a pixel thrown at the speed limit never passes a one-pixel wall; pixel obstacles are traced into straight runs of edges, so a box slides along a floor of several symbols without catching on the seams.

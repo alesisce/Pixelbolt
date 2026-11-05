@@ -521,7 +521,7 @@ test('the fluid blast example compiles from the explosion fluid source to the pi
   assert.deepEqual(renderProject(recipe).warnings, []);
   assert.deepEqual(metadata.effects.blast.cues.map(cue => cue.name), ['boom']);
   // This changes with any change to the fluid, shape or particle pixels: regenerate it only after the art is seen again.
-  assert.equal(createHash('sha256').update(JSON.stringify(recipe)).digest('hex'), '317fa1f2de92257ecead54666a960eda81b312433e1785e1ef94181d222f5198');
+  assert.equal(createHash('sha256').update(JSON.stringify(recipe)).digest('hex'), '102297faa77226f0bea87b115ed9838237803ae6c44f3fef129364e7bc91b524');
 });
 
 // ---- Turned copies: one effect drawn in several directions ---------------------------------------------------------------

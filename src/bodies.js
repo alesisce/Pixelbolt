@@ -802,7 +802,8 @@ function simulate(effect, context) {
 const snap = (value, size) => (size % 2 ? Math.floor(value) + 0.5 : Math.round(value));
 // A body keeps the pixel it is drawn at until it has moved HOLD past the halfway mark to the next, and its drawn angle
 // until it has turned TURN_HOLD of a step past halfway, so a body rocking about a boundary (a crate bobbing on water, a
-// box settling) holds still instead of flickering between two pixels. The fluid's solid cells follow the drawing.
+// box settling) holds still instead of flickering between two pixels. A fluid's solid cells for it are where it really
+// is (exactCells), and the fluid draws its liquid in those its drawing leaves uncovered.
 const HOLD = 0.3, TURN_HOLD = 0.2;
 function held(b, axis, size) {
   const value = axis ? b.y : b.x, next = snap(value, size), memory = b.held ??= {}, key = `${axis}:${size}`, was = memory[key];
@@ -992,11 +993,35 @@ function pictureOf(b, symbols) {
   return picture;
 }
 
+// Drawn finer than the world's pixels, a body holds its drawn place to the fine pixel until it has moved HOLD past
+// halfway to the next, as at whole pixels, and its drawn angle until it has turned more than half a step and TURN_HOLD
+// of one (a step is a degree, or less for a body so long that a degree would move its ends more than a fine pixel), then
+// takes its own: a crate bobbing on the water or a box rocking as it settles holds still instead of shimmering, one that
+// slides moves a fine pixel at a time with its picture unchanged, and one that spins turns evenly. Its place is snapped
+// so its picture's pixel edges, turned to the nearest quarter turn, fall between the fine pixels' centres: sampled on
+// them, a box at rest a hundredth of a degree off square was drawn sheared, one half of each side a fine pixel off the
+// other.
+function heldTurn(b, reach, n) {
+  let step = 1;
+  while (step > 1 / 16 && reach * n * step * RADIANS > 1) step /= 2;
+  const exact = atan2Deg(b.s, b.c), memory = b.held ??= {}, was = memory.fineTurn;
+  if (was === undefined || Math.abs(((exact - was) % 360 + 540) % 360 - 180) >= step * (0.5 + TURN_HOLD)) memory.fineTurn = exact;
+  return memory.fineTurn;
+}
+// `offset` is where the picture's edges lie from its centre, in this quarter turn: the drawn centre is that far off a
+// fine pixel's edge. A new quarter turn (or picture) starts the hold afresh.
+function heldFine(b, axis, offset, n, q) {
+  const value = ((axis ? b.y : b.x) - offset) * n, next = Math.round(value), memory = b.held ??= {}, key = `fine:${axis}`, was = memory[key];
+  if (!was || was.q !== q || was.offset !== offset || was.n !== n || (next !== was.at && Math.abs(value - was.at) >= 0.5 + HOLD)) memory[key] = { at: next, q, offset, n };
+  return memory[key].at / n + offset;
+}
+
 /**
  * Draws the bodies `n` times finer than the world's pixels (a source's `subpixels`) into `grid` (character codes,
- * width × n by height × n): each body is its own picture, every pixel of it a square n fine pixels across, turned
- * exactly with the body and placed where the body is to a fraction of a pixel, so it turns and moves smoothly and never
- * changes shape. A circle's picture doesn't turn, as at whole pixels; a hoop is drawn as at whole pixels, enlarged.
+ * width × n by height × n): each body is its own picture, every pixel of it a square n fine pixels across, turned with
+ * the body and placed where the body is to the fine pixel (held as heldFine and fineStep say), so it turns and moves
+ * smoothly and never changes shape. A circle's picture doesn't turn, as at whole pixels; a hoop is drawn as at whole
+ * pixels, enlarged.
  */
 export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
   const W = width * n, H = height * n;
@@ -1020,12 +1045,14 @@ export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
       for (const [x, y] of cover(b, b.x, b.y)) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) put(x * n + i, y * n + j, code);
       continue;
     }
-    const { rows, cx, cy } = pictureOf(b, symbols), w = rows[0].length, h = rows.length, turns = b.shape !== 'circle', c = turns ? b.c : 1, s = turns ? b.s : 0;
+    const { rows, cx, cy } = pictureOf(b, symbols), w = rows[0].length, h = rows.length, turns = b.shape !== 'circle';
     const rx = Math.max(cx, w - cx), ry = Math.max(cy, h - cy), reach = turns ? Math.sqrt(rx * rx + ry * ry) : Math.max(rx, ry);
-    const i0 = Math.max(0, Math.floor((b.x - reach) * n)), i1 = Math.min(W - 1, Math.ceil((b.x + reach) * n)), j0 = Math.max(0, Math.floor((b.y - reach) * n)), j1 = Math.min(H - 1, Math.ceil((b.y + reach) * n));
+    const degrees = turns ? heldTurn(b, reach, n) : 0, c = cosDeg(degrees), s = sinDeg(degrees);
+    const q = ((Math.round(degrees / 90) % 4) + 4) % 4, x = heldFine(b, 0, [cx, -cy, -cx, cy][q], n, q), y = heldFine(b, 1, [cy, cx, -cy, -cx][q], n, q);
+    const i0 = Math.max(0, Math.floor((x - reach) * n)), i1 = Math.min(W - 1, Math.ceil((x + reach) * n)), j0 = Math.max(0, Math.floor((y - reach) * n)), j1 = Math.min(H - 1, Math.ceil((y + reach) * n));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-      // Where this fine pixel's centre lies in the picture, turned back by the body's angle.
-      const px = (i + 0.5) / n - b.x, py = (j + 0.5) / n - b.y, u = Math.floor(px * c + py * s + cx), v = Math.floor(py * c - px * s + cy);
+      // Where this fine pixel's centre lies in the picture, turned back by the body's drawn angle.
+      const px = (i + 0.5) / n - x, py = (j + 0.5) / n - y, u = Math.floor(px * c + py * s + cx), v = Math.floor(py * c - px * s + cy);
       if (u < 0 || v < 0 || u >= w || v >= h) continue;
       const ch = rows[v][u];
       if (ch !== '.' && ch !== ' ') put(i, j, ch.charCodeAt(0));

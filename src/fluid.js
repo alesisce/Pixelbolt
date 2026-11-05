@@ -3534,6 +3534,28 @@ function liquidOutline(wet, solid, walls, width, height) {
   return out;
 }
 
+// A body's cells under the liquid are drawn as the liquid beside them, under the body's own drawing (docs/physics-model.md,
+// section 13). A body is solid where its exact shape covers a pixel's centre, but drawn where it is (finer than these
+// pixels, or held at a whole pixel), so its drawing leaves a sliver of some of its cells uncovered; drawn empty, those
+// slivers were holes in the water under a floating ball, coming and going as it bobbed. A run of body cells along a row
+// is under the liquid when liquid closes it in, on both sides or on one side with a wall or an obstacle on the other;
+// each cell of it takes the colour of the liquid on its nearer side (the left, halfway). Above the surface the runs meet
+// air and stay empty.
+function underBodies(chars, solid, see, walls, width, height) {
+  for (let j = 0; j < height; j++) for (let i = 0; i < width;) {
+    if (!see[j * width + i]) { i++; continue; }
+    let k = i;
+    while (k < width && see[j * width + k]) k++;
+    const left = j * width + i - 1, right = j * width + k;
+    const wetLeft = i > 0 && !solid[left] && chars[left] > 0, wetRight = k < width && !solid[right] && chars[right] > 0;
+    const shutLeft = wetLeft || (i > 0 ? solid[left] === 1 : walls.left), shutRight = wetRight || (k < width ? solid[right] === 1 : walls.right);
+    if ((wetLeft || wetRight) && shutLeft && shutRight) {
+      for (let x = i; x < k; x++) chars[j * width + x] = wetLeft && (!wetRight || x - i < k - x) ? chars[left] : chars[right];
+    }
+    i = k;
+  }
+}
+
 // A bilinear sample over the open cells only: obstacle cells drop out and the rest are weighted up to make up for them
 // (off the canvas counts as empty). With no open cell in reach it returns `fallback`.
 function openSample(a, solid, nx, ny, fx, fy, fallback) {
@@ -3718,6 +3740,7 @@ function renderFields(effect, base, width, height, drawn = null) {
   }
   // `drawn`, when given, marks the cells the look layers drew the fluid on (after cleanup, before the outline).
   if (drawn) for (let c = 0; c < N; c++) drawn[c] = chars[c] ? 1 : 0;
+  if (liquid && see) underBodies(chars, solid, see, effect.walls, width, height);
   // Halos, in look order: the empty pixels within a round reach of a layer's pixels (an offset (dx, dy) reaches when
   // dx² + dy² ≤ (width + 0.5)² − 1, so one pixel wide is the four neighbours) take its glow colour.
   if (by) effect.look.forEach((layer, index) => {

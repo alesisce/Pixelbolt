@@ -158,3 +158,21 @@ test('bodies drawn finer than the liquid sit over it, and the water a turning pa
     assert.equal(count, 0, `frame ${f}: ${count} pale pixels in the deep`);
   }
 });
+
+test('a body in the water leaves no hole in it: its cells under the surface are drawn as the water beside them', () => {
+  // Below the surface (the top of the water at the pool's left edge, and a pixel more for its ripples) nothing is left
+  // empty: a body's cells there show the water wherever the body's finer drawing doesn't cover them. Drawn empty, they
+  // were holes under the floating ball that came and went as it bobbed, and round the water wheel's paddles.
+  for (const [name, from, most] of [['crate-splash', 40, 0], ['water-wheel', 0, 16]]) {
+    const source = fluidBodyPresets[name], n = source.subpixels, project = renderProject(compileFluid(source).recipe), [animation] = Object.values(project.animations), W = project.width;
+    const water = ['B', 'b', 'c', 'w'].map(key => parseColor(source.palette[key]).slice(0, 3).join());
+    for (let f = from; f < animation.frames.length; f++) {
+      const d = project.frames[animation.frames[f]].data, wet = i => water.includes(`${d[i * 4]},${d[i * 4 + 1]},${d[i * 4 + 2]}`);
+      let top = 0, holes = 0;
+      while (top < project.height && !wet(top * W)) top++;
+      for (let i = (top + n) * W; i < W * project.height; i++) if (d[i * 4 + 3] === 0) holes++;
+      // A loop's closing frames blend the water toward the warm-up's, which may leave a dip a pixel across by a body.
+      assert.ok(holes <= most, `${name} frame ${f}: ${holes} empty fine pixels under the water`);
+    }
+  }
+});

@@ -8,7 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderProject, PixelError } from '../src/core.js';
-import { compileBodies } from '../src/bodies.js';
+import { compileBodies, createBodyWorld, readBodies, drawBodies } from '../src/bodies.js';
+import { cosDeg, sinDeg } from '../src/craft.js';
 import { startMCP } from '../src/mcp.js';
 import { packageFiles } from '../scripts/build-studio.mjs';
 import { bodiesPresets } from '../scripts/bodies-presets.mjs';
@@ -17,7 +18,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': 'b74d28539797396da501d776c9220f9114967fdb0eb6786c0cf7b83b1ac9fa93', territory: 'df91dbb9680d2a86741f1079714c5b921b67796cdb7abb10c05d6277a34664f3'
+  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': '46fc517bbc175daea132767549d92a5076b8af580ce9c2e300098c1e4cbf427d', territory: 'df91dbb9680d2a86741f1079714c5b921b67796cdb7abb10c05d6277a34664f3'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -190,4 +191,34 @@ test('bodies drawn finer than the world turn as rigid pictures, within the canva
   refused({ ...source(9) }, 'bodies.subpixels', /from 1 to 8/);
   refused({ ...source(4), width: 72 }, 'bodies.subpixels', /at most 256 a side, so use subpixels of at most 3/);
   refused({ ...source(4, { frames: 100 }), width: 64, height: 48 }, 'bodies.subpixels', /4,194,304.*lower subpixels to 3/);
+});
+
+test('bodies drawn finer than the world hold still while they bob or rock, keep straight sides at rest and turn evenly', () => {
+  // One crate, placed and turned by hand frame after frame, drawn 2 (or 3) times finer as compileBodies draws it.
+  const symbols = { crate: ['kkkkkkkk', 'kwwwwwwk', 'kwkwwwwk', 'kwwkwwwk', 'kwwwkwwk', 'kwwwwkwk', 'kwwwwwwk', 'kkkkkkkk'] };
+  const crate = (n, spin = 0) => {
+    const [b] = createBodyWorld({ substeps: 8, iterations: 6, gravity: [0, 0], walls: { left: false, right: false, top: false, bottom: false }, obstacles: [],
+      bodies: readBodies([{ shape: 'box', size: [8, 8], at: [16, 12], symbol: 'crate', ...(spin && { fixed: true, spin }) }], 'bodies', { palette, symbols, width: 32, height: 24 }) }, { width: 32, height: 24 }).bodies;
+    return { b, draw: (x, y, degrees) => { b.x = x; b.y = y; b.c = cosDeg(degrees); b.s = sinDeg(degrees); const { op } = drawBodies([b], 32, 24, symbols, n); return op; } };
+  };
+  const cells = op => { const out = new Map(); op.rows.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] !== '.') out.set(`${op.x + i},${op.y + j}`, row[i]); }); return out; };
+  // At rest a hundredth of a degree off square, with its sides where the fine pixels' centres are, it is drawn square:
+  // each row of it spans the same fine pixels (sampled on its pixel edges, half of each side was a fine pixel out).
+  const rest = crate(2).draw(16.75, 12, 0.06);
+  assert.equal(rest.rows.length, 16);
+  assert.deepEqual(new Set(rest.rows.map(row => `${row.search(/[^.]/)}:${row.replace(/\./g, '').length}`)), new Set(['0:16']), `a straight-sided crate: ${rest.rows.join('/')}`);
+  // Bobbing a tenth of a pixel and rocking a third of a degree, it draws the same pixels every frame.
+  const bob = crate(3), first = JSON.stringify(bob.draw(16.4, 12.3, 8.9));
+  for (let f = 1; f < 24; f++) assert.equal(JSON.stringify(bob.draw(16.4 + 0.1 * Math.sin(f), 12.3 + 0.1 * Math.cos(f * 1.3), 8.9 + 0.3 * Math.sin(f * 0.7))), first, `frame ${f} holds still`);
+  // Sliding at a fixed angle, it moves a fine pixel at a time and its picture never changes.
+  const slide = crate(3), start = cells(slide.draw(10, 12, 20));
+  for (let f = 1; f <= 30; f++) {
+    const op = slide.draw(10 + f / 9, 12, 20), shift = Math.floor(f / 3), moved = new Map([...start].map(([key, ch]) => { const [x, y] = key.split(',').map(Number); return [`${x + shift},${y}`, ch]; }));
+    assert.deepEqual(cells(op), moved, `frame ${f}: the same picture, ${shift} fine pixels on`);
+  }
+  // Spinning, it is drawn at its own angle every frame: evenly turned, never held back.
+  const spin = crate(3, 4.5), turned = [];
+  for (let f = 0; f < 8; f++) turned.push(JSON.stringify(spin.draw(16, 12, 4.5 * f)));
+  assert.equal(new Set(turned).size, 8, 'a new picture every frame');
+  for (let f = 0; f < 8; f++) assert.equal(turned[f], JSON.stringify(crate(3, 4.5).draw(16, 12, 4.5 * f)), `frame ${f} is drawn at exactly its angle, as a body first drawn there is`);
 });

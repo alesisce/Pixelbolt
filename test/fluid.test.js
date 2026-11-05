@@ -50,11 +50,11 @@ const GOLDEN = {
   hourglass: 'd9664a2973600387217e81bdfe73b8df130ebe20febde720fcc56543c4f16d06',
   'sand-gate': 'b5ad55de68dee6c0ade0aa225ea8f094a2fe1bb421beac1adc023e043f92cf6d',
   'sand-plough': 'd3854405dd7e42d64a3ca694e405acb6d57d23fefe6358dcddc820254ec64971',
-  'crate-splash': 'a3caf4f7c63e3de41a30076b2af2a59c9e5d8024206dfca3068418d79ba3afbb',
-  'sand-slide': '70ec7f31f498d2d75768625ffaa200d9c4d3200f68da5fde1e46a92dca75670a',
-  'water-wheel': '573a29b06472fc32d383b764489f0299ea0ebddad36661857de19bb11abdb7ff',
-  'hot-stone': '9db9945a194275ff0bba0e4fb9e86011572b6201a77f14711a5a47a22c8b7559',
-  'plank-tip': 'd2295b6538c70985a52152532b35325290660e85adf06e766f4e25384446cdab'
+  'crate-splash': 'bc7c624189a6d071c3d79c86a84af268ee74c1f86deafc6cd58e30e6ee0527c6',
+  'sand-slide': '8396c39fb3e74a8ff1cbf4e49d960c836da117c2eb745ba2dc7e1cfd2e3eba55',
+  'water-wheel': '47abf2725c8f300975483b42f1d302e02b0315be0038f0f7b7670c36818a41dd',
+  'hot-stone': '8018ea9fb6e66d615a201f209c1dbf81ae99133442d47ddac3054e7ffceddcfc',
+  'plank-tip': '84e4e72aec704d05c2bdd94559fd9689be0d1066fbdb860bd56003a6a4135ca8'
 };
 const examples = new Map();
 const example = async name => {

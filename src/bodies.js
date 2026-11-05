@@ -17,10 +17,14 @@ import { PixelError, renderProject } from './core.js';
 import { fields } from './authoring.js';
 import { sinDeg, cosDeg, traceLine, turnRows } from './craft.js';
 import { atan2Deg } from './shapes.js';
+import { readTerritory, readPickups, readEvents, readHud, createTerritory } from './territory.js';
 
 export const BODY_SHAPES = ['circle', 'box', 'polygon', 'hoop'];
 export const BODY_WALLS = ['left', 'right', 'top', 'bottom'];
 const LIMITS = { effects: 16, entries: 64, bodies: 256, obstacles: 32, frames: 256, work: 400000000 };
+// A match written as numbered video frames (bodiesFrames) may run this long, and do this much work.
+export const MATCH_FRAMES = 18000;
+const MATCH_WORK = 4000000000;
 const PI = 3.141592653589793, RADIANS = PI / 180;
 // Overlap (pixels) the solver leaves alone, the share of the rest it removes each substep, and the fastest it pushes.
 const SLOP = 0.02, BIAS = 0.2, MAX_PUSH = 1;
@@ -108,7 +112,7 @@ function readMaterial(value, path, fixed) {
   };
 }
 
-const BODY_FIELDS = ['temperature', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'outline', 'symbol', 'trail', 'ring', 'grid'];
+const BODY_FIELDS = ['temperature', 'team', 'speed', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'outline', 'symbol', 'trail', 'ring', 'grid'];
 
 // One entry of `bodies`: a body, or copies of it laid out on a ring or a grid. Returns the bodies it makes.
 function readBody(entry, path, context) {
@@ -128,6 +132,16 @@ function readBody(entry, path, context) {
   // A body keeps its temperature in a fluid with heat, as an obstacle does: a red-hot stone boils the water it lands in.
   if (entry.temperature !== undefined && !context.heat) fail(`${path}.temperature`, 'a body has a temperature in a pixelforge-fluid effect with heat, where it warms or chills what it touches');
   const temperature = entry.temperature === undefined ? null : number(entry.temperature, `${path}.temperature`, -16, 16);
+  // A team's body passes through its own team's cells of a territory and paints the other teams' cells it hits
+  // (docs/physics-model.md, section 13a); a held speed keeps it going (an open cheat, as tireless is).
+  let team = -1;
+  if (entry.team !== undefined) {
+    if (!context.teams) fail(`${path}.team`, 'a team goes with a territory: give the effect a territory whose teams include it');
+    team = context.teams.findIndex(other => other.name === entry.team);
+    if (team < 0) fail(`${path}.team`, `no team is named ${JSON.stringify(entry.team)}; the territory's teams are ${context.teams.map(other => other.name).join(', ')}`);
+  }
+  if (entry.speed !== undefined && fixed) fail(`${path}.speed`, 'speed holds a free body\'s speed; a fixed body moves exactly by its velocity and spin');
+  const speed = entry.speed === undefined ? null : number(entry.speed, `${path}.speed`, 0.05, MAX_SPEED);
   // Geometry in the body's own frame, centred on its centre of mass.
   let parts, area, inertia, size;
   if (shape === 'circle') {
@@ -219,7 +233,7 @@ function readBody(entry, path, context) {
     shape, parts, size, fixed, x, y, angle: a, vx: velocity[0], vy: velocity[1], spin,
     invMass: fixed ? 0 : 1 / mass, invInertia: fixed || shape === 'hoop' ? 0 : 1 / (mass * inertia),
     bounce: material.bounce, friction: material.friction, drag: material.drag, spinDrag: material.spinDrag,
-    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, fills, outline, symbol, trail
+    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, team, speed, fills, outline, symbol, trail
   }));
 }
 
@@ -236,10 +250,11 @@ export function readBodies(list, path, context) {
 
 function readEffect(effect, path, context) {
   if (!isObject(effect)) fail(path, 'expected an effect');
-  fields(effect, ['frames', 'duration', 'substeps', 'iterations', 'gravity', 'background', 'walls', 'obstacles', 'bodies'], path);
-  const { width, height, symbols, palette } = context;
+  fields(effect, ['frames', 'duration', 'substeps', 'iterations', 'gravity', 'background', 'walls', 'obstacles', 'territory', 'bodies', 'pickups', 'events', 'hud'], path);
+  const { width, height, symbols, palette } = context, most = context.frames ?? LIMITS.frames;
   const background = effect.background === undefined ? null : paletteKey(effect.background, `${path}.background`, palette);
-  const frames = integer(effect.frames, `${path}.frames`, 1, LIMITS.frames);
+  if (Number.isInteger(effect.frames) && effect.frames > most && effect.frames <= MATCH_FRAMES) fail(`${path}.frames`, `a recipe holds at most ${most} frames; write a longer match as numbered video frames: pixelbolt sequence <source> --out <folder> --fps 30, or pixel_compile with sequence`);
+  const frames = integer(effect.frames, `${path}.frames`, 1, most);
   const duration = integer(effect.duration ?? 40, `${path}.duration`, 10, 1000);
   const substeps = integer(effect.substeps ?? 8, `${path}.substeps`, 1, 16), iterations = integer(effect.iterations ?? 6, `${path}.iterations`, 1, 16);
   const gravity = effect.gravity === undefined ? [0, 0.15] : pair(effect.gravity, `${path}.gravity`, -2, 2);
@@ -264,8 +279,12 @@ function readEffect(effect, path, context) {
     if (!solid && (obstacle.bounce !== undefined || obstacle.friction !== undefined)) fail(`${op}.${obstacle.bounce !== undefined ? 'bounce' : 'friction'}`, 'a decoration (solid: false) never meets a body');
     return { symbol: obstacle.symbol, x, y, rows, draw, solid, bounce: number(obstacle.bounce ?? SURFACE.bounce, `${op}.bounce`, 0, 1), friction: number(obstacle.friction ?? SURFACE.friction, `${op}.friction`, 0, 2) };
   });
-  const bodies = readBodies(effect.bodies, `${path}.bodies`, context);
-  return { frames, duration, substeps, iterations, gravity, background, walls: Object.fromEntries(BODY_WALLS.map(edge => [edge, walls.includes(edge)])), obstacles, bodies };
+  // A territory of team-owned cells, then the bodies (whose teams it names), the powers and the heads-up display.
+  const territory = effect.territory === undefined ? null : readTerritory(effect.territory, `${path}.territory`, { width, height, palette });
+  const bodies = readBodies(effect.bodies, `${path}.bodies`, { ...context, teams: territory ? territory.teams : null });
+  const pickups = readPickups(effect.pickups, `${path}.pickups`, context), events = readEvents(effect.events, `${path}.events`, context, bodies);
+  const hud = readHud(effect.hud, `${path}.hud`, context, territory ? territory.teams : null);
+  return { frames, duration, substeps, iterations, gravity, background, walls: Object.fromEntries(BODY_WALLS.map(edge => [edge, walls.includes(edge)])), obstacles, territory, bodies, pickups, events, hud };
 }
 
 // ---- Pixel obstacles --------------------------------------------------------------------------------------------------
@@ -295,14 +314,22 @@ function traceObstacles(effect, width, height) {
     const o = i >= 0 && i < width && j >= 0 && j < height ? owner[j * width + i] : -1;
     return o < 0 ? SURFACE : effect.obstacles[o];
   };
+  return { ...traceGrid(at, material, width, height, 1, 0, 0, width, height), solid };
+}
+
+// The faces of a grid of cells, `at(i, j)` solid (it may answer past the grid's edges), as one-sided segments in canvas
+// pixels, cell (i, j) covering `scale` pixels from (ox + i·scale, oy + j·scale): joined along straight runs, each with
+// its outward normal and its cell's `material`, and an index for finding the ones near an area of a width × height
+// canvas. Pixel obstacles are a grid of 1-pixel cells; a territory's cells are larger.
+function traceGrid(at, material, width, height, scale, ox, oy, canvasWidth, canvasHeight) {
   const segments = [];
-  const add = (ax, ay, bx, by, nx, ny, cell) => {
+  const add = (ai, aj, bi, bj, nx, ny, cell) => {
     // Wound so the first edge's normal (dy, −dx) is the outward normal.
-    const ex = bx - ax, ey = by - ay, len = Math.sqrt(ex * ex + ey * ey), dx = ex / len, dy = ey / len;
+    const ex = bi - ai, ey = bj - aj, len = Math.sqrt(ex * ex + ey * ey), dx = ex / len, dy = ey / len;
     // Convex ends: the solid cell just past the end, on the solid side, is empty.
-    const convexA = !at(Math.floor(ax - dx * 0.5 - nx * 0.5), Math.floor(ay - dy * 0.5 - ny * 0.5));
-    const convexB = !at(Math.floor(bx + dx * 0.5 - nx * 0.5), Math.floor(by + dy * 0.5 - ny * 0.5));
-    const m = material(cell[0], cell[1]);
+    const convexA = !at(Math.floor(ai - dx * 0.5 - nx * 0.5), Math.floor(aj - dy * 0.5 - ny * 0.5));
+    const convexB = !at(Math.floor(bi + dx * 0.5 - nx * 0.5), Math.floor(bj + dy * 0.5 - ny * 0.5));
+    const m = material(cell[0], cell[1]), ax = ox + ai * scale, ay = oy + aj * scale, bx = ox + bi * scale, by = oy + bj * scale;
     segments.push({ ax, ay, bx, by, nx, ny, convexA, convexB, bounce: m.bounce, friction: m.friction, soft: !!m.soft,
       part: polygonPart([[ax, ay], [bx, by]]) });
   };
@@ -331,7 +358,7 @@ function traceObstacles(effect, width, height) {
     }
   }
   // A coarse grid of cells, each listing the segments that cross it, for queries by area.
-  const CELL = 8, gx0 = -1, gy0 = -1, gw = Math.ceil(width / CELL) + 3, gh = Math.ceil(height / CELL) + 3, cells = Array.from({ length: gw * gh }, () => []);
+  const CELL = 8, gx0 = -1, gy0 = -1, gw = Math.ceil(canvasWidth / CELL) + 3, gh = Math.ceil(canvasHeight / CELL) + 3, cells = Array.from({ length: gw * gh }, () => []);
   segments.forEach((s, index) => {
     const x0 = Math.floor(Math.min(s.ax, s.bx) / CELL) - gx0, x1 = Math.floor(Math.max(s.ax, s.bx) / CELL) - gx0;
     const y0 = Math.floor(Math.min(s.ay, s.by) / CELL) - gy0, y1 = Math.floor(Math.max(s.ay, s.by) / CELL) - gy0;
@@ -353,7 +380,7 @@ function traceObstacles(effect, width, height) {
     }
     return out.sort((a, b) => a - b);
   };
-  return { segments, near, solid };
+  return { segments, near };
 }
 
 // ---- Geometry in the world --------------------------------------------------------------------------------------------
@@ -513,6 +540,23 @@ export function createBodyWorld(effect, context) {
   const energy = b => (b.vx * b.vx + b.vy * b.vy) / 2 - pull(b)[0] * b.x - pull(b)[1] * b.y;
   for (const b of bodies) if (b.tireless) b.energy = energy(b);
   bodies.forEach(place);
+  // A body's shape scaled by k about its centre (the grow power): its mass follows its area, its inertia that squared.
+  const scale = (b, k) => {
+    b.parts = b.parts.map(part => (part.kind === 'circle' ? { kind: 'circle', r: part.r * k } : polygonPart(Array.from({ length: part.n }, (_, i) => [part.vx[i] * k, part.vy[i] * k]), part.r * k)));
+    b.size = b.size.map(n => Math.max(1, Math.round(n * k))); b.extent *= k;
+    if (b.invMass) b.invMass /= k * k;
+    if (b.invInertia) b.invInertia /= k * k * k * k;
+    place(b);
+  };
+  // A copy of a body (the split power), added after the others, while there is room.
+  const copy = b => {
+    if (bodies.length >= LIMITS.bodies) return null;
+    const twin = { ...b, index: bodies.length, name: null, path: `${b.path} (split ${bodies.length})`, history: [], held: undefined, hits: 0, hit: false, struck: false, sleepy: 0, asleep: false };
+    place(twin); bodies.push(twin);
+    return twin;
+  };
+  // Territory and powers (territory.js): cells owned by teams, pickups and events.
+  const turf = effect.territory || (effect.pickups && effect.pickups.length) || (effect.events && effect.events.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height }) : null;
   const dynamic = b => !b.fixed && !b.gone;
   const moving = b => b.fixed ? (b.vx !== 0 || b.vy !== 0 || b.spin !== 0) : !b.gone && !b.asleep;
   const awake = b => !b.fixed && !b.gone && !b.asleep;
@@ -561,6 +605,13 @@ export function createBodyWorld(effect, context) {
         a.world.forEach((pa, ia) => {
           const m = partSegment(pa, s, margin);
           if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), soft: s.soft });
+        });
+      }
+      // Cells of the other teams' territory are walls to it.
+      if (turf) for (const { s, key } of turf.near(a, x0 - margin, y0 - margin, x1 + margin, y1 + margin)) {
+        a.world.forEach((pa, ia) => {
+          const m = partSegment(pa, s, margin);
+          if (m) contacts.push({ a, b: null, key: `${a.index}:${key}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), cell: s });
         });
       }
     }
@@ -633,6 +684,7 @@ export function createBodyWorld(effect, context) {
     for (const b of bodies) {
       if (!dynamic(b) || b.asleep) continue;
       if (!b.weightless) { b.vx += gravity[0] * dt; b.vy += gravity[1] * dt; }
+      if (turf) turf.pull(b, dt);
       // A force from outside the solver (a fluid's buoyancy), steady through the frame as gravity is.
       if (b.push) { b.vx += b.push[0] * dt; b.vy += b.push[1] * dt; b.w += b.push[2] * dt; }
       if (b.drag) { const k = 1 / (1 + b.drag * dt); b.vx *= k; b.vy *= k; }
@@ -691,6 +743,13 @@ export function createBodyWorld(effect, context) {
       next.set(`${contact.key}:${point.id}`, [point.normal, point.tangent]);
       if (point.approach < -REST_SPEED && point.most > 0) { contact.a.hit = contact.a.struck = true; if (contact.b) contact.b.hit = contact.b.struck = true; }
     }
+    // The cells hit change hands; a body with a held speed goes on at it, along its own heading.
+    if (turf) { for (const contact of contacts) if (contact.cell) turf.hit(contact, contact.cell); turf.settle(); }
+    for (const b of bodies) {
+      if (!b.speed || !dynamic(b) || b.asleep) continue;
+      const v = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+      if (v > 1e-9) { b.vx *= b.speed / v; b.vy *= b.speed / v; }
+    }
     for (const b of bodies) {
       if (!b.struck) continue;
       b.struck = false;
@@ -709,6 +768,8 @@ export function createBodyWorld(effect, context) {
   }
   const advance = f => {
     if (f > 0) for (let k = 0; k < substeps; k++) substep();
+    // Powers run out and are taken, and the score is counted, between frames.
+    if (turf) { turf.frame(f, bodies); for (const b of bodies) if (!b.gone) place(b); }
     // Hits change colour once a frame; slow bodies fall asleep; bodies far outside the canvas are gone.
     for (const b of bodies) {
       if (b.gone) continue;
@@ -726,13 +787,13 @@ export function createBodyWorld(effect, context) {
     }
     if (stats.rest === null && f > 0 && bodies.every(b => b.gone || b.fixed && !moving(b) || b.asleep)) stats.rest = f;
   };
-  return { bodies, stats, gravity, advance, retrace: obstacles => { world = traceObstacles({ obstacles, walls: effect.walls }, width, height); } };
+  return { bodies, stats, gravity, advance, turf, retrace: obstacles => { world = traceObstacles({ obstacles, walls: effect.walls }, width, height); } };
 }
 
 function simulate(effect, context) {
   const world = createBodyWorld(effect, context), drawn = [];
-  for (let f = 0; f < effect.frames; f++) { world.advance(f); drawn.push(draw(world.bodies, context.width, context.height, context)); }
-  return { drawn, stats: world.stats, steps: (effect.frames - 1) * effect.substeps };
+  for (let f = 0; f < effect.frames; f++) { world.advance(f); drawn.push(drawFrame(world, context.width, context.height, context, f, effect.hud)); }
+  return { drawn, stats: world.stats, turf: world.turf, steps: (effect.frames - 1) * effect.substeps };
 }
 
 // ---- Drawing ----------------------------------------------------------------------------------------------------------
@@ -972,6 +1033,16 @@ export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
   }
 }
 
+// A frame of a bodies source: the territory's cells and waiting pickups, the bodies over them (n times finer with
+// subpixels) and the heads-up display's operations.
+function drawFrame(world, width, height, context, f, hud = []) {
+  const n = context.subpixels ?? 1, grid = new Uint16Array(width * n * height * n);
+  if (world.turf) world.turf.draw(grid, width, height, f, context.symbols, n);
+  if (n > 1) paintBodiesFine(world.bodies, grid, width, height, context.symbols, n);
+  else paintBodies(world.bodies, grid, width, height, context.symbols);
+  return { ...crop(grid, width * n, height * n), hud: world.turf && hud.length ? world.turf.hud(f, hud, n) : [] };
+}
+
 /** Draws the bodies into `grid` (character codes, width × height): trails first, then each body in order. */
 export function paintBodies(bodies, grid, width, height, symbols) {
   const context = { symbols };
@@ -1118,8 +1189,9 @@ export const bodyCells = b => (b.gone ? [] : exactCells(b));
 /** The cells a body as read (before any step) fills. */
 export const startCells = b => { const placed = { ...b, c: cosDeg(b.angle), s: sinDeg(b.angle) }; place(placed); return exactCells(placed); };
 
-/** A version-1 pixelforge-bodies source → { recipe, metadata, warnings? }. One-shot: bodies don't loop. */
-export function compileBodies(source) {
+// A source's shell (what every frame's recipe shares, its canvas n times finer with subpixels) and its effects, read
+// and checked; an effect may run `frames` long.
+function readSource(source, frames) {
   fields(source, ['format', 'version', 'name', 'width', 'height', 'subpixels', 'palette', 'symbols', 'anchor', 'sheet', 'effects'], 'bodies');
   if (source.format !== 'pixelforge-bodies' || source.version !== 1) fail('bodies', 'expected version-1 pixelforge-bodies');
   const palette = source.palette ?? {};
@@ -1136,23 +1208,43 @@ export function compileBodies(source) {
   const shell = { version: 1, name: source.name, width: width * n, height: height * n, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: scaleAnchor(source.anchor, n) }) };
   // The renderer's palette, symbol and name checks, before any simulating.
   renderProject({ ...shell, frames: [{ name: 'check' }] });
-  const frames = [], animations = {}, seen = new Set(), metadata = { format: 'pixelforge-bodies-metadata', version: 1, effects: {} }, warnings = [];
-  let total = 0;
+  const effects = [], seen = new Set();
   for (const [name, value] of Object.entries(source.effects)) {
     const path = `bodies.effects.${name}`;
     identifier(name, path);
     if (seen.has(name.toLowerCase())) fail(path, 'effect names must be unique ignoring case; they name animations and frames');
     seen.add(name.toLowerCase());
-    const effect = readEffect(value, path, { width, height, palette, symbols });
+    effects.push({ name, path, effect: readEffect(value, path, { width, height, palette, symbols, frames }) });
+  }
+  return { shell, width, height, n, palette, symbols, effects };
+}
+
+// One frame's operations: the background, obstacles under the bodies, the bodies' grid, obstacles over them and the
+// heads-up display, on a canvas n times finer with subpixels (the world drawn in blocks that size).
+function frameOps(effect, drawn, width, height, n) {
+  const stamps = where => effect.obstacles.filter(o => o.draw === where).map(o => ({ op: 'stamp', symbol: o.symbol, x: o.x * n, y: o.y * n, ...(n > 1 && { scale: n }) }));
+  return [...(effect.background ? [{ op: 'rect', x: 0, y: 0, w: width * n, h: height * n, color: effect.background }] : []), ...stamps('under'), ...(drawn.op ? [drawn.op] : []), ...stamps('over'), ...drawn.hud];
+}
+// The territory's figures for the metadata (the teams, each frame's cells per team, the cells that changed hands and the
+// team ahead at the end) and the powers taken.
+const territoryFigures = (turf, territory) => ({
+  ...(turf && territory && { territory: { teams: turf.teams.map(team => team.name), counts: turf.stats.counts, flips: turf.stats.flips, leader: turf.teams[turf.stats.counts.at(-1).reduce((best, n, k, all) => (n > all[best] ? k : best), 0)].name } }),
+  ...(turf && turf.stats.taken.length && { powers: turf.stats.taken })
+});
+
+/** A version-1 pixelforge-bodies source → { recipe, metadata, warnings? }. One-shot: bodies don't loop. */
+export function compileBodies(source) {
+  const { shell, width, height, n, symbols, effects } = readSource(source, LIMITS.frames);
+  const frames = [], animations = {}, metadata = { format: 'pixelforge-bodies-metadata', version: 1, effects: {} }, warnings = [];
+  let total = 0;
+  for (const { name, path, effect } of effects) {
     if (frames.length + effect.frames > LIMITS.frames) fail('bodies.effects', `the effects make more than ${LIMITS.frames} frames; a recipe holds at most ${LIMITS.frames}`);
     framesFit(frames.length + effect.frames, width, height, n, 'bodies');
     total += work(effect);
     if (total > LIMITS.work) fail(path, `the simulations need about ${Math.round(total / 1e6)} million updates, more than ${LIMITS.work / 1e6} million; lower frames, substeps, iterations or the number of bodies`);
-    const run = simulate(effect, { width, height, symbols, subpixels: n });
-    const stamps = where => effect.obstacles.filter(o => o.draw === where).map(o => ({ op: 'stamp', symbol: o.symbol, x: o.x * n, y: o.y * n, ...(n > 1 && { scale: n }) }));
-    const under = stamps('under'), over = stamps('over'), names = [];
+    const run = simulate(effect, { width, height, symbols, subpixels: n }), names = [];
     run.drawn.forEach((frame, i) => {
-      const ops = [...(effect.background ? [{ op: 'rect', x: 0, y: 0, w: width * n, h: height * n, color: effect.background }] : []), ...under, ...(frame.op ? [frame.op] : []), ...over];
+      const ops = frameOps(effect, frame, width, height, n);
       frames.push({ name: `${name}-${i}`, duration: effect.duration, ...(ops.length && { ops }) });
       names.push(`${name}-${i}`);
     });
@@ -1160,12 +1252,36 @@ export function compileBodies(source) {
     const effectWarnings = run.stats.overlaps.map(pair => `${pair}; they push apart on the first frame. Move it clear`);
     if (!run.drawn.some(frame => frame.pixels)) effectWarnings.push(`${path}: no body is ever on the canvas; check at against width and height`);
     warnings.push(...effectWarnings);
+    const played = territoryFigures(run.turf, effect.territory);
     metadata.effects[name] = {
       frames: effect.frames, substeps: effect.substeps, steps: run.steps, bodies: effect.bodies.length, hits: run.stats.hits,
-      escaped: run.stats.escaped, rest: run.stats.rest, pixels: run.drawn.map(frame => frame.pixels), ...(Object.keys(run.stats.paths).length && { paths: run.stats.paths }), ...(effectWarnings.length && { warnings: effectWarnings })
+      escaped: run.stats.escaped, rest: run.stats.rest, pixels: run.drawn.map(frame => frame.pixels), ...(Object.keys(run.stats.paths).length && { paths: run.stats.paths }), ...played, ...(effectWarnings.length && { warnings: effectWarnings })
     };
   }
   const recipe = { ...shell, frames, animations, ...(source.sheet !== undefined && { sheet: source.sheet }) };
   renderProject(recipe);
   return JSON.parse(JSON.stringify({ recipe, metadata, ...(warnings.length && { warnings }) }));
+}
+
+/** One effect of a pixelforge-bodies source stepped a frame at a time, for numbered video frames: a match may run up
+ * to MATCH_FRAMES frames, past a recipe's 256, and none of it is kept as a recipe. Returns { name, effect, width,
+ * height, palette, frames, duration, image(f), figures() }: image(f) is frame f's RGBA (f must never go back), and
+ * figures() the metadata a compiled effect carries, so far. */
+export function bodiesFrames(source, effectName) {
+  const { shell, width, height, n, palette, symbols, effects } = readSource(source, MATCH_FRAMES);
+  const chosen = effectName === undefined ? effects[0] : effects.find(entry => entry.name === effectName);
+  if (!chosen) fail('sequence.animation', `no effect named "${effectName}"; choose one of: ${effects.map(entry => entry.name).join(', ')}`);
+  const { name, path, effect } = chosen;
+  if (work(effect) > MATCH_WORK) fail(path, `the match needs about ${Math.round(work(effect) / 1e6)} million updates, more than ${MATCH_WORK / 1e6} million; lower frames, substeps, iterations or the number of bodies`);
+  const world = createBodyWorld(effect, { width, height }), context = { width, height, symbols, subpixels: n };
+  let at = -1, image = null;
+  return {
+    name: source.name, effect: name, width: width * n, height: height * n, palette, frames: effect.frames, duration: effect.duration,
+    image: f => {
+      if (!Number.isInteger(f) || f < at || f >= effect.frames) fail('sequence', `frame ${f} is not ahead of frame ${at} within the match's ${effect.frames}`);
+      while (at < f) { at++; world.advance(at); if (at === f) { const ops = frameOps(effect, drawFrame(world, width, height, context, at, effect.hud), width, height, n); image = renderProject({ ...shell, frames: [{ name: `${name}-${at}`, ...(ops.length && { ops }) }] }).frames[0].data; } }
+      return image;
+    },
+    figures: () => ({ frames: at + 1, hits: world.stats.hits, escaped: world.stats.escaped, ...territoryFigures(world.turf, effect.territory) })
+  };
 }

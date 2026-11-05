@@ -1502,6 +1502,12 @@
                   "type": "boolean",
                   "description": "Every hit gives back the energy (speed plus height against gravity) the hit cost, so a ball keeps bouncing at full height among loose blocks. An open cheat; off by default."
                 },
+                "speed": {
+                  "type": "number",
+                  "minimum": 0.05,
+                  "maximum": 8,
+                  "description": "Held speed, pixels a frame: set back to it along its heading after every step, so a ball crossing a board never tires. An open cheat, like tireless."
+                },
                 "density": {
                   "type": "number",
                   "minimum": 0.05,

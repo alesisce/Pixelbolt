@@ -119,7 +119,8 @@
           "frames": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 256
+            "maximum": 18000,
+            "description": "At most 256 in a recipe (and in all of a source's effects); a longer match goes out as numbered video frames: pixelbolt sequence, or pixel_compile with sequence."
           },
           "duration": {
             "type": "integer",
@@ -219,6 +220,103 @@
             },
             "maxItems": 32,
             "description": "Symbols stamped on the canvas whose pixels are solid. Bodies slide along their edges without catching on the seams between pixels."
+          },
+          "territory": {
+            "type": "object",
+            "properties": {
+              "cell": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64,
+                "description": "Pixels a side. Default 4."
+              },
+              "at": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4096
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "description": "Top-left on the canvas. Default [0, 0]."
+              },
+              "size": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4096
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "description": "With split: [columns, rows]. Default: as many as fit the canvas."
+              },
+              "teams": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+                      "description": "Portable name: do not use Windows device names (CON, PRN, AUX, NUL, COM1–9, LPT1–9). Frame/animation names must be unique ignoring case."
+                    },
+                    "color": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1,
+                      "description": "A one-character palette key; dot and space are reserved."
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 40,
+                      "description": "Shown by {leader}. Default the name in capitals."
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "color"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 8,
+                "minItems": 2
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 4096,
+                "description": "One character a cell: a team's colour, or . for a cell no one owns."
+              },
+              "split": {
+                "enum": [
+                  "columns",
+                  "rows"
+                ],
+                "description": "Instead of rows: the board shared out among the teams in order, side by side or one above the next."
+              },
+              "bounce": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Default 1."
+              },
+              "friction": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "Default 0."
+              }
+            },
+            "required": [
+              "teams"
+            ],
+            "additionalProperties": false,
+            "description": "Cells owned by teams, drawn in their colours: a team's body passes its own and bounces off the others', claiming each it hits (the metadata counts them each frame)."
           },
           "bodies": {
             "type": "array",
@@ -340,6 +438,16 @@
                 "tireless": {
                   "type": "boolean",
                   "description": "Every hit gives back the energy (speed plus height against gravity) the hit cost, so a ball keeps bouncing at full height among loose blocks. An open cheat; off by default."
+                },
+                "speed": {
+                  "type": "number",
+                  "minimum": 0.05,
+                  "maximum": 8,
+                  "description": "Held speed, pixels a frame: set back to it along its heading after every step, so a ball crossing a board never tires. An open cheat, like tireless."
+                },
+                "team": {
+                  "type": "string",
+                  "description": "A territory team's name: the body passes through that team's cells, bounces off the other teams' and claims each one it hits."
                 },
                 "density": {
                   "type": "number",
@@ -504,6 +612,342 @@
             "maxItems": 64,
             "minItems": 1,
             "description": "At most 256 bodies with their copies."
+          },
+          "pickups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": -4096,
+                    "maximum": 4096
+                  },
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64,
+                  "description": "Pixels a side; default the symbol's size, or 5."
+                },
+                "from": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18000,
+                  "description": "First frame it waits. Default 0."
+                },
+                "until": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 18001
+                },
+                "symbol": {
+                  "type": "string",
+                  "description": "Drawn while it waits."
+                },
+                "color": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1,
+                  "description": "Or a plain square."
+                },
+                "power": {
+                  "enum": [
+                    "split",
+                    "grow",
+                    "speed",
+                    "warp",
+                    "magnet"
+                  ],
+                  "description": "split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams' bodies toward to (default the pickup) for frames."
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 40,
+                  "description": "For {news}. Default the power in capitals."
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 8,
+                  "description": "split: bodies after. Default 3."
+                },
+                "spread": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 180,
+                  "description": "split: degrees between headings. Default 30."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1.25,
+                  "maximum": 4,
+                  "description": "grow. Default 2."
+                },
+                "factor": {
+                  "type": "number",
+                  "minimum": 0.25,
+                  "maximum": 4,
+                  "description": "speed. Default 1.5."
+                },
+                "to": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": -4096,
+                    "maximum": 4096
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "description": "warp, magnet: a canvas point."
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0.001,
+                  "maximum": 1,
+                  "description": "magnet: pixels a frame² . Default 0.05."
+                },
+                "frames": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 18000,
+                  "description": "grow, speed, magnet: how long. Default 120."
+                }
+              },
+              "required": [
+                "at",
+                "power"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 64,
+            "description": "Power-ups the first body to reach one takes."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "frame": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 18000
+                },
+                "body": {
+                  "type": "string",
+                  "description": "A named body."
+                },
+                "power": {
+                  "enum": [
+                    "split",
+                    "grow",
+                    "speed",
+                    "warp",
+                    "magnet"
+                  ],
+                  "description": "split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams' bodies toward to (default the pickup) for frames."
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 40,
+                  "description": "For {news}. Default the power in capitals."
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 8,
+                  "description": "split: bodies after. Default 3."
+                },
+                "spread": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 180,
+                  "description": "split: degrees between headings. Default 30."
+                },
+                "scale": {
+                  "type": "number",
+                  "minimum": 1.25,
+                  "maximum": 4,
+                  "description": "grow. Default 2."
+                },
+                "factor": {
+                  "type": "number",
+                  "minimum": 0.25,
+                  "maximum": 4,
+                  "description": "speed. Default 1.5."
+                },
+                "to": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": -4096,
+                    "maximum": 4096
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "description": "warp, magnet: a canvas point."
+                },
+                "strength": {
+                  "type": "number",
+                  "minimum": 0.001,
+                  "maximum": 1,
+                  "description": "magnet: pixels a frame² . Default 0.05."
+                },
+                "frames": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 18000,
+                  "description": "grow, speed, magnet: how long. Default 120."
+                }
+              },
+              "required": [
+                "frame",
+                "body",
+                "power"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 64,
+            "description": "Powers given to a named body at the end of a frame."
+          },
+          "hud": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 80,
+                      "description": "{team} cells, {team%} share, {leader}, {news} (the last power's label, for news frames), {frame}."
+                    },
+                    "at": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": -4096,
+                        "maximum": 4096
+                      },
+                      "maxItems": 2,
+                      "minItems": 2
+                    },
+                    "color": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1,
+                      "description": "A one-character palette key; dot and space are reserved."
+                    },
+                    "align": {
+                      "enum": [
+                        "left",
+                        "center",
+                        "right"
+                      ]
+                    },
+                    "back": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1,
+                      "description": "A box behind the text."
+                    },
+                    "pad": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16
+                    },
+                    "scale": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 8
+                    },
+                    "news": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 18000,
+                      "description": "Frames {news} shows. Default 45."
+                    },
+                    "from": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 18000
+                    },
+                    "until": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 18001
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "at",
+                    "color"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "bar": {
+                      "type": "object",
+                      "properties": {
+                        "at": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": -4096,
+                            "maximum": 4096
+                          },
+                          "maxItems": 2,
+                          "minItems": 2
+                        },
+                        "size": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": -4096,
+                            "maximum": 4096
+                          },
+                          "maxItems": 2,
+                          "minItems": 2
+                        }
+                      },
+                      "required": [
+                        "at",
+                        "size"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "empty": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1,
+                      "description": "A one-character palette key; dot and space are reserved."
+                    },
+                    "from": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 18000
+                    },
+                    "until": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 18001
+                    }
+                  },
+                  "required": [
+                    "bar"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "maxItems": 16,
+            "description": "With a territory: the score drawn over everything, every frame."
           }
         },
         "required": [

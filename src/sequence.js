@@ -3,6 +3,7 @@
 // arithmetic on the frame rate as a fraction, so 29.97 means 30000/1001 and a sequence is the same on every machine.
 import { PixelError, parseColor } from './core.js';
 import { renderScene } from './scene.js';
+import { bodiesFrames } from './bodies.js';
 import { encodePNG } from './png.js';
 
 const fail = (path, message) => { throw new PixelError(path, message); };
@@ -241,6 +242,27 @@ export function createSequence(project, options = {}) {
   if ((options.step ?? 1) > 1) notes.push(`Animated on ${options.step}s: each sampled frame is held for ${options.step} video frames.`);
   if (built.place.cropped) notes.push(cropNote('sprite', built.info));
   Object.assign(built.info, { loop: { loops: options.loops ?? 1, plays: sequence.loop ? 'loops' : 'once', passFrames: Math.round(plan.exactFrames / (options.loops ?? 1) * 1e6) / 1e6, seamless: sequence.loop && plan.seamless && options.seconds === undefined }, timing });
+  return finish(built, notes);
+}
+
+// A pixelforge-bodies match as a sequence: one effect (`animation` names it; the first by default) stepped frame after
+// frame and drawn straight to video frames, never kept as a recipe, so it may run past a recipe's 256 frames (up to
+// MATCH_FRAMES). It plays once and holds its last frame. info.figures carries the match's metadata (hits, the score).
+export function createBodiesSequence(source, options = {}) {
+  const rate = common(options, KEYS.filter(key => key !== 'loops' && key !== 'step')), match = bodiesFrames(source, options.animation);
+  const plan = planSequence(new Array(match.frames).fill(match.duration), { fps: rate, loop: false, seconds: options.seconds });
+  let shown = -1, picture = null;
+  const built = build(`${match.name}-${match.effect}`, match.width, match.height, plan.count, frame => {
+    const pose = plan.poses[frame];
+    if (pose !== shown) { picture = match.image(pose); shown = pose; }
+    const data = picture;
+    return { key: pose, pixels: () => data };
+  }, { ...options, rate, palette: match.palette }, { source: 'bodies', bodies: match.name, effect: match.effect });
+  const notes = [];
+  if (built.place.cropped) notes.push(cropNote('match', built.info));
+  const steps = plan.timing.filter(entry => entry.frames > 0).length;
+  if (steps < match.frames && options.seconds === undefined) notes.push(`${match.frames - steps} of the match's ${match.frames} frames (${match.duration} ms each) fall between video frames at ${rate.label} frames per second and are not shown; set the effect's duration to a whole number of video frames.`);
+  Object.assign(built.info, { loop: { loops: 1, plays: 'once', passFrames: Math.round(plan.exactFrames * 1e6) / 1e6, seamless: false }, figures: match.figures() });
   return finish(built, notes);
 }
 

@@ -512,6 +512,14 @@ const bodyMaterial = {
   bounce: num(0, 1, 'How much of its approach speed a body keeps in a bounce: 0 lands dead, 1 bounces back as fast. A pair bounces with the larger. Default 0.3.'),
   friction: num(0, 2, 'Sliding friction; a pair uses the square root of the product. Default 0.4.')
 };
+// A power, for pickups and events.
+const powerFields = {
+  power: { enum: ['split', 'grow', 'speed', 'warp', 'magnet'], description: 'split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams\' bodies toward to (default the pickup) for frames.' },
+  label: { type: 'string', maxLength: 40, description: 'For {news}. Default the power in capitals.' },
+  count: int(2, 8, 'split: bodies after. Default 3.'), spread: num(1, 180, 'split: degrees between headings. Default 30.'), scale: num(1.25, 4, 'grow. Default 2.'), factor: num(0.25, 4, 'speed. Default 1.5.'),
+  to: { ...pairOf(num(-4096, 4096)), description: 'warp, magnet: a canvas point.' }, strength: num(0.001, 1, 'magnet: pixels a frame² . Default 0.05.'), frames: int(1, 18000, 'grow, speed, magnet: how long. Default 120.')
+};
+const point2 = pairOf(int(-4096, 4096));
 const body = object({
   name: { ...id, maxLength: 60, description: 'Names the body in the metadata (its path, frame by frame, and when it leaves the canvas). Copies are numbered name-0, name-1, …' },
   shape: { enum: ['circle', 'box', 'polygon', 'hoop'], description: 'circle (radius; 0.5 is one pixel), box (size), polygon (convex points) or hoop (a ring of thin walls with an optional gap, for a fixed container).' },
@@ -529,6 +537,8 @@ const body = object({
   weightless: { type: 'boolean', description: 'Gravity doesn\'t pull it: it floats where it is put, drifting only when hit.' },
   asleep: { type: 'boolean', description: 'Starts asleep: holds exactly still, even in the air, until something moves into it.' },
   tireless: { type: 'boolean', description: 'Every hit gives back the energy (speed plus height against gravity) the hit cost, so a ball keeps bouncing at full height among loose blocks. An open cheat; off by default.' },
+  speed: num(0.05, 8, 'Held speed, pixels a frame: set back to it along its heading after every step, so a ball crossing a board never tires. An open cheat, like tireless.'),
+  team: { type: 'string', description: 'A territory team\'s name: the body passes through that team\'s cells, bounces off the other teams\' and claims each one it hits.' },
   density: num(0.05, 100, 'Mass per square pixel. Default 1. A heavier body pushes lighter ones about and keeps its own speed.'),
   ...bodyMaterial,
   drag: num(0, 1, 'About the share of its speed lost each frame. Default 0.'),
@@ -543,7 +553,7 @@ const body = object({
 // A source's subpixels: bodies drawn finer than the world's pixels.
 const subpixels = world => int(1, 8, `Draw the bodies this many times finer than the world's pixels: each pixel of a body's picture turns as a square and the body sits where it is to a fraction of a pixel, so it turns and moves smoothly without changing shape; ${world} are drawn in blocks this size. The recipe's canvas is width and height times this, at most 256 a side and 4,194,304 pixels over its frames. Default 1, bodies at whole pixels.`);
 // In a fluid a body can also have a temperature, where the fluid has heat (a gas always does).
-const fluidBody = { ...body, properties: { ...body.properties, temperature: num(-16, 16, 'With heat (a gas, or a liquid with heat): the temperature the body keeps, warming or chilling what it touches as a hot obstacle does, so a red-hot stone boils the water it lands in. Default none.') } };
+const fluidBody = { ...body, properties: { ...Object.fromEntries(Object.entries(body.properties).filter(([key]) => key !== 'team')), temperature: num(-16, 16, 'With heat (a gas, or a liquid with heat): the temperature the body keeps, warming or chilling what it touches as a hot obstacle does, so a red-hot stone boils the water it lands in. Default none.') } };
 const fluid = {
   $schema: schema.$schema, title: 'Pixelbolt fluid effects',
   description: 'Start fire, smoke, explosions and splashes from a preset (pixel_help topic presets, then pixel_compile with preset); for fewer frames keep N evenly spaced frames with one pixel_patch call (the quick start shows it), never by lowering frames in the source, which stops the simulation early. A deterministic fluid simulation compiled into an ordinary recipe: one frame sequence and animation per effect (frames <effect>-0, <effect>-1…), each frame a palette grid operation, with obstacles stamped from symbols. Gases (smoke, fire, steam, explosions, magic) run stable fluids with buoyancy, vorticity confinement, dissipation and cooling; liquids (splashes, waterfalls, drips, potions) run FLIP particles on the same grid. Either may be viscous (honey, syrup, tar), and a liquid may have a yield stress (mud, slime). Look layers map fields onto palette ramps through ordered dither, so no colour outside the palette can appear. Looping effects warm up for whole cycles and blend their closing frames toward the frames before frame 0, so the last frame flows into the first. The same source gives the same recipe on every machine.',
@@ -663,7 +673,7 @@ const bodies = {
     effects: { type: 'object', minProperties: 1, maxProperties: 16,
       propertyNames: { ...id, maxLength: 60 }, description: 'Names become animations and frame names; unique ignoring case. At most 256 frames in all.',
       additionalProperties: object({
-        frames: int(1, 256), duration: int(10, 1000, 'Milliseconds per frame. Default 40.'),
+        frames: int(1, 18000, 'At most 256 in a recipe (and in all of a source\'s effects); a longer match goes out as numbered video frames: pixelbolt sequence, or pixel_compile with sequence.'), duration: int(10, 1000, 'Milliseconds per frame. Default 40.'),
         substeps: int(1, 16, 'Solver steps a frame. Default 8.'), iterations: int(1, 16, 'Contact passes a step. Default 6.'),
         gravity: { ...pairOf(num(-2, 2)), description: 'Pixels a frame² [x, y]. Default [0, 0.15].' },
         background: { ...bodyKey, description: 'Fills the canvas under everything.' },
@@ -671,7 +681,16 @@ const bodies = {
         obstacles: { ...array(object({ symbol: { type: 'string' }, x: int(-4096, 4096), y: int(-4096, 4096),
           draw: { enum: ['over', 'under', 'none'], description: 'over (default), under the bodies, or none (an invisible wall).' },
           solid: { type: 'boolean', description: 'false: a decoration the bodies pass.' }, ...bodyMaterial }, ['symbol']), 32), description: 'Symbols stamped on the canvas whose pixels are solid. Bodies slide along their edges without catching on the seams between pixels.' },
-        bodies: { ...array(body, 64), minItems: 1, description: 'At most 256 bodies with their copies.' }
+        territory: { ...object({ cell: int(1, 64, 'Pixels a side. Default 4.'), at: { ...pairOf(int(0, 4096)), description: 'Top-left on the canvas. Default [0, 0].' },
+          size: { ...pairOf(int(1, 4096)), description: 'With split: [columns, rows]. Default: as many as fit the canvas.' },
+          teams: { ...array(object({ name: id, color: bodyKey, label: { type: 'string', maxLength: 40, description: 'Shown by {leader}. Default the name in capitals.' } }, ['name', 'color']), 8), minItems: 2 },
+          rows: { ...array({ type: 'string', minLength: 1 }, 4096), description: 'One character a cell: a team\'s colour, or . for a cell no one owns.' },
+          split: { enum: ['columns', 'rows'], description: 'Instead of rows: the board shared out among the teams in order, side by side or one above the next.' },
+          bounce: num(0, 1, 'Default 1.'), friction: num(0, 2, 'Default 0.') }, ['teams']), description: 'Cells owned by teams, drawn in their colours: a team\'s body passes its own and bounces off the others\', claiming each it hits (the metadata counts them each frame).' },
+        bodies: { ...array(body, 64), minItems: 1, description: 'At most 256 bodies with their copies.' },
+        pickups: { ...array(object({ at: point2, size: int(1, 64, 'Pixels a side; default the symbol\'s size, or 5.'), from: int(0, 18000, 'First frame it waits. Default 0.'), until: int(1, 18001), symbol: { type: 'string', description: 'Drawn while it waits.' }, color: { ...bodyKey, description: 'Or a plain square.' }, ...powerFields }, ['at', 'power']), 64), description: 'Power-ups the first body to reach one takes.' },
+        events: { ...array(object({ frame: int(1, 18000), body: { type: 'string', description: 'A named body.' }, ...powerFields }, ['frame', 'body', 'power']), 64), description: 'Powers given to a named body at the end of a frame.' },
+        hud: { ...array({ oneOf: [object({ text: { type: 'string', maxLength: 80, description: '{team} cells, {team%} share, {leader}, {news} (the last power\'s label, for news frames), {frame}.' }, at: point2, color: bodyKey, align: { enum: ['left', 'center', 'right'] }, back: { ...bodyKey, description: 'A box behind the text.' }, pad: int(0, 16), scale: int(1, 8), news: int(1, 18000, 'Frames {news} shows. Default 45.'), from: int(0, 18000), until: int(1, 18001) }, ['text', 'at', 'color']), object({ bar: object({ at: point2, size: point2 }, ['at', 'size']), empty: bodyKey, from: int(0, 18000), until: int(1, 18001) }, ['bar'])] }, 16), description: 'With a territory: the score drawn over everything, every frame.' }
       }, ['frames', 'bodies']) }
   }, ['format', 'version', 'name', 'width', 'height', 'palette', 'effects'])
 };

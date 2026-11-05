@@ -71,4 +71,45 @@ const crateTopple = bodiesSource('crate-topple', 112, 48,
   });
 
 const finer = (source, subpixels) => { const { format, version, name, width, height, ...rest } = source; return { format, version, name, width, height, subpixels, ...rest }; };
-export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2) };
+// Territory: tide (navy, top) against ember (amber, bottom). Each team's balls fly at a held speed through their own
+// ground and bounce off the other team's, claiming every cell they hit, so the border between them frays. Pickups drop
+// in: a triple split, a giant, a warp that drops a tide ball deep in ember ground to carve a pocket, a rush of speed and
+// a vortex that drags the other team's balls to the border. The score bar and counts sit under the board, the latest
+// power over it, and the leader is named at the end. A longer match goes out as video frames (pixelbolt sequence).
+const territoryFrames = 256, territorySpeed = 3.5;
+const ball = (name, team, at, velocity, fill) => ({ name, shape: 'circle', radius: 2.5, at, velocity, speed: territorySpeed, team, bounce: 1, friction: 0, fill });
+const territory = bodiesSource('territory', 72, 128,
+  { n: '#1d3557', a: '#f4a259', N: '#0d1b2a', A: '#fff1d6', k: '#10131a', w: '#f8f4ec', p: '#e63973', q: '#ffe0ea' },
+  {
+    frames: territoryFrames, duration: 33, gravity: [0, 0], background: 'k', walls: ['left', 'right', 'top'],
+    obstacles: [{ symbol: 'floor', x: 0, y: 112, draw: 'none' }],
+    territory: { cell: 4, size: [18, 28], split: 'rows', teams: [{ name: 'tide', color: 'n' }, { name: 'ember', color: 'a' }] },
+    bodies: [
+      ball('tide1', 'tide', [22, 30], [1.2, 1.6], 'A'), ball('ember1', 'ember', [50, 84], [-1.5, -1.3], 'N'),
+      ball('tide2', 'tide', [54, 12], [-1.1, 1.7], 'A'), ball('ember2', 'ember', [14, 104], [1.6, -1.2], 'N')
+    ],
+    pickups: [
+      { at: [16, 16], from: 10, power: 'split', symbol: 'triple', label: 'TRIPLE' },
+      { at: [56, 96], from: 40, power: 'grow', symbol: 'giant', label: 'GIANT', frames: 70, scale: 2.4 },
+      { at: [54, 22], from: 90, power: 'warp', symbol: 'warp', label: 'WARP', to: [20, 92] },
+      { at: [18, 100], from: 120, power: 'speed', symbol: 'rush', label: 'RUSH', frames: 70 },
+      { at: [36, 40], from: 150, power: 'magnet', symbol: 'vortex', label: 'VORTEX', frames: 70, strength: 0.25, to: [36, 56] }
+    ],
+    hud: [
+      { bar: { at: [4, 116], size: [64, 3] } },
+      { text: '{tide}', at: [4, 121], color: 'w' },
+      { text: '{ember}', at: [68, 121], color: 'w', align: 'right' },
+      { text: '{news}', at: [36, 3], color: 'w', align: 'center', back: 'p', pad: 1, news: 40 },
+      { text: '{leader} LEADS', at: [36, 52], color: 'w', align: 'center', back: 'p', pad: 2, from: territoryFrames - 30 }
+    ]
+  },
+  {
+    floor: ['k'.repeat(72)],
+    triple: ['ppppp', 'pqpqp', 'ppppp', 'pqpqp', 'ppppp'],
+    giant: ['ppppp', 'pqqqp', 'pqpqp', 'pqqqp', 'ppppp'],
+    warp: ['ppppp', 'pqpqp', 'ppqpp', 'pqpqp', 'ppppp'],
+    rush: ['ppppp', 'pqppp', 'ppqpp', 'pqppp', 'ppppp'],
+    vortex: ['ppppp', 'pqqqp', 'pqpqp', 'pqpqp', 'ppppp']
+  });
+
+export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory };

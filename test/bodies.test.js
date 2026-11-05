@@ -17,7 +17,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': 'b74d28539797396da501d776c9220f9114967fdb0eb6786c0cf7b83b1ac9fa93'
+  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': 'b74d28539797396da501d776c9220f9114967fdb0eb6786c0cf7b83b1ac9fa93', territory: 'df91dbb9680d2a86741f1079714c5b921b67796cdb7abb10c05d6277a34664f3'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -117,7 +117,8 @@ test('every rigid-body example compiles to its golden recipe and draws only pale
     assert.equal(sha(recipe), GOLDEN[name], `${name} compiled differently; if the change is intended, update GOLDEN and rebuild the GIFs`);
     const keys = new Set(Object.keys(source.palette));
     for (const frame of recipe.frames) for (const op of frame.ops ?? []) {
-      assert.ok(['grid', 'stamp', 'rect'].includes(op.op), `${name} ${frame.name}: ${op.op}`);
+      // A territory's heads-up display adds text and its boxes and bars.
+      assert.ok(['grid', 'stamp', 'rect', 'text'].includes(op.op), `${name} ${frame.name}: ${op.op}`);
       if (op.op === 'grid') for (const row of op.rows) for (const char of row) assert.ok(char === '.' || keys.has(char), `${name} ${frame.name} draws ${char}`);
     }
     renderProject(recipe);

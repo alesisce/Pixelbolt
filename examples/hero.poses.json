@@ -16,12 +16,13 @@
     "p": "#222844",
     "q": "#39476b",
     "o": "#5a6f99",
+    "v": "#7b93c4",
     "b": "#3a2421",
     "c": "#6e4430",
     "h": "#f2c14e",
     "g": "#c08a2a"
   },
-  "ramps": [["x", "y", "z"], ["r", "s", "t", "u"], ["p", "q", "o"]],
+  "ramps": [["x", "y", "z"], ["r", "s", "t", "u"], ["p", "q", "o", "v"]],
   "light": 225,
   "parts": {
     "torso": {
@@ -42,19 +43,19 @@
       "anchor": [4, 7]
     },
     "thigh": {
-      "bone": { "length": 5, "width": [3, 3], "ramp": 2, "base": 1, "outline": "k", "caps": ["round", "round"] },
+      "bone": { "length": 5, "width": [3, 3], "ramp": 2, "base": 2, "outline": "k", "caps": ["round", "round"] },
       "points": { "end": "end" }
     },
     "shin": {
-      "bone": { "length": 5, "width": [3, 2], "ramp": 2, "base": 1, "outline": "k", "caps": ["socket", "round"] },
+      "bone": { "length": 5, "width": [3, 2], "ramp": 2, "base": 2, "outline": "k", "caps": ["socket", "round"] },
       "points": { "end": "end" }
     },
     "farThigh": {
-      "bone": { "length": 5, "width": [3, 3], "ramp": 2, "base": 0, "outline": "k", "caps": ["round", "round"] },
+      "bone": { "length": 5, "width": [3, 3], "ramp": 2, "base": 1, "outline": "k", "caps": ["round", "round"] },
       "points": { "end": "end" }
     },
     "farShin": {
-      "bone": { "length": 5, "width": [3, 2], "ramp": 2, "base": 0, "outline": "k", "caps": ["socket", "round"] },
+      "bone": { "length": 5, "width": [3, 2], "ramp": 2, "base": 1, "outline": "k", "caps": ["socket", "round"] },
       "points": { "end": "end" }
     },
     "upper": {

@@ -59,6 +59,13 @@
       "maximum": 359,
       "description": "Clockwise light direction: 0 right, 225 top left (default)."
     },
+    "innerLines": {
+      "enum": [
+        "shade",
+        "outline"
+      ],
+      "description": "Where a bone or mass outline falls inside the figure (an arm across the chest, the near leg over the far one): shade (default) draws it one ramp step below the part's base colour, so the figure keeps one outline round its silhouette; outline keeps the outline colour."
+    },
     "rig": {
       "type": "object",
       "properties": {

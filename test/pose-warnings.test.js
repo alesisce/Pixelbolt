@@ -83,8 +83,8 @@ test('a rig placed off the canvas gets one warning for the rest pose and one per
   const { warnings, metadata } = compilePoses(withTorsoAt([16, 15]));
   assert.deepEqual(warnings, [
     'poses.poses[0]: Pose "stand" draws nothing inside the 32x36 canvas: all 357 of its pixels fall outside (its parts cover x 27 to 35, y 39 to 65). A part without attach stands at the pose origin [15, 35] plus its at. The motion templates move this pose, so the poses they make fall outside too.',
-    'poses.rig.legs[1] (farShin): Motion templates aim the feet at rig.ground (row 34), but in the rest pose "stand" this leg ends at row 64, so its target is out of reach in 35 generated poses (idle, walk, run, jump, attack, hurt) by 9 to 15.033 px and the chain uses its closest straight pose. Move the body or the pose origin until the leg ends near row 34, or set rig.ground to match.',
-    'poses.rig.legs[0] (nearShin): Motion templates aim the feet at rig.ground (row 34), but in the rest pose "stand" this leg ends at row 64, so its target is out of reach in 35 generated poses (idle, walk, run, jump, attack, hurt) by 9 to 15.033 px and the chain uses its closest straight pose. Move the body or the pose origin until the leg ends near row 34, or set rig.ground to match.'
+    'poses.rig.legs[1] (farShin): Motion templates aim the feet at rig.ground (row 34), but in the rest pose "stand" this leg ends at row 64, so its target is out of reach in 35 generated poses (idle, walk, run, jump, attack, hurt) by 9.055 to 14 px and the chain uses its closest straight pose. Move the body or the pose origin until the leg ends near row 34, or set rig.ground to match.',
+    'poses.rig.legs[0] (nearShin): Motion templates aim the feet at rig.ground (row 34), but in the rest pose "stand" this leg ends at row 64, so its target is out of reach in 35 generated poses (idle, walk, run, jump, attack, hurt) by 9.055 to 14 px and the chain uses its closest straight pose. Move the body or the pose origin until the leg ends near row 34, or set rig.ground to match.'
   ]);
   // The metadata keeps one entry per pose, each at a path into the source: an authored index or a motion and pose.
   assert.equal(metadata.warnings.length, 106);
@@ -96,7 +96,7 @@ test('a motion that asks more than the legs reach is named once per leg, and an 
   const long = structuredClone(hero); long.motions.walk.stride = 40; long.motions.walk.lift = 12;
   const { warnings } = compilePoses(long);
   assert.equal(warnings.length, 2);
-  assert.match(warnings[0], /^poses\.motions\.walk \(farShin\)\.reach: Target is out of reach in 8 of 8 poses \(walk-contact-a, walk-down-a, walk-passing-a and 5 more\) by [\d.]+ to [\d.]+ px; the chain uses its closest straight pose\. In the rest pose "stand" this leg ends on rig\.ground \(row 34\), so the motion asks for more than it reaches: lower its stride, lift or bob, or lengthen the leg\.$/);
+  assert.match(warnings[0], /^poses\.motions\.walk \(farShin\)\.reach: Target is out of reach in 2 of 8 poses \(walk-down-a, walk-up-a\) by [\d.]+ to [\d.]+ px; the chain uses its closest straight pose\. In the rest pose "stand" this leg ends on rig\.ground \(row 34\), so the motion asks for more than it reaches: lower its stride, lift or bob, or lengthen the leg\.$/);
   // An authored pose that replaces a generated one moves to the end when the motions expand; its path is still
   // where it was written.
   const replaced = structuredClone(hero); replaced.poses.push({ ...structuredClone(hero.poses[0]), name: 'hurt-recoil', origin: [15, 70] });

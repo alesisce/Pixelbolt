@@ -152,6 +152,7 @@ const poses = {
   $schema: schema.$schema, title: 'Pixelbolt authored poses',
   ...object({ format: { const: 'pixelforge-poses' }, version: { const: 1 }, name: id, width: int(1, 256), height: int(1, 256), palette: schema.properties.palette,
     ramps: schema.properties.ramps, light: int(0, 359, 'Clockwise light direction: 0 right, 225 top left (default).'),
+    innerLines: { enum: ['shade', 'outline'], description: 'Where a bone or mass outline falls inside the figure (an arm across the chest, the near leg over the far one): shade (default) draws it one ramp step below the part\'s base colour, so the figure keeps one outline round its silhouette; outline keeps the outline colour.' },
     rig: object({ ground: int(0, 255, 'Canvas pixel row touched by planted markers; must be below height.'), body: id, head: id, rest: id,
       legs: array({ ...array(id, 3), minItems: 2 }, 8), arms: array({ ...array(id, 3), minItems: 2 }, 8), tail: array(id, 16) }, ['ground']),
     motions: { type: 'object', maxProperties: 16, propertyNames: id, additionalProperties: { oneOf: [

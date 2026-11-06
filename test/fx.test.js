@@ -397,7 +397,7 @@ test('the hero magic example compiles from the hero\'s pose source to the pixels
   const project = renderProject(recipe);
   assert.deepEqual(project.warnings, []);
   // This changes with any change to the sprite, aura or particle pixels: regenerate it only after the art is seen again.
-  assert.equal(createHash('sha256').update(JSON.stringify(recipe)).digest('hex'), '7d66b9f2affa3d2bed9f8cff36988a886d1dfbb6fc4a53b483d150144e9789f6');
+  assert.equal(createHash('sha256').update(JSON.stringify(recipe)).digest('hex'), '54f8df518193654ccdf3d8b4803cbbc5b4639bd06fea9c1b25aeac9567ed1350');
   // The aura's last frame runs into its first no more than any two neighbouring frames differ.
   const aura = project.frames.filter(frame => frame.name.startsWith('aura-')).map(frame => frame.data);
   const differ = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 3] !== b[i + 3] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++; return n; };

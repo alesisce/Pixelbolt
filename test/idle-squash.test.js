@@ -198,9 +198,10 @@ test('a flat mass keeps its base on its anchor row under every squash, keeps its
 
 test('idles and ellipse masses without the new fields stay byte-identical to the output before grounded squash', () => {
   // Hashes of the compiled JSON and every RGBA frame, taken before flat masses and idle squash existed. Regenerate
-  // them only for a deliberate change to the idle template, mass drawing or the rigs above.
+  // them only for a deliberate change to the idle template, mass drawing or the rigs above. The strider's legs cross
+  // its body, so it keeps its outline-coloured inner lines, as everything was drawn then.
   const compiled = source => { const result = compilePoses(source); return hash(JSON.stringify(result) + renderProject(result.recipe).frames.map(frame => hash(frame.data)).join()); };
-  assert.deepEqual([...[2, 3, 4].map(frames => compiled(strider({ frames, breath: .1 }))), ...[2, 3, 4].map(frames => compiled(blob({ idle: { frames, breath: .15 } }))), compiled(blob({ mass: { outline: 'selective' }, body: { angle: 20 } }))], [
+  assert.deepEqual([...[2, 3, 4].map(frames => compiled({ ...strider({ frames, breath: .1 }), innerLines: 'outline' })), ...[2, 3, 4].map(frames => compiled(blob({ idle: { frames, breath: .15 } }))), compiled(blob({ mass: { outline: 'selective' }, body: { angle: 20 } }))], [
     '06cd66bdf8a51a7a5e692784c8aa776fb33d4b3c082b5701e2343abde556e24a',
     '4ef8b1eb52f03c49defde6735b88002d1afc8b508613ae534943c7dc57155536',
     '55719b3e381bd650155ed8e56aae851b606e0ead9b2cf3824ba6d09f3e594a12',

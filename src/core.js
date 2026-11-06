@@ -852,7 +852,7 @@ export function describeStampRecipe(spec) {
   };
   const frames = spec.frames.map((frame, index) => {
     const p = `project.frames[${index}]`;
-    object(frame, p, ['name', 'duration', 'anchor', 'points', 'layers']);
+    object(frame, p, ['name', 'duration', 'anchor', 'points', 'layers', 'pixels']);
     const frameName = name(frame.name, `${p}.name`);
     if (frameNames.has(frameName.toLowerCase())) fail(`${p}.name`, `duplicate frame ${frameName}; names must also be unique ignoring case`);
     frameNames.add(frameName.toLowerCase());
@@ -895,6 +895,18 @@ export function describeStampRecipe(spec) {
       spend((x1 - x0 + 1) * (y1 - y0 + 1));
       left = Math.min(left, x0); right = Math.max(right, x1);
       top = Math.min(top, y0); bottom = Math.max(bottom, y1);
+    }
+    // Final pixels in palette keys, such as a posed figure's inner lines.
+    list(frame.pixels ?? [], `${p}.pixels`, 65536);
+    spend((frame.pixels ?? []).length);
+    for (const [i, pixel] of (frame.pixels ?? []).entries()) {
+      const pp = `${p}.pixels[${i}]`;
+      object(pixel, pp, ['x', 'y', 'color']);
+      const x = integer(pixel.x, `${pp}.x`, 0, width - 1), y = integer(pixel.y, `${pp}.y`, 0, height - 1);
+      if (typeof pixel.color !== 'string' || !alpha.has(pixel.color)) fail(`${pp}.color`, 'expected a palette key');
+      if (!alpha.get(pixel.color)) continue;
+      left = Math.min(left, x); right = Math.max(right, x);
+      top = Math.min(top, y); bottom = Math.max(bottom, y);
     }
     boxes.push(right < 0 ? { index, sx: 0, sy: 0, w: 1, h: 1, empty: true }
       : { index, sx: left, sy: top, w: right - left + 1, h: bottom - top + 1 });

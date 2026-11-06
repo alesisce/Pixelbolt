@@ -168,14 +168,14 @@ export function plainRig() {
   return {
     format: 'pixelforge-poses', version: 1, name: 'plain-walker', width: 32, height: 36,
     palette: { k: '#1b1626', x: '#6e3f3a', y: '#c27b5c', z: '#f0b98e', r: '#3f1c2c', s: '#7f2b3d', t: '#b8463f', u: '#e07e52',
-      p: '#222844', q: '#39476b', o: '#5a6f99', b: '#3a2421', c: '#6e4430', h: '#f2c14e', g: '#c08a2a' },
-    ramps: [['x', 'y', 'z'], ['r', 's', 't', 'u'], ['p', 'q', 'o']],
+      p: '#222844', q: '#39476b', o: '#5a6f99', v: '#7b93c4', b: '#3a2421', c: '#6e4430', h: '#f2c14e', g: '#c08a2a' },
+    ramps: [['x', 'y', 'z'], ['r', 's', 't', 'u'], ['p', 'q', 'o', 'v']],
     light: 225,
     parts: {
       torso: { mass: { size: [7, 9], ramp: 1, base: 2, outline: 'k' }, points: { hip: [0, 4], shoulder: [1, -3], neck: [1, -4] } },
       head: { rows: ['..kkkk..', '.kghhhk.', 'kgghhhhk', 'kghzzkzk', '.kgzzzzk', '.kyzzzyk', '..kyyyk.', '...kkk..'], anchor: [4, 7] },
-      thigh: limb(5, [3, 3], 2, 1, ['round', 'round']), shin: limb(5, [3, 2], 2, 1),
-      farThigh: limb(5, [3, 3], 2, 0, ['round', 'round']), farShin: limb(5, [3, 2], 2, 0),
+      thigh: limb(5, [3, 3], 2, 2, ['round', 'round']), shin: limb(5, [3, 2], 2, 2),
+      farThigh: limb(5, [3, 3], 2, 1, ['round', 'round']), farShin: limb(5, [3, 2], 2, 1),
       upper: limb(4, [2, 2], 1, 2, ['round', 'round']), fore: limb(4, [2, 2], 0, 1),
       farUpper: limb(4, [2, 2], 1, 1, ['round', 'round']), farFore: limb(4, [2, 2], 0, 0),
       boot: { rows: ['kcck.', 'kbcck', 'kkkkk'], anchor: [1, 2] }

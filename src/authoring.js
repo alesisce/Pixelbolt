@@ -104,9 +104,10 @@ const span = (low, high) => low === high ? `${low}` : `${low} to ${high}`;
 export function compilePoses(source, mode) {
   let written = null;
   if (source?.motions !== undefined) { const input = source; source = expandPoses(source); written = writtenPoses(input, source); }
-  fields(source, ['format', 'version', 'name', 'width', 'height', 'palette', 'ramps', 'light', 'rig', 'motionInfo', 'parts', 'poses', 'animations', 'sheet'], 'poses');
+  fields(source, ['format', 'version', 'name', 'width', 'height', 'palette', 'ramps', 'light', 'innerLines', 'rig', 'motionInfo', 'parts', 'poses', 'animations', 'sheet'], 'poses');
   if (source.format !== 'pixelforge-poses' || source.version !== 1) fail('poses', 'expected version-1 pixelforge-poses');
   if (source.light !== undefined && (!Number.isInteger(source.light) || source.light < 0 || source.light > 359)) fail('poses.light', 'expected whole degrees from 0 to 359');
+  if (source.innerLines !== undefined && !['shade', 'outline'].includes(source.innerLines)) fail('poses.innerLines', 'expected shade (the default) or outline');
   if (source.ramps !== undefined && (!Array.isArray(source.ramps) || source.ramps.length > 64)) fail('poses.ramps', 'expected at most 64 colour ramps');
   if (source.rig !== undefined) validateRig(source.rig, source.height);
   if (!source.parts || Array.isArray(source.parts) || typeof source.parts !== 'object' || Object.keys(source.parts).length > 256) fail('poses.parts', 'expected at most 256 part definitions');
@@ -146,6 +147,32 @@ export function compilePoses(source, mode) {
   if (source.rig !== undefined) metadata.rig = { ...source.rig };
   // generated: what a warning on a generated pose is about, so the text warnings can say it once per motion.
   const compiled = Object.create(null), shapes = new Map(), warnings = [], generated = new WeakMap();
+  // Bone and mass drawings with an outline: which of their pixels are outline, and the shade an outline takes where it
+  // falls inside the figure (one ramp step below the part's base colour), by symbol.
+  const lineShades = new Map();
+  // A pixel artist outlines a figure once, round its silhouette. Where a bone or mass crosses another part (an arm over
+  // the chest, the near leg over the far one), its outline is drawn in that shade instead, so the parts stay apart
+  // without black lines through the body. These are the frame's final pixels; innerLines: "outline" keeps them black.
+  const innerLinePixels = layers => {
+    if (source.innerLines === 'outline' || !lineShades.size) return [];
+    const width = source.width, height = source.height, owner = new Uint8Array(width * height), shade = new Array(width * height).fill(null);
+    for (const layer of layers) {
+      const stamp = layer.ops[0], rows = symbols[stamp.symbol], line = lineShades.get(stamp.symbol), w = rows[0].length;
+      for (let sy = 0; sy < rows.length; sy++) for (let sx = 0; sx < w; sx++) {
+        const key = rows[sy][sx];
+        if (key === '.' || key === ' ' || source.palette?.[key] === 'transparent') continue;
+        const x = stamp.x + (stamp.flipX ? w - 1 - sx : sx), y = stamp.y + sy;
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        owner[y * width + x] = 1; shade[y * width + x] = line?.outline[sy * w + sx] ? line.shade : null;
+      }
+    }
+    const pixels = [];
+    for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+      const at = y * width + x;
+      if (shade[at] !== null && owner[at - 1] && owner[at + 1] && owner[at - width] && owner[at + width]) pixels.push({ x, y, color: shade[at] });
+    }
+    return pixels;
+  };
   let rasterWork = 0;
   // The drawn shape of a part instance. Flips alone stay a stamp flag; a rotation (after any flip) is baked into a new
   // editable symbol named <part>-r<degrees> (-fr when flipped, -raw without cleanup) around the part's anchor pixel.
@@ -164,6 +191,8 @@ export function compilePoses(source, mode) {
         rasterWork += raster.work;
         if (rasterWork > RASTER_BUDGET) fail(where, `drawing bone and mass parts exceeds the 8,388,608-pixel budget; reuse angles and squash values, or use smaller masses`);
         symbols[symbol] = raster.rows;
+        const ramp = source.ramps[shape.ramp], line = shape.outline === 'selective' ? ramp[0] : shape.outline, inner = ramp[Math.max(0, shape.base - 1)];
+        if (line && inner !== line) lineShades.set(symbol, { outline: raster.outlineMask, shade: inner });
         shapes.set(key, { symbol, width: raster.width, height: raster.height, fill: raster.fill, outline: raster.outlineMask,
           flipX: false, anchor: raster.pivot, end: raster.end, point: p => p === 'end' ? raster.end : raster.map(p) });
       }
@@ -390,6 +419,7 @@ export function compilePoses(source, mode) {
             const joined = rows.map(row => row.join(''));
             if (symbol.length > 64 || Object.hasOwn(source.parts, symbol) || (symbols[symbol] && JSON.stringify(symbols[symbol]) !== JSON.stringify(joined))) fail(partsPath, `socket symbol ${symbol} collides or is too long; shorten or rename the part`);
             symbols[symbol] = joined; part.symbol = symbol;
+            if (lineShades.has(shape.symbol)) lineShades.set(symbol, lineShades.get(shape.symbol));
           }
         }
         return { name: instance.name, ops: [{ op: 'stamp', symbol, x: part.topLeft[0], y: part.topLeft[1], ...(shape.flipX && { flipX: true }) }] };
@@ -415,7 +445,8 @@ export function compilePoses(source, mode) {
     compiled[pose.name] = { origin, placed, layers, markers, contacts, duration, inputs, mirrorInputs };
     metadata.poses[pose.name] = { origin, ...(pose.mirror !== undefined && { mirror: pose.mirror }), ...(pose.relight !== undefined && { relight: pose.relight }), ...(tween && { tween }), parts: placed, markers, ...(contacts !== undefined && { contacts }) };
     // The pose origin becomes the frame anchor; marker positions become named frame points in the atlas.
-    return { name: pose.name, ...(duration !== undefined && { duration }), anchor: origin, ...(markers.length && { points: Object.fromEntries(markers.map(m => [m.name, m.at])) }), layers };
+    const lines = mode === PROBE ? [] : innerLinePixels(layers);
+    return { name: pose.name, ...(duration !== undefined && { duration }), anchor: origin, ...(markers.length && { points: Object.fromEntries(markers.map(m => [m.name, m.at])) }), layers, ...(lines.length && { pixels: lines }) };
   });
   if (mode === PROBE) return { metadata: { poses: metadata.poses } };
   // When every pose shares one origin, it is declared once as the recipe anchor.

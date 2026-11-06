@@ -118,8 +118,14 @@ export function expandMotions(input, compileRest, probeJoints) {
     const half = count / 2;
     // Short contact phases retain both a planted pair and a flight in compact six-frame runs.
     const stance = locomotion ? Math.max(1, Math.min(template === 'walk' ? Math.ceil(count * .625) : Math.max(2, Math.floor(count / 3)), Math.floor(stride / Math.max(.000001, Math.abs(speed) * duration / 1000)) + 1)) : 0;
-    const downIndex = Math.max(1, Math.floor(half / 4));
-    const phaseKeys = [...new Set([0, downIndex, Math.floor(half / 2), ...(template === 'run' && half >= 5 ? [Math.floor(half * .75)] : []), half - 1])].sort((a, b) => a - b);
+    // How far a planted foot travels back under the body in one contact, centred under the hip so the legs reach
+    // equally far forward and back. The stance cap above keeps it inside the stride.
+    const direction = speed < 0 ? -1 : 1, travel = locomotion ? Math.abs(speed) * (stance - 1) * duration / 1000 : 0;
+    const downIndex = Math.max(1, Math.floor(half / 4)), passingIndex = Math.floor(half / 2);
+    // A walk's up pose sits as far after passing as down sits before it. Up to twelve frames that is the frame before
+    // the next contact, or one from it; in a longer walk the frame before contact is nearly the contact itself.
+    const upIndex = template === 'walk' && half > 6 ? 2 * passingIndex - downIndex : half - 1;
+    const phaseKeys = [...new Set([0, downIndex, passingIndex, ...(template === 'run' && half >= 5 ? [Math.floor(half * .75)] : []), upIndex])].sort((a, b) => a - b);
     // Past four idle frames the rest are in-betweens: the key poses are the quarter phases (rest, full stretch or
     // inhale, rest, full squash or exhale), which the motion review's pose spread compares.
     const keyIndices = locomotion ? [...phaseKeys, ...phaseKeys.map(i => i + half)] : template === 'idle' && count > 4 ? [...new Set([0, 1, 2, 3].map(q => Math.round(q * count / 4)))] : Array.from({ length: count }, (_, i) => i);
@@ -140,7 +146,8 @@ export function expandMotions(input, compileRest, probeJoints) {
       const parts = new Map(pose.parts.map(p => [p.name, p])), torso = parts.get(rig.body), angle = Math.round(i * 360 / count) + (template === 'idle' && count === 2 ? 90 : 0);
       const setAngle = (part, value) => { delete part.rotate; delete part.reach; delete part.bend; part.angle = ((Math.round(value) + 180) % 360 + 360) % 360 - 180; };
       let dy = 0, bodySquash = 1;
-      if (locomotion) { dy = Math.round(bob * cosDeg(angle * 2)); bodySquash = template === 'run' ? (i % half === downIndex ? .9 : i % half === half - 1 ? 1.05 : 1) : 1; setAngle(torso, restAngle(rig.body) + lean); }
+      // A walking or running body's height comes from its legs and the bob, once every pose is made (below).
+      if (locomotion) { bodySquash = template === 'run' ? (i % half === downIndex ? .9 : i % half === half - 1 ? 1.05 : 1) : 1; setAngle(torso, restAngle(rig.body) + lean); }
       if (template === 'idle') bodySquash = 1 + (grounded ? squashBy : breath) * sinDeg(angle);
       if (template === 'jump') { dy = [2, 0, -apex, -apex * 2, -apex, 2, 0][i]; bodySquash = [crouch, stretch, 1.05, 1, 1, crouch, 1][i]; }
       // Follow-through carries the swing well past the strike and settles the body, so it reads as its own key pose.
@@ -157,18 +164,30 @@ export function expandMotions(input, compileRest, probeJoints) {
       }
       if (rig.head && template === 'idle') { const head = parts.get(rig.head); head.at = [...(head.at ?? [0, 0])]; head.at[1] -= Math.round(sinDeg(angle)); }
       for (const [j, tail] of (rig.tail ?? []).entries()) setAngle(parts.get(tail), restAngle(tail) + 10 * sinDeg(angle - j * 25));
-      if (locomotion) for (const [j, chain] of (rig.arms ?? []).entries()) setAngle(parts.get(chain[0]), restAngle(chain[0]) + 35 * sinDeg(angle + j % 2 * 180));
+      // Arms swing against the legs: at a contact the arm on the leading leg's side is furthest back and its partner
+      // furthest forward, and they pass the body when the legs do. An elbow bends as its arm comes forward; a runner's
+      // stays bent.
+      if (locomotion) for (const [j, chain] of (rig.arms ?? []).entries()) {
+        const swing = cosDeg(angle + j % 2 * 180);
+        setAngle(parts.get(chain[0]), restAngle(chain[0]) + direction * (template === 'run' ? 35 : 25) * swing);
+        if (chain.length > 1) setAngle(parts.get(chain[1]), restAngle(chain[1]) - direction * ((template === 'run' ? 40 : 0) + 20 * Math.max(0, -swing)));
+      }
       for (const [j, leg] of legs.entries()) {
         const last = parts.get(leg.last);
         delete last.angle; delete last.rotate;
         let x = leg.x, y = rig.ground, planted = true;
         if (locomotion) {
-          const k = (i + (j % 2) * half) % count, direction = speed < 0 ? -1 : 1, front = leg.x + direction * stride / 2;
+          const k = (i + (j % 2) * half) % count, front = leg.x + direction * travel / 2;
           planted = k < stance;
           if (planted) x = front - speed * k * duration / 1000;
           else {
-            const back = front - speed * (stance - 1) * duration / 1000, t = (k - stance + 1) / (count - stance + 1);
-            x = back + (front - back) * t; y -= lift === 0 ? 0 : Math.max(1, Math.round(lift * 4 * t * (1 - t)));
+            // The lifted foot lags behind the hip, then reaches forward to land: it leaves the ground behind the body
+            // (kicking further back, toward the stride's rear, when the contact covers less than the stride), passes
+            // under the hip tucked up and lands from in front. Its height peaks a third of the way through, so the
+            // heel comes up behind and the leg is long again as it reaches.
+            const t = (k - stance + 1) / (count - stance + 1), share = Math.min(1, travel / stride);
+            const reach = -share + 2 * share * t * t * (1.8 - .8 * t) + (1 - share) * 10 * t * (1 - t) * (2 * t - 1);
+            x = leg.x + direction * stride / 2 * reach; y -= lift === 0 ? 0 : Math.max(1, Math.round(lift * 6.75 * t * (1 - t) * (1 - t)));
           }
         } else if (template === 'jump' && i > 0 && i < 5) { planted = false; y += Math.min(-1, dy); }
         last.reach = [Math.round(x), Math.round(y)]; last.bend ??= 'forward';
@@ -200,18 +219,20 @@ export function expandMotions(input, compileRest, probeJoints) {
       if (grounded) groundedPoses.set(pose.name, name);
     }
     // A bob or lean must never lift a hip beyond its leg: a planted foot that misses its target floats and slides.
-    // Find how far each pose must sink (at most four pixels, while that reduces its planted feet's miss) and lower
-    // every pose of the motion by the deepest of those, so the bob keeps its shape and no frame dips on its own.
+    // sink finds how far a pose must sink: at most four pixels, while that reduces its planted feet's miss.
+    // Only the chosen leg chains and what they hang from decide where their feet land; place compiles just those.
+    const place = (pose, chosen) => {
+      const byName = new Map(pose.parts.map(p => [p.name, p])), needed = new Set();
+      for (const leg of chosen) for (let name = leg.last; name && !needed.has(name); name = byName.get(name)?.attach?.part) needed.add(name);
+      const probe = { name: pose.name, origin: pose.origin, parts: pose.parts.filter(p => needed.has(p.name)) };
+      const probeParts = Object.fromEntries([...new Set(probe.parts.map(p => p.part))].map(name => [name, source.parts[name]]));
+      return probeJoints({ ...checkSource, parts: probeParts, poses: [probe], animations: { check: { frames: [pose.name], loop: false } } }).metadata.poses[pose.name].parts;
+    };
     const sink = pose => {
       const plantedLegs = legs.filter(leg => pose.contacts.includes(leg.marker));
       if (!plantedLegs.length) return 0;
-      // Only the planted chains and what they hang from decide where a foot lands; compile just those.
-      const byName = new Map(pose.parts.map(p => [p.name, p])), needed = new Set();
-      for (const leg of plantedLegs) for (let name = leg.last; name && !needed.has(name); name = byName.get(name)?.attach?.part) needed.add(name);
-      const probe = { name: pose.name, origin: pose.origin, parts: pose.parts.filter(p => needed.has(p.name)) };
-      const probeParts = Object.fromEntries([...new Set(probe.parts.map(p => p.part))].map(name => [name, source.parts[name]]));
       const miss = () => {
-        const placed = probeJoints({ ...checkSource, parts: probeParts, poses: [probe], animations: { check: { frames: [pose.name], loop: false } } }).metadata.poses[pose.name].parts;
+        const placed = place(pose, plantedLegs);
         return plantedLegs.reduce((sum, leg) => {
           const end = placed[leg.last].joints.end, target = pose.parts.find(p => p.name === leg.last).reach;
           return sum + Math.abs(end[0] - target[0]) + Math.abs(end[1] - target[1]);
@@ -228,8 +249,24 @@ export function expandMotions(input, compileRest, probeJoints) {
       pose.origin[1] = start;
       return depth;
     };
-    const motionPoses = generated.slice(-count), depth = Math.max(...motionPoses.map(sink));
-    if (depth) for (const pose of motionPoses) pose.origin[1] += depth;
+    const motionPoses = generated.slice(-count);
+    if (locomotion) {
+      // A walking or running body rides its legs: each pose sinks only as far as its planted feet need, so a planted
+      // leg is long under the body and at a contact both legs are nearly straight. The bob is then the dip just after
+      // each contact, as the knees take the weight, and in a run the rise through flight.
+      motionPoses.forEach((pose, i) => {
+        pose.origin[1] += sink(pose) + (i % half === downIndex ? bob : pose.contacts.length ? 0 : -bob);
+        // A lifted foot only says where the leg reaches. Where the body has risen a little past it, as in flight, the
+        // leg straightens toward it, and that is where the foot is drawn: aim it there. A miss of more than two pixels
+        // is a stride or lift the legs can't make, and stays a warning.
+        const lifted = legs.filter(leg => !pose.contacts.includes(leg.marker)), placed = lifted.length ? place(pose, lifted) : null;
+        for (const leg of lifted) if (placed[leg.last].reach?.unreachable && placed[leg.last].reach.error <= 2) pose.parts.find(p => p.name === leg.last).reach = [...placed[leg.last].joints.end];
+      });
+    } else {
+      // The other templates lower every pose by the deepest sink, so the motion keeps its shape and no frame dips alone.
+      const depth = Math.max(...motionPoses.map(sink));
+      if (depth) for (const pose of motionPoses) pose.origin[1] += depth;
+    }
     if (Object.hasOwn(animations, name)) fail(`${path}`, 'the generated animation name is already authored; choose another motion name');
     const playback = template === 'attack' ? [names[0], ...Array(hold).fill(names[1]), ...names.slice(2)] : names;
     animations[name] = { frames: playback, loop: locomotion || template === 'idle' };

@@ -24,7 +24,7 @@ For Codex, Cursor and the other agents the open [skills CLI](https://skills.sh) 
 
 [Neon Voyage](https://skulitom.github.io/NeonRocketGame/): a free browser game made with Pixelbolt. Every sprite, effect and letter is a [recipe](https://github.com/skulitom/NeonRocketGame/tree/main/art), and the rocket's exhaust is a live fluid simulation that bends as you steer.
 
-English · [简体中文](https://github.com/skulitom/Pixelbolt/blob/main/README.zh-CN.md) · [日本語](https://github.com/skulitom/Pixelbolt/blob/main/README.ja.md)
+English · [简体中文](https://github.com/skulitom/Pixelbolt/blob/main/README.zh-CN.md) · [日本語](https://github.com/skulitom/Pixelbolt/blob/main/README.ja.md) · [한국어](https://github.com/skulitom/Pixelbolt/blob/main/README.ko.md) · [Español](https://github.com/skulitom/Pixelbolt/blob/main/README.es.md)
 
 [![Tests](https://github.com/skulitom/Pixelbolt/actions/workflows/test.yml/badge.svg)](https://github.com/skulitom/Pixelbolt/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

@@ -1,6 +1,6 @@
 # Pixelbolt
 
-[English](https://github.com/skulitom/Pixelbolt/blob/main/README.md) · 简体中文 · [日本語](https://github.com/skulitom/Pixelbolt/blob/main/README.ja.md)
+[English](https://github.com/skulitom/Pixelbolt/blob/main/README.md) · 简体中文 · [日本語](https://github.com/skulitom/Pixelbolt/blob/main/README.ja.md) · [한국어](https://github.com/skulitom/Pixelbolt/blob/main/README.ko.md) · [Español](https://github.com/skulitom/Pixelbolt/blob/main/README.es.md)
 
 > 本文是英文 README 的中文摘要译本。功能细节、限制和最新变化以[英文 README](https://github.com/skulitom/Pixelbolt/blob/main/README.md) 为准。
 

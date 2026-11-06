@@ -4,6 +4,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Korean and Spanish READMEs
+
+- `README.ko.md` (한국어) and `README.es.md` (Español) summarize the English README like the Chinese and Japanese ones: what Pixelbolt is for, trying it, the skill, plugin, Claude Desktop and MCP setups, the eight tools, a tiny animation, fluids and rigid bodies, and the export bundle. Every README's language line links all five, llms.txt lists them, and the npm package ships them.
+
 ### The rest of the review of 0.12.0
 
 - A loop with bodies closes as the warm-up runs into frame 0. Its closing frames draw the liquid round the bodies where they are drawn (blended back to the warm-up's places), with the warm-up's wakes, and blend each cell's fields only where it is open both now and then, so no body leaves a hole of its shape; the last frame is then exactly the warm-up's last. Drawn round the duck and crate where the cycle left them, the water wheel's liquid changed 82 cells at the seam against at most 56 in a step, and now 31, the warm-up's own step into frame 0. The water wheel's recipe and GIF are regenerated; loops without bodies compile exactly as before.

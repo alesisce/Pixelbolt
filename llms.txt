@@ -67,7 +67,7 @@ Use pixelforge-poses with bone limbs, mass bodies, grid heads/props, ramps and w
 - [Contributing](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/CONTRIBUTING.md): Development setup and pull request guidance.
 - [MIT license](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/LICENSE): License for the toolkit and included original artwork.
 - [Issues](https://github.com/skulitom/Pixelbolt/issues): Bug reports and feature requests.
-- [简体中文 README](https://github.com/skulitom/Pixelbolt/blob/main/README.zh-CN.md) and [日本語 README](https://github.com/skulitom/Pixelbolt/blob/main/README.ja.md): Translated summaries of the English README.
+- [简体中文 README](https://github.com/skulitom/Pixelbolt/blob/main/README.zh-CN.md), [日本語 README](https://github.com/skulitom/Pixelbolt/blob/main/README.ja.md), [한국어 README](https://github.com/skulitom/Pixelbolt/blob/main/README.ko.md) and [README en español](https://github.com/skulitom/Pixelbolt/blob/main/README.es.md): Translated summaries of the English README.
 
 ## Sibling tools (same author, MIT, local MCP servers)
 

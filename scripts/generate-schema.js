@@ -516,9 +516,9 @@ const bodyMaterial = {
 };
 // A power, for pickups, events and strikes.
 const powerFields = {
-  power: { enum: ['split', 'grow', 'speed', 'warp', 'magnet', 'vanish'], description: 'split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams\' bodies toward to (default the pickup) for frames; vanish: the body is gone (an event may take a fixed body away: a ring bursts).' },
+  power: { enum: ['split', 'grow', 'speed', 'warp', 'magnet', 'vanish', 'break'], description: 'split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams\' bodies toward to (default the pickup) for frames; vanish: the body is gone (an event may take a fixed body away: a ring bursts); break: the body breaks into count pieces, each carrying its part of the picture (an event may break a fixed body, whose pieces fall).' },
   label: { type: 'string', maxLength: 40, description: 'For {news}. Default the power in capitals.' },
-  count: int(2, 8, 'split: bodies after. Default 3.'), spread: num(1, 180, 'split: degrees between headings. Default 30.'), scale: num(1.25, 4, 'grow. Default 2.'), factor: num(0.25, 4, 'speed. Default 1.5.'),
+  count: int(2, 8, 'split: bodies after. Default 3. break: pieces. Default 6.'), spread: num(1, 180, 'split: degrees between headings. Default 30.'), scale: num(1.25, 4, 'grow. Default 2.'), factor: num(0.25, 4, 'speed. Default 1.5.'),
   to: { ...pairOf(num(-4096, 8192)), description: 'warp, magnet: a canvas point [x, y], each from minus the canvas side to twice it.' }, strength: num(0.001, 1, 'magnet: pixels a frame² . Default 0.05.'), frames: int(1, 18000, 'grow, speed, magnet: how long. Default 120.')
 };
 const point2 = pairOf(int(-4096, 4096));
@@ -554,6 +554,7 @@ const body = object({
   symbol: { type: 'string', description: 'Draw this symbol instead of fill and outline, centred on the body and turned with it to the whole degree, its outline kept a closed line (under 6 pixels across, in quarter turns).' },
   trail: object({ color: bodyKey, length: int(1, 16, 'Frames of trail. Default 2.') }, ['color']),
   smear: { ...object({ colors: { ...array(bodyKey, 8), minItems: 1, description: 'The most recent part of the sweep first.' }, frames: int(1, 8, 'Frames of sweep. Default 1.') }, ['colors']), description: 'The shape swept over its last frames, drawn under it, banded from the first colour behind it to the last: a blade\'s swish. Not for a hoop.' },
+  breaks: { ...object({ at: num(0.1, 16, 'How hard a knock breaks it: the speed it is hit at where it is hit (with the bounce), in pixels a frame, shared with what hits it by how easily each gives there. Default 3.'), pieces: int(2, 16, 'Pieces it breaks into, fewer where a piece would be too small to read. Default 6.'), speed: num(0, 8, 'Pixels a frame the pieces fly apart at, away from where it was hit, on top of its own motion. Default 0.5.') }), description: 'A free body that breaks when knocked hard enough, in a pixelforge-bodies source: into convex pieces cut through its shape about where it was hit, smaller there, each a body of its own carrying its part of the picture. Pieces do not break again.' },
   ring: object({ radius: num(1, 256), count: int(2, 256), from: num(-3600, 3600, 'Degrees of the first copy. Default 0.'), to: num(-3600, 3600, 'Degrees of the last; default a full turn, spaced evenly.') }, ['radius', 'count']),
   grid: object({ count: { ...pairOf(int(1, 256)), description: '[columns, rows].' }, step: { ...pairOf(num(-256, 256)), description: '[x, y] between copies.' }, stagger: num(-256, 256, 'Shifts odd rows across. Default 0.') }, ['count', 'step'])
 }, ['shape', 'at']);

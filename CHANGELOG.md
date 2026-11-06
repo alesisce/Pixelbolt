@@ -4,6 +4,13 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Breaking bodies
+
+- A free body with `breaks: { at, pieces, speed }` breaks when it is knocked hard enough: when something meets it at `at` pixels a frame or more, shared with what hits it by how easily each side gives there, so a box landing on a corner breaks as one landing flat does and a pebble barely knocks a heavy vase. It breaks into up to `pieces` convex pieces cut through its shape about where it was hit (a Voronoi fracture, smaller pieces near the hit), each a body of its own with the body's material, moving as its part moved and flung apart at `speed`. Each piece carries its part of the body's picture, so a crate breaks into pieces of crate and between them they hold every pixel of it; slivers too small to read are merged into their neighbours, and pieces never break again.
+- The knock is read from the speed two bodies meet at, not from the pushes the solve passes along, so a ball that breaks the first crate in a row breaks the next ones only as the pieces hit them (measured by the pushes, the whole row broke in one frame).
+- A `break` power for pickups, events and strikes breaks a body on cue into `count` pieces; an event may break a fixed body, whose pieces fall, and a strike of `break` with a `cut` makes a blade that breaks what it passes through. The metadata lists each body that broke under `broken`, and `copies` no longer counts pieces. Bodies in a fluid don't break yet, and say so.
+- The crate-smash preset: a heavy iron ball thrown through a pane of glass into a pyramid of crates; the glass shatters and the crates burst into planks.
+
 ### Walks and runs that read, and a new hero
 
 - Walk and run templates: arms swing against the legs, the arm on the leading leg's side furthest back at each contact (they were a quarter cycle late, so an arm stuck out forward mid-step), and an elbow bends as its arm comes forward; a run keeps the elbows bent. The planted foot's travel is centred under the hip. The body rides its legs: each pose sinks only as far as its planted feet need, so the legs are nearly straight at contact, and `bob` is the dip just after each contact (and a run's rise through flight). The lifted foot leaves behind the hip, rises with the heel up, passes under the hip and reaches forward to land. Past twelve frames, a walk's up pose sits opposite down around passing.

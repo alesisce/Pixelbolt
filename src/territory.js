@@ -12,10 +12,10 @@ import { fields } from './authoring.js';
 import { cosDeg, sinDeg } from './craft.js';
 import { layoutText, measureText, FONT_CAP_HEIGHT } from './font.js';
 
-export const POWERS = ['split', 'grow', 'speed', 'warp', 'magnet', 'vanish'];
+export const POWERS = ['split', 'grow', 'speed', 'warp', 'magnet', 'vanish', 'break'];
 const LIMITS = { teams: 8, cells: 65536, pickups: 64, events: 64, strikes: 16, hud: 16 };
 // Labels the news line shows for a power that names none.
-const LABELS = { split: 'SPLIT', grow: 'GROW', speed: 'SPEED', warp: 'WARP', magnet: 'MAGNET', vanish: 'GONE' };
+const LABELS = { split: 'SPLIT', grow: 'GROW', speed: 'SPEED', warp: 'WARP', magnet: 'MAGNET', vanish: 'GONE', break: 'BREAK' };
 
 const fail = (path, message) => { throw new PixelError(path, message); };
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -94,11 +94,11 @@ export function readTerritory(value, path, { width, height, palette }) {
 function readPower(entry, path, context) {
   if (!POWERS.includes(entry.power)) fail(`${path}.power`, `expected ${POWERS.join(', ')}`);
   const power = entry.power, only = (field, powers) => { if (entry[field] !== undefined && !powers.includes(power)) fail(`${path}.${field}`, `${field} goes with ${powers.join(' or ')}`); };
-  only('count', ['split']); only('spread', ['split']); only('scale', ['grow']); only('factor', ['speed']); only('to', ['warp', 'magnet']); only('strength', ['magnet']); only('frames', ['grow', 'speed', 'magnet']);
+  only('count', ['split', 'break']); only('spread', ['split']); only('scale', ['grow']); only('factor', ['speed']); only('to', ['warp', 'magnet']); only('strength', ['magnet']); only('frames', ['grow', 'speed', 'magnet']);
   if (power === 'warp' && entry.to === undefined) fail(`${path}.to`, 'a warp needs a place to move the body to');
   return {
     power, label: entry.label === undefined ? LABELS[power] : label(entry.label, `${path}.label`),
-    count: integer(entry.count ?? 3, `${path}.count`, 2, 8), spread: number(entry.spread ?? 30, `${path}.spread`, 1, 180),
+    count: integer(entry.count ?? (power === 'break' ? 6 : 3), `${path}.count`, 2, 8), spread: number(entry.spread ?? 30, `${path}.spread`, 1, 180),
     scale: number(entry.scale ?? 2, `${path}.scale`, 1.25, 4), factor: number(entry.factor ?? 1.5, `${path}.factor`, 0.25, 4),
     to: entry.to === undefined ? null : target(entry.to, `${path}.to`, context),
     strength: number(entry.strength ?? 0.05, `${path}.strength`, 0.001, 1), frames: integer(entry.frames ?? 120, `${path}.frames`, 1, 18000)
@@ -139,7 +139,7 @@ export function readEvents(list, path, context, bodies) {
     fields(entry, ['frame', 'body', ...POWER_FIELDS], p);
     const index = bodies.findIndex(b => b.name !== null && b.name.toLowerCase() === String(entry.body).toLowerCase());
     if (index < 0) fail(`${p}.body`, `no body is named ${JSON.stringify(entry.body)}`);
-    if (bodies[index].fixed && entry.power !== 'vanish') fail(`${p}.body`, `${entry.body} is fixed; powers go to bodies that move freely (a fixed body can only vanish)`);
+    if (bodies[index].fixed && entry.power !== 'vanish' && entry.power !== 'break') fail(`${p}.body`, `${entry.body} is fixed; powers go to bodies that move freely (a fixed body can only vanish or break)`);
     return { frame: integer(entry.frame, `${p}.frame`, 1, 18000), body: index, path: p, ...readPower(entry, p, context) };
   });
 }
@@ -196,7 +196,7 @@ export function readHud(list, path, context, teams) {
 /** The territory's state while a world runs. `trace(at, material, columns, rows, scale, x, y)` is bodies.js's face tracer;
  * `scale(b, k)` grows a body's shape by k; `copy(b)` adds a copy of a body to the world and returns it; `fastest` is the
  * bodies' speed limit. */
-export function createTerritory(effect, { trace, scale, copy, width, height, fastest = Infinity }) {
+export function createTerritory(effect, { trace, scale, copy, shatter, width, height, fastest = Infinity }) {
   // Powers work without a territory too: then there are no cells and no teams.
   const t = effect.territory ?? { cell: 1, x: 0, y: 0, columns: 0, rows: 0, teams: [], start: new Int8Array(0), bounce: 1, friction: 0 };
   const { columns, rows, cell, teams } = t, owner = Int8Array.from(t.start);
@@ -284,8 +284,14 @@ export function createTerritory(effect, { trace, scale, copy, width, height, fas
     } else if (p.power === 'vanish') {
       // Gone, as a body that leaves the canvas is: what it held falls (bodies.js wakes what rested on it).
       b.gone = true;
+    } else if (p.power === 'break') {
+      // Broken into `count` pieces about where the power found it (a pickup's place, else its centre); a cut's pieces leave
+      // behind the cutter. A body too small or a crowd too full to break is left whole.
+      if (back) { b.vx += p.cut * back[0]; b.vy += p.cut * back[1]; }
+      const made = shatter(b, what.pickup !== undefined ? what.at : [b.x, b.y], p.count);
+      if (entry) entry.pieces = made;
     }
-    if (back && p.power !== 'split' && p.power !== 'warp' && p.power !== 'vanish') { b.vx += p.cut * back[0]; b.vy += p.cut * back[1]; }
+    if (back && p.power !== 'split' && p.power !== 'warp' && p.power !== 'vanish' && p.power !== 'break') { b.vx += p.cut * back[0]; b.vy += p.cut * back[1]; }
   };
   // The bodies each strike's body pushed (or cut) this frame, by index, given its power at the frame's end; a cut body
   // with the way behind the cutter where it was first touched.

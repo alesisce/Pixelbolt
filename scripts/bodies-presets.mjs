@@ -144,4 +144,27 @@ const bladeBloom = bodiesSource('blade-bloom', 80, 80,
   },
   { katana });
 
-export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory, 'blade-bloom': bladeBloom };
+// Crate smash: a heavy iron ball is thrown through a pane of glass into a pyramid of crates. The pane shatters and its
+// shards fly on into the crates; crates the ball or the flying pieces knock hard enough break apart, each piece carrying
+// its part of the crate (its boards and grain), while the far side of the pyramid stands; a crate that falls from the top
+// breaks where it lands. Everything settles into a heap of whole crates, planks and glass.
+const SMASH_FLOOR = 56;
+const pane = ['wwwww', 'wpppw', 'wpqpw', 'wpppw', 'wppqw', 'wpppw', 'wqppw', 'wpppw', 'wpqpw', 'wpppw', 'wppqw', 'wpppw', 'wpppw', 'wqppw', 'wpppw', 'wwwww'];
+const smashCrate = (at, extra = {}) => ({ shape: 'box', size: [8, 8], at, asleep: true, density: 0.6, friction: 0.6, bounce: 0.1, symbol: 'crate', breaks: { at: 1.5, pieces: 4 }, ...extra });
+const crateSmash = bodiesSource('crate-smash', 112, 64,
+  { o: '#3b2414', h: '#c98c4f', c: '#a5683a', d: '#6e4223', m: '#b4bdd8', k: '#14141c', s: '#4a5068', b: '#1b1d2a', g: '#2c3047', w: '#e8f4ff', p: '#6fc3e6', q: '#b9e6f7' },
+  {
+    frames: 180, duration: 40, gravity: [0, 0.2], background: 'b', walls: ['left', 'right'],
+    obstacles: [{ symbol: 'ground', x: 0, y: SMASH_FLOOR }],
+    bodies: [
+      { name: 'ball', shape: 'circle', radius: 4, at: [6, 46], velocity: [5.5, -0.8], density: 20, bounce: 0.2, friction: 0.6, fill: 'm', outline: 'k' },
+      smashCrate([64, SMASH_FLOOR - 4], { name: 'crate', grid: { count: [4, 1], step: [8, 0] } }),
+      smashCrate([68, SMASH_FLOOR - 12], { name: 'crate-two', grid: { count: [3, 1], step: [8, 0] } }),
+      smashCrate([72, SMASH_FLOOR - 20], { name: 'crate-three', grid: { count: [2, 1], step: [8, 0] } }),
+      smashCrate([76, SMASH_FLOOR - 28], { name: 'crate-top' }),
+      { name: 'pane', shape: 'box', size: [5, 16], at: [36, SMASH_FLOOR - 8], asleep: true, density: 1.2, friction: 0.4, bounce: 0.1, symbol: 'pane', breaks: { at: 1.2, pieces: 8, speed: 0.8 } }
+    ]
+  },
+  { crate, pane, ground: ['g'.repeat(112), 's'.repeat(112), 'g'.repeat(112)] });
+
+export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory, 'blade-bloom': bladeBloom, 'crate-smash': crateSmash };

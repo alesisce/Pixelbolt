@@ -18,7 +18,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '12ce30e2a30240499a3b7442550d5f5085158ec51a8c20eb3cb7f54c3ac23c6e', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': 'e3b290ee0f38e34623368381973b7362fe0ce7243797d49dcea37cdcd76e5538', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': 'eb4397b860abbb2b7233a9e6c5c6256c99c6f93bb2a190aea9c889b657798fe1'
+  'ring-escape': '12ce30e2a30240499a3b7442550d5f5085158ec51a8c20eb3cb7f54c3ac23c6e', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': 'e3b290ee0f38e34623368381973b7362fe0ce7243797d49dcea37cdcd76e5538', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': 'eb4397b860abbb2b7233a9e6c5c6256c99c6f93bb2a190aea9c889b657798fe1', 'crate-smash': '41a154c53c329df13461fd763eceb083f7e6536027beb0874813f7db83e43303'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -454,6 +454,63 @@ test('a heavy body rests on light ones without sinking, and still ploughs throug
   // it were solved as lighter while it shoves).
   const plough = run(scene({ frames: 80, gravity: [0, 0.3], walls, bodies: [{ name: 'heavy', shape: 'circle', radius: 3, at: [8, 44], velocity: [3, 0], density: 50, friction: 0.2, fill: 'w' }, { shape: 'circle', radius: 1.5, at: [40, 46.5], grid: { count: [10, 3], step: [3, -3], stagger: 1.5 }, friction: 0.2, fill: 'k' }] }, { width: 96, height: 48 })).effect;
   assert.ok(plough.paths.heavy.at(-1)[0] > 70, `the heavy ball ends at ${plough.paths.heavy.at(-1)[0]}`);
+});
+
+test('a body knocked hard enough breaks into convex pieces that carry its whole picture, and they settle', () => {
+  // A picture of 8 × 8 pixels, every one drawn, on a box dropped 30 pixels onto the floor.
+  const checks = ['kwkwkwkw', 'wkwkwkwk', 'kwkwkwkw', 'wkwkwkwk', 'kwkwkwkw', 'wkwkwkwk', 'kwkwkwkw', 'wkwkwkwk'];
+  const effect = { substeps: 8, iterations: 6, gravity: [0, 0.3], walls: { left: true, right: true, top: false, bottom: true }, obstacles: [], most: 256,
+    bodies: readBodies([{ name: 'box', shape: 'box', size: [8, 8], at: [24, 10], angle: 20, density: 2, symbol: 'checks', breaks: { at: 2, pieces: 5 } }], 'bodies', { palette, symbols: { checks }, width: 48, height: 48, breakable: true }) };
+  const world = createBodyWorld(effect, { width: 48, height: 48, symbols: { checks } });
+  let f = 0;
+  while (!world.stats.broken.length && f < 60) world.advance(++f);
+  const [entry] = world.stats.broken, pieces = world.bodies.slice(1);
+  assert.ok(entry && entry.body === 'box' && entry.pieces === pieces.length && pieces.length >= 3 && pieces.length <= 5 && world.bodies[0].gone, JSON.stringify(entry));
+  // The pieces share out the box's area and mass, each is convex, and between them they carry every pixel of the picture.
+  const area = part => { let a = 0; for (let i = 0; i < part.n; i++) { const j = (i + 1) % part.n; a += part.vx[i] * part.vy[j] - part.vy[i] * part.vx[j]; } return a / 2; };
+  assert.ok(Math.abs(pieces.reduce((sum, p) => sum + area(p.parts[0]), 0) - 64) < 0.01, 'the pieces cover the box');
+  assert.ok(Math.abs(pieces.reduce((sum, p) => sum + 1 / p.invMass, 0) - 128) < 0.01, 'and weigh what it did');
+  for (const p of pieces) {
+    const part = p.parts[0];
+    for (let i = 0; i < part.n; i++) { const j = (i + 1) % part.n, k = (i + 2) % part.n; assert.ok((part.vx[j] - part.vx[i]) * (part.vy[k] - part.vy[j]) - (part.vy[j] - part.vy[i]) * (part.vx[k] - part.vx[j]) > 0, `${p.path} turns one way at every corner`); }
+  }
+  assert.equal(pieces.reduce((sum, p) => sum + p.rows.join('').replace(/\./g, '').length, 0), 64);
+  for (; f < 200 && world.stats.rest === null; f++) world.advance(f + 1);
+  assert.ok(world.stats.rest !== null, 'the pieces come to rest');
+});
+
+test('a knock breaks what it hits, as hard as it is hit, and not the row behind it', () => {
+  const crates = extra => ({ name: 'crate', shape: 'box', size: [8, 8], at: [30, 44], grid: { count: [4, 1], step: [8, 0] }, asleep: true, density: 0.6, fill: 'w', outline: 'k', breaks: { at: 1.5, pieces: 4 }, ...extra });
+  const throwAt = (density, speed) => run(scene({ frames: 40, gravity: [0, 0.2], walls: ['left', 'right', 'bottom'], bodies: [{ name: 'ball', shape: 'circle', radius: 3, at: [8, 44.9], velocity: [speed, 0], density, fill: 'r' }, crates()] }, { width: 72, height: 48 })).effect;
+  // A heavy ball breaks the first crate. Measured by the pushes the solve passed on, all four broke in that frame.
+  const heavy = throwAt(20, 4);
+  assert.equal(heavy.broken[0].body, 'crate-0');
+  assert.ok(heavy.broken.filter(entry => entry.frame === heavy.broken[0].frame).length < 4, JSON.stringify(heavy.broken));
+  // A pebble as fast barely knocks a crate, and a slow ball not hard enough: none breaks.
+  assert.equal(throwAt(0.05, 4).broken, undefined);
+  assert.equal(throwAt(20, 0.8).broken, undefined);
+});
+
+test('a break power breaks a body on cue, a fixed one too, and a blade that cuts breaks what it touches', () => {
+  // A fixed slab broken by an event at frame 10: its pieces fall to the floor.
+  const slab = run(scene({ frames: 60, gravity: [0, 0.3], walls: ['bottom'], bodies: [{ name: 'slab', shape: 'box', size: [16, 6], at: [24, 10], fixed: true, fill: 'w', outline: 'k' }], events: [{ frame: 10, body: 'slab', power: 'break', count: 5 }] })).effect;
+  assert.ok(slab.broken.length === 1 && slab.broken[0].frame === 10 && slab.broken[0].pieces >= 3, JSON.stringify(slab.broken));
+  const grid = frame => frame.ops.find(op => op.op === 'grid');
+  const { recipe } = run(scene({ frames: 60, gravity: [0, 0.3], walls: ['bottom'], bodies: [{ name: 'slab', shape: 'box', size: [16, 6], at: [24, 10], fixed: true, fill: 'w', outline: 'k' }], events: [{ frame: 10, body: 'slab', power: 'break', count: 5 }] }));
+  assert.ok(grid(recipe.frames[59]).y > 20 && grid(recipe.frames[5]).y < 10, 'the pieces fell');
+  // A turning blade whose strike is break (and cuts) breaks the balls it passes through.
+  const blade = run(scene({ frames: 40, gravity: [0, 0], bodies: [{ name: 'blade', shape: 'box', size: [20, 2], pivot: [-10, 0], at: [24, 16], fixed: true, spin: 9, fill: 'w' }, { shape: 'box', size: [5, 5], at: [34, 22], grid: { count: [2, 1], step: [-6, 6] }, fill: 'r', outline: 'k' }], strikes: [{ by: 'blade', power: 'break', count: 4, cut: 0.5 }] })).effect;
+  assert.equal(blade.broken.length, 2, JSON.stringify(blade.broken));
+});
+
+test('breaking is read strictly', () => {
+  const box = { name: 'box', shape: 'box', size: [8, 8], at: [24, 16], fill: 'w' };
+  refused(scene({ bodies: [{ ...box, fixed: true, breaks: {} }] }), 'bodies.effects.e.bodies[0].breaks', /event whose power is break/);
+  refused(scene({ bodies: [{ shape: 'hoop', fixed: true, radius: 10, at: [24, 16], fill: 'w', breaks: {} }] }), 'bodies.effects.e.bodies[0].breaks', /does not break/);
+  refused(scene({ bodies: [{ ...box, size: [1, 2], breaks: {} }] }), 'bodies.effects.e.bodies[0].breaks', /too small/);
+  refused(scene({ bodies: [{ ...box, breaks: { pieces: 1 } }] }), 'bodies.effects.e.bodies[0].breaks.pieces', /from 2 to 16/);
+  refused(scene({ bodies: [{ ...box, breaks: { at: 3, chips: 4 } }] }), 'bodies.effects.e.bodies[0].breaks.chips', /unknown/);
+  refused(scene({ bodies: [box], events: [{ frame: 3, body: 'box', power: 'break', count: 9 }] }), 'bodies.effects.e.events[0].count', /from 2 to 8/);
 });
 
 test('the work estimate charges the crowd a strike can make and a smear\'s sweep', () => {

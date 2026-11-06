@@ -15,7 +15,7 @@
 // and iteration counts, and bodies, contacts and pixels visited in a fixed order.
 import { PixelError, renderProject } from './core.js';
 import { fields } from './authoring.js';
-import { sinDeg, cosDeg, traceLine, turnRows } from './craft.js';
+import { sinDeg, cosDeg, traceLine, turnRows, random } from './craft.js';
 import { atan2Deg } from './shapes.js';
 import { readTerritory, readPickups, readEvents, readStrikes, readHud, createTerritory } from './territory.js';
 
@@ -116,7 +116,7 @@ function readMaterial(value, path, fixed) {
   };
 }
 
-const BODY_FIELDS = ['temperature', 'team', 'speed', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'pivot', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'fillEvery', 'outline', 'symbol', 'trail', 'smear', 'ring', 'grid'];
+const BODY_FIELDS = ['temperature', 'team', 'speed', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'pivot', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'fillEvery', 'outline', 'symbol', 'trail', 'smear', 'breaks', 'ring', 'grid'];
 
 // One entry of `bodies`: a body, or copies of it laid out on a ring or a grid. Returns the bodies it makes.
 function readBody(entry, path, context) {
@@ -231,6 +231,20 @@ function readBody(entry, path, context) {
     pivot = pair(entry.pivot, `${path}.pivot`, -128, 128);
     if (pivot[0] === 0 && pivot[1] === 0) pivot = null;
   }
+  // A body that breaks: knocked hard enough (its speed changed by `at` pixels a frame or more in one substep, from
+  // everything pushing on it, so a body crushed between two others counts both pushes), it breaks into `pieces` pieces cut
+  // through its shape about where it was hit, each a body of its own carrying its part of the picture, flung apart at
+  // `speed` on top of the body's own motion.
+  let breaks = null;
+  if (entry.breaks !== undefined) {
+    if (!context.breakable) fail(`${path}.breaks`, 'bodies break in a pixelforge-bodies source; the bodies in a fluid do not break yet');
+    if (!isObject(entry.breaks)) fail(`${path}.breaks`, 'expected { at, pieces, speed }');
+    fields(entry.breaks, ['at', 'pieces', 'speed'], `${path}.breaks`);
+    if (shape === 'hoop') fail(`${path}.breaks`, 'a hoop is a container and does not break; an event can make it vanish');
+    if (fixed) fail(`${path}.breaks`, 'a fixed body takes no knocks; break it on cue with an event whose power is break');
+    if (area < 4) fail(`${path}.breaks`, 'the body is under 4 square pixels, too small to show pieces; make it bigger');
+    breaks = { at: number(entry.breaks.at ?? 3, `${path}.breaks.at`, 0.1, 16), pieces: integer(entry.breaks.pieces ?? 6, `${path}.breaks.pieces`, 2, 16), speed: number(entry.breaks.speed ?? 0.5, `${path}.breaks.speed`, 0, MAX_SPEED) };
+  }
   // Copies on a ring (each turned to face out from its centre, `at`) or on a grid (from `at`).
   if (entry.ring !== undefined && entry.grid !== undefined) fail(`${path}.grid`, 'copies go on a ring or a grid, not both');
   let places = [[at[0], at[1], angle]];
@@ -260,7 +274,7 @@ function readBody(entry, path, context) {
     shape, parts, size, fixed, x, y, angle: a, vx: velocity[0], vy: velocity[1], spin,
     invMass: fixed ? 0 : 1 / mass, invInertia: fixed || shape === 'hoop' ? 0 : 1 / (mass * inertia),
     bounce: material.bounce, friction: material.friction, drag: material.drag, spinDrag: material.spinDrag,
-    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, team, speed, fills, fillEvery, outline, symbol, trail, smear,
+    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, team, speed, fills, fillEvery, outline, symbol, trail, smear, breaks,
     ...(pivot && pivoted(x, y, a, pivot, velocity, spin))
   }));
 }
@@ -270,6 +284,49 @@ function pivoted(x, y, angle, pivot, velocity, spin) {
   const c = cosDeg(angle), s = sinDeg(angle), dx = -(c * pivot[0] - s * pivot[1]), dy = -(s * pivot[0] + c * pivot[1]), w = spin * RADIANS;
   return { pivot, anchor: [x, y], drift: velocity, x: x + dx, y: y + dy, vx: velocity[0] - w * dy, vy: velocity[1] + w * dx };
 }
+
+// ---- Breaking ---------------------------------------------------------------------------------------------------------
+// A body's outline in its own frame, wound as a polygon part's: a polygon's corners, a circle's as a 16-sided polygon.
+function outlineOf(b) {
+  const part = b.parts[0];
+  if (part.kind === 'circle') return Array.from({ length: 16 }, (_, k) => [part.r * cosDeg(k * 22.5), part.r * sinDeg(k * 22.5)]);
+  return Array.from({ length: part.n }, (_, i) => [part.vx[i], part.vy[i]]);
+}
+// A convex polygon cut to the side of the line through (mx, my) where (p − m)·d ≤ 0 (one edge of Sutherland–Hodgman).
+function clipHalf(points, mx, my, dx, dy) {
+  const out = [], side = ([x, y]) => (x - mx) * dx + (y - my) * dy;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i], b = points[(i + 1) % points.length], sa = side(a), sb = side(b);
+    if (sa <= 0) out.push(a);
+    if ((sa < 0 && sb > 0) || (sa > 0 && sb < 0)) { const t = sa / (sa - sb); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+  }
+  return out;
+}
+// A polygon's area, centroid and second moment of area about its centroid.
+function polygonMass(points) {
+  let area = 0, cx = 0, cy = 0, second = 0;
+  for (let i = 0; i < points.length; i++) {
+    const [ax, ay] = points[i], [bx, by] = points[(i + 1) % points.length], cross = ax * by - ay * bx;
+    area += cross; cx += (ax + bx) * cross; cy += (ay + by) * cross;
+  }
+  cx /= 3 * area; cy /= 3 * area;
+  for (let i = 0; i < points.length; i++) {
+    const ax = points[i][0] - cx, ay = points[i][1] - cy, bx = points[(i + 1) % points.length][0] - cx, by = points[(i + 1) % points.length][1] - cy, cross = ax * by - ay * bx;
+    second += cross * (ax * ax + ax * bx + bx * bx + ay * ay + ay * by + by * by) / 12;
+  }
+  return { area: area / 2, cx, cy, second };
+}
+// A convex polygon from cutting, with its doubled and straight corners dropped: none if fewer than 3 corners are left or
+// it covers under a twentieth of a square pixel.
+function tidy(points) {
+  let pts = points.filter((p, i) => { const q = points[(i + 1) % points.length], dx = p[0] - q[0], dy = p[1] - q[1]; return dx * dx + dy * dy > 1e-8; });
+  pts = pts.filter((p, i) => {
+    const a = pts[(i + pts.length - 1) % pts.length], c = pts[(i + 1) % pts.length];
+    return (p[0] - a[0]) * (c[1] - p[1]) - (p[1] - a[1]) * (c[0] - p[0]) > 1e-9;
+  });
+  return pts.length >= 3 && polygonMass(pts).area > 0.05 ? pts : [];
+}
+const BREAK_SALT = 7703;
 
 /** A list of body entries (as a bodies source's or a fluid effect's `bodies`) → the bodies they make, copies included. */
 export function readBodies(list, path, context) {
@@ -315,7 +372,7 @@ function readEffect(effect, path, context) {
   });
   // A territory of team-owned cells, then the bodies (whose teams it names), the powers and the heads-up display.
   const territory = effect.territory === undefined ? null : readTerritory(effect.territory, `${path}.territory`, { width, height, palette });
-  const bodies = readBodies(effect.bodies, `${path}.bodies`, { ...context, teams: territory ? territory.teams : null });
+  const bodies = readBodies(effect.bodies, `${path}.bodies`, { ...context, teams: territory ? territory.teams : null, breakable: true });
   const pickups = readPickups(effect.pickups, `${path}.pickups`, context), events = readEvents(effect.events, `${path}.events`, context, bodies);
   const strikes = readStrikes(effect.strikes, `${path}.strikes`, context, bodies);
   const hud = readHud(effect.hud, `${path}.hud`, context, territory ? territory.teams : null);
@@ -621,8 +678,100 @@ export function createBodyWorld(effect, context) {
     place(twin); bodies.push(twin);
     return twin;
   };
+  // A body broken into up to `count` pieces about the point `at` (in the world), while there is room for them: seeded
+  // sites in its shape, drawn toward `at` so the pieces are smaller where it was hit. Each site's share of the shape (its
+  // cell of the Voronoi diagram, cut to the outline) is a piece, a convex body of its own, and each pixel of the body's
+  // picture goes with the piece of the nearest site, so the picture breaks with it and none of it is lost. A piece moves as
+  // its part of the body moved (velocity and turning), flung `kick` pixels a frame away from `at`; a sliver that holds no
+  // pixel of the picture is dust and is dropped. The body is gone and what rested on it wakes; pieces never break again.
+  // Returns the number of pieces (none when it can't break into two).
+  const shatter = (b, at, count, kick) => {
+    count = Math.min(count, most - bodies.length);
+    if (b.gone || b.piece || b.shape === 'hoop' || count < 2) return 0;
+    const outline = outlineOf(b), c = b.c, s = b.s;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of outline) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    const inside = (x, y) => outline.every(([ax, ay], i) => { const [bx, by] = outline[(i + 1) % outline.length]; return (bx - ax) * (y - ay) - (by - ay) * (x - ax) >= 0; });
+    // Where it was hit, in its own frame.
+    const lx = at[0] - b.x, ly = at[1] - b.y, qx = c * lx + s * ly, qy = c * ly - s * lx;
+    const sites = [];
+    for (let k = 0; k < count; k++) {
+      let px = 0, py = 0;
+      for (let t = 0; t < 32; t++) {
+        const x = x0 + (x1 - x0) * random(BREAK_SALT, b.index, current, k, t, 1), y = y0 + (y1 - y0) * random(BREAK_SALT, b.index, current, k, t, 2);
+        if (inside(x, y)) { px = x; py = y; break; }
+      }
+      const pull = 0.3 + 0.7 * random(BREAK_SALT, b.index, current, k, 3);
+      sites.push([qx + (px - qx) * pull, qy + (py - qy) * pull]);
+    }
+    const { rows, cx, cy } = pictureOf(b, context.symbols ?? {});
+    let cells, pixels, drawn = 0;
+    for (const row of rows) for (const ch of row) if (ch !== '.' && ch !== ' ') drawn++;
+    // A piece too small to read (a sliver of a pixel or two, which would only flicker) gives its site up, and the cut is
+    // made again without it, so its neighbours take its share and every piece stays one convex body.
+    const least = Math.max(4, Math.round(drawn / (3 * count)));
+    for (;;) {
+      cells = sites.map(([sx, sy], i) => {
+        let cell = outline;
+        for (let j = 0; j < sites.length && cell.length; j++) {
+          if (j === i) continue;
+          const dx = sites[j][0] - sx, dy = sites[j][1] - sy;
+          if (dx * dx + dy * dy < 1e-9) { if (j < i) cell = []; continue; }
+          cell = clipHalf(cell, (sx + sites[j][0]) / 2, (sy + sites[j][1]) / 2, dx, dy);
+        }
+        return cell.length ? tidy(cell) : [];
+      });
+      pixels = cells.map(() => []);
+      rows.forEach((row, v) => {
+        for (let u = 0; u < row.length; u++) {
+          if (row[u] === '.' || row[u] === ' ') continue;
+          const x = u + 0.5 - cx, y = v + 0.5 - cy;
+          let best = -1, near = Infinity;
+          sites.forEach(([sx, sy], k) => { const d = (x - sx) * (x - sx) + (y - sy) * (y - sy); if (cells[k].length && d < near) { near = d; best = k; } });
+          if (best >= 0) pixels[best].push([u, v, row[u]]);
+        }
+      });
+      let weakest = -1;
+      pixels.forEach((list, k) => { if (list.length < least && (weakest < 0 || list.length < pixels[weakest].length)) weakest = k; });
+      if (weakest < 0 || sites.length <= 2) break;
+      sites.splice(weakest, 1);
+    }
+    const part = b.parts[0], density = b.fixed ? 1 : 1 / (b.invMass * (part.kind === 'circle' ? PI * part.r * part.r : polygonMass(outline).area));
+    const pieces = [];
+    cells.forEach((cell, k) => {
+      if (!cell.length || !pixels[k].length) return;
+      const { area, cx: mx, cy: my, second } = polygonMass(cell);
+      // The piece's place is the half pixel nearest its centroid, the middle of its picture: its pixels, padded evenly.
+      const gx = Math.round(2 * (cx + mx)) / 2, gy = Math.round(2 * (cy + my)) / 2;
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (const [u, v] of pixels[k]) { u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+      const L = Math.max(gx - u0, u1 + 1 - gx), M = Math.max(gy - v0, v1 + 1 - gy), picture = Array.from({ length: 2 * M }, () => Array(2 * L).fill('.'));
+      for (const [u, v, ch] of pixels[k]) picture[v - (gy - M)][u - (gx - L)] = ch;
+      const ox = gx - cx, oy = gy - cy, local = cell.map(([x, y]) => [x - ox, y - oy]), mass = density * area;
+      const inertia = (second + area * ((mx - ox) * (mx - ox) + (my - oy) * (my - oy))) / area;
+      let px0 = Infinity, py0 = Infinity, px1 = -Infinity, py1 = -Infinity;
+      for (const [x, y] of local) { px0 = Math.min(px0, x); py0 = Math.min(py0, y); px1 = Math.max(px1, x); py1 = Math.max(py1, y); }
+      const size = [Math.max(1, Math.round(px1 - px0)), Math.max(1, Math.round(py1 - py0))];
+      // Its offset from the body's centre in the world, and the way from where the body was hit to its centroid.
+      const wx = c * ox - s * oy, wy = s * ox + c * oy, fx = c * (mx - qx) - s * (my - qy), fy = s * (mx - qx) + c * (my - qy), f = Math.sqrt(fx * fx + fy * fy);
+      const x = b.x + wx, y = b.y + wy;
+      pieces.push({
+        ...b, name: null, shape: 'polygon', parts: [polygonPart(local)], size, extent: Math.max(size[0], size[1]) / 2, fixed: false, x, y, x0: x, y0: y,
+        vx: b.vx - b.w * wy + (f > 1e-6 ? kick * fx / f : 0), vy: b.vy + b.w * wx + (f > 1e-6 ? kick * fy / f : 0), spin: 0,
+        invMass: 1 / mass, invInertia: 1 / (mass * inertia), symbol: null, rows: picture.map(row => row.join('')), fills: null, fillEvery: null, outline: null, colour: 0,
+        trail: null, smear: null, speed: null, tireless: false, energy: undefined, breaks: null, piece: true, pivot: null, anchor: null, drift: null, cuts: false,
+        gone: false, asleep: false, sleepy: 0, hit: false, struck: false, hits: 0, history: [], poses: [], held: undefined, rested: b.rested ? { ...b.rested } : undefined
+      });
+    });
+    if (pieces.length < 2) return 0;
+    pieces.forEach((piece, k) => { piece.index = bodies.length; piece.path = `${b.path} (piece ${k})`; place(piece); bodies.push(piece); });
+    b.gone = true;
+    stats.broken.push({ body: b.name ?? b.path, frame: current, pieces: pieces.length });
+    rouse([b]);
+    return pieces.length;
+  };
   // Territory and powers (territory.js): cells owned by teams, pickups, events and strikes.
-  const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height, fastest: MAX_SPEED }) : null;
+  const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, shatter: (b, at, count) => shatter(b, at, count, b.breaks ? b.breaks.speed : 0.5), width, height, fastest: MAX_SPEED }) : null;
   // A body that cuts passes through what it cuts, so it is drawn over it (paintBodies draws it last).
   for (const r of effect.strikes ?? []) if (r.cut) bodies[r.by].cuts = true;
   let current = 0;
@@ -630,7 +779,9 @@ export function createBodyWorld(effect, context) {
   const moving = b => b.fixed ? (b.vx !== 0 || b.vy !== 0 || b.spin !== 0) : !b.gone && !b.asleep;
   const awake = b => !b.fixed && !b.gone && !b.asleep;
   let warm = new Map();
-  const stats = { hits: 0, escaped: [], rest: null, overlaps: [], paths: {} };
+  const stats = { hits: 0, escaped: [], rest: null, overlaps: [], paths: {}, broken: [] };
+  // Bodies that break when knocked (see shatter); their pieces don't.
+  const breakable = bodies.some(b => b.breaks);
   const round = v => Math.round(v * 100) / 100;
   for (const b of bodies) if (b.name !== null && !b.fixed) stats.paths[b.name] = [];
   let time = 0;
@@ -932,11 +1083,26 @@ export function createBodyWorld(effect, context) {
         apply(contact, point, nx * impulse, ny * impulse);
       }
     }
+    // How hard each body that breaks was knocked this substep, and where: at each point where something met it, the speed
+    // the two met at (with its bounce), shared out as easily as each side gives there (its weight and its turning about
+    // its centre both resist, so a box landing on a corner is knocked as hard as one landing flat, and a pebble barely
+    // knocks a heavy vase). Measured from the speed they met at, not the pushes the solve passed on, so a knock breaks what
+    // it hits and not every crate in the row behind it at once: those break, if they do, as the pieces hit them.
+    const knocks = breakable ? new Map() : null;
+    const give = (body, rx, ry, nx, ny) => { const arm = rx * ny - ry * nx; return body.invMass + body.invInertia * arm * arm; };
     for (const contact of contacts) for (const point of contact.points) {
       next.set(`${contact.key}:${point.id}`, [point.normal, point.tangent]);
       if (point.approach < -impact && point.most > 0) { contact.a.hit = contact.a.struck = true; if (contact.b) contact.b.hit = contact.b.struck = true; }
       // A strike's body strikes what it pushes, a hit or not: a blade that sweeps a ball along a wall keeps striking it.
       if (turf && contact.b && point.most > 0) turf.strike(contact.a, contact.b);
+      if (knocks && point.approach < 0 && (contact.a.breaks || (contact.b && contact.b.breaks))) {
+        const { a, b, nx, ny } = contact, ka = solid(a) ? 0 : give(a, point.rax, point.ray, nx, ny), kb = solid(b) ? 0 : give(b, point.rbx, point.rby, nx, ny);
+        for (const [body, k] of [[a, ka], [b, kb]]) {
+          if (!body || !body.breaks || !k) continue;
+          const speed = -point.approach * (1 + contact.bounce) * k / (ka + kb);
+          if (speed > (knocks.get(body)?.speed ?? 0)) knocks.set(body, { speed, at: [point.x, point.y] });
+        }
+      }
     }
     // The cells hit change hands; a body with a held speed goes on at it, along its own heading.
     if (turf) { for (const contact of contacts) if (contact.cell) turf.hit(contact, contact.cell); turf.settle(bodies); }
@@ -952,6 +1118,8 @@ export function createBodyWorld(effect, context) {
       const [gx, gy] = pull(b), want = 2 * (b.energy + gx * b.x + gy * b.y - spinEnergy(b)), has = b.vx * b.vx + b.vy * b.vy;
       if (want > 0 && has > 1e-12) { const k = Math.sqrt(want / has); b.vx *= k; b.vy *= k; }
     }
+    // Bodies knocked harder than they hold break, in body order, as they move after the knock.
+    if (knocks) for (const [b, knock] of [...knocks].sort((p, q) => p[0].index - q[0].index)) if (knock.speed >= b.breaks.at) shatter(b, knock.at, b.breaks.pieces, b.breaks.speed);
     warm = next;
     time += dt;
   };
@@ -1014,10 +1182,12 @@ export function createBodyWorld(effect, context) {
   return { bodies, stats, gravity, advance, turf, retrace };
 }
 
+// The bodies splits added to a world (the pieces of broken bodies are counted with them, under broken).
+const copiesOf = (world, effect) => world.bodies.length - effect.bodies.length - world.stats.broken.reduce((sum, entry) => sum + entry.pieces, 0);
 function simulate(effect, context) {
   const world = createBodyWorld(effect, context), drawn = [];
   for (let f = 0; f < effect.frames; f++) { world.advance(f); drawn.push(drawFrame(world, context.width, context.height, context, f, effect.hud)); }
-  return { drawn, stats: world.stats, turf: world.turf, steps: (effect.frames - 1) * effect.substeps, copies: world.bodies.length - effect.bodies.length };
+  return { drawn, stats: world.stats, turf: world.turf, steps: (effect.frames - 1) * effect.substeps, copies: copiesOf(world, effect) };
 }
 
 // ---- Drawing ----------------------------------------------------------------------------------------------------------
@@ -1237,7 +1407,8 @@ function draw(bodies, width, height, context) {
 // with where its centre lies in it ([x, y], in the picture's pixels). Cached by shape, size, fill and outline.
 const pictures = new Map();
 function pictureOf(b, symbols) {
-  if (b.symbol) { const rows = symbols[b.symbol]; return { rows, cx: rows[0].length / 2, cy: rows.length / 2 }; }
+  // A piece of a broken body carries its own picture (its part of the body's), centred on it as a symbol is.
+  if (b.symbol || b.rows) { const rows = b.rows ?? symbols[b.symbol]; return { rows, cx: rows[0].length / 2, cy: rows.length / 2 }; }
   const part = b.parts[0], fill = b.fills[b.colour];
   const key = `${b.shape}:${b.size}:${part.r ?? ''}:${part.vx ? part.vx.join() : ''}:${part.vy ? part.vy.join() : ''}:${fill}:${b.outline ?? ''}`;
   if (pictures.has(key)) return pictures.get(key);
@@ -1453,9 +1624,9 @@ export function paintBodies(bodies, grid, width, height, symbols) {
     // as it turns. (Drawn afresh from the pixels it covered it swelled into a blob; resampled as RotSprite does it rounded
     // off and grew spikes; resampled exactly it grew a nub at each corner.) Under 6 pixels across it is drawn square: no
     // picture that small shows a turn without a pinwheel.
-    const upright = !b.symbol && (b.shape === 'box' || b.shape === 'polygon') && Math.max(b.size[0], b.size[1]) >= 6 ? uprightRows(b) : null;
-    if (b.symbol || upright) {
-      const rows = upright ?? context.symbols[b.symbol], degrees = b.shape === 'circle' ? 0 : Math.round(drawnDegrees(b, [rows[0].length, rows.length])) % 360;
+    const upright = !b.symbol && !b.rows && (b.shape === 'box' || b.shape === 'polygon') && Math.max(b.size[0], b.size[1]) >= 6 ? uprightRows(b) : null;
+    if (b.symbol || b.rows || upright) {
+      const rows = upright ?? b.rows ?? context.symbols[b.symbol], degrees = b.shape === 'circle' ? 0 : Math.round(drawnDegrees(b, [rows[0].length, rows.length])) % 360;
       const { rows: turned, origin } = sprite(rows, b.shape === 'circle' ? 0 : degrees);
       // Turned about its centre, which sits on the body's drawn centre: on a pixel's middle where the turned picture's
       // middle is one (mx a half), else on a pixel corner, so the turned picture lies on whole pixels with its middle
@@ -1524,8 +1695,10 @@ export const scaleAnchor = (anchor, n) => (n > 1 && Array.isArray(anchor) && anc
 const FACE_WORK = 1, PIXEL_WORK = 0.25;
 function work(effect, { width, height, n = 1, symbols = {} }) {
   const count = effect.bodies.length, moving = effect.bodies.filter(b => !b.fixed), margin = MAX_SPEED / effect.substeps + 0.1;
-  const splits = [effect.pickups, effect.events, effect.strikes].some(list => (list ?? []).some(p => p.power === 'split'));
-  const added = splits && moving.length ? Math.max(0, (effect.most ?? count) - count) : 0, crowd = count + added;
+  // Splits and break powers may fill the crowd up to `most`; bodies that break when knocked add their pieces.
+  const splits = [effect.pickups, effect.events, effect.strikes].some(list => (list ?? []).some(p => p.power === 'split' || p.power === 'break'));
+  const pieces = effect.bodies.reduce((sum, b) => sum + (b.breaks ? b.breaks.pieces : 0), 0), room = Math.max(0, (effect.most ?? count) - count);
+  const added = splits && moving.length ? room : Math.min(pieces, room), crowd = count + added;
   const smallest = moving.length ? Math.max(0.5, Math.min(...moving.map(shapeArea))) : 1;
   const span = b => Math.max(b.size[0], b.size[1]) * Math.SQRT2;
   const pairs = b => Math.min(crowd - 1, Math.ceil((span(b) + 4 * margin + 8) ** 2 / smallest)) / 2;
@@ -1740,7 +1913,7 @@ export function compileBodies(source) {
     const played = territoryFigures(run.turf, effect.territory);
     metadata.effects[name] = {
       frames: effect.frames, substeps: effect.substeps, steps: run.steps, bodies: effect.bodies.length, ...(run.copies && { copies: run.copies }), hits: run.stats.hits,
-      escaped: run.stats.escaped, rest: run.stats.rest, pixels: run.drawn.map(frame => frame.pixels), ...(Object.keys(run.stats.paths).length && { paths: run.stats.paths }), ...played, ...(effectWarnings.length && { warnings: effectWarnings })
+      escaped: run.stats.escaped, ...(run.stats.broken.length && { broken: run.stats.broken }), rest: run.stats.rest, pixels: run.drawn.map(frame => frame.pixels), ...(Object.keys(run.stats.paths).length && { paths: run.stats.paths }), ...played, ...(effectWarnings.length && { warnings: effectWarnings })
     };
   }
   const recipe = { ...shell, frames, animations, ...(source.sheet !== undefined && { sheet: source.sheet }) };
@@ -1768,6 +1941,6 @@ export function bodiesFrames(source, effectName) {
       while (at < f) { at++; world.advance(at); if (at === f) { const ops = frameOps(effect, drawFrame(world, width, height, context, at, effect.hud), width, height, n); image = renderProject({ ...shell, frames: [{ name: `${name}-${at}`, ...(ops.length && { ops }) }] }).frames[0].data; } }
       return image;
     },
-    figures: () => ({ frames: at + 1, ...(world.bodies.length > effect.bodies.length && { copies: world.bodies.length - effect.bodies.length }), hits: world.stats.hits, escaped: world.stats.escaped, ...territoryFigures(world.turf, effect.territory) })
+    figures: () => ({ frames: at + 1, ...(copiesOf(world, effect) && { copies: copiesOf(world, effect) }), hits: world.stats.hits, escaped: world.stats.escaped, ...(world.stats.broken.length && { broken: world.stats.broken }), ...territoryFigures(world.turf, effect.territory) })
   };
 }

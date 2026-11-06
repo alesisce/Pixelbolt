@@ -28,6 +28,7 @@ test('bodies go wherever a fluid does; a body has a temperature only where there
   const box = { shape: 'box', size: [6, 6], at: [24, 10], fill: 'h' };
   refused(pool([{ ...box, shape: 'star' }]), 'fluid.effects.pool.bodies[0].shape', /circle, box, polygon, hoop/);
   refused(pool([{ ...box, temperature: 4 }]), 'fluid.effects.pool.bodies[0].temperature', /with heat/);
+  refused(pool([{ ...box, breaks: { at: 2 } }]), 'fluid.effects.pool.bodies[0].breaks', /do not break yet/);
   assert.throws(() => compileBodies({ format: 'pixelforge-bodies', version: 1, name: 'hot', width: 32, height: 32, palette,
     effects: { drop: { frames: 4, duration: 50, bodies: [{ ...box, temperature: 4 }] } } }), error => error instanceof PixelError && /temperature/.test(error.path) && /with heat/.test(error.message));
   // A gas has no gravity of its own; with bodies in it, gravity is what pulls them.

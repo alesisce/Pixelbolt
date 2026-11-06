@@ -18,7 +18,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '732208a10f7603dfd3e5cc447dc62a066f732f626c7b134fde5300af8b5cfe71', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': '066de7bb6a870cd3148848e00a9f790bd68db5906b63ef7cbdb400dc824a65cb', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': 'c5dba208434334548f38d180769bc92ad4e497f5d39e011a9651fbec3154c84e'
+  'ring-escape': '12ce30e2a30240499a3b7442550d5f5085158ec51a8c20eb3cb7f54c3ac23c6e', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': 'e3b290ee0f38e34623368381973b7362fe0ce7243797d49dcea37cdcd76e5538', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': 'eb4397b860abbb2b7233a9e6c5c6256c99c6f93bb2a190aea9c889b657798fe1'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -416,6 +416,44 @@ test('a strike that cuts passes through what it strikes and leaves the pieces be
   // The cutter is drawn over what it passes through: the blade's pixels are those it has alone.
   const alone = run(scene({ frames: 8, gravity: [0, 0], bodies: [blade] }, { width: 64, height: 48 })).recipe;
   for (let f = 3; f < 8; f++) assert.deepEqual(keyCells(recipe.frames[f], 'w'), keyCells(alone.frames[f], 'w'), `frame ${f}: the blade drawn whole`);
+});
+
+test('a pixel two bodies\' pictures claim is drawn for the body whose shape covers it, not the one drawn last', () => {
+  // Two touching balls of radius 1.5 (3 × 3 pictures, which reach past their round shapes): the pixel both pictures
+  // claim lies inside the first. Drawn later, the second was drawn over it.
+  const grid = frame => frame.ops.find(op => op.op === 'grid'), at = (frame, x, y) => { const g = grid(frame); return g.rows[y - g.y][x - g.x]; };
+  const two = run(scene({ frames: 2, gravity: [0, 0], bodies: [{ shape: 'circle', radius: 1.5, at: [12.4, 12.1], fill: 'r' }, { shape: 'circle', radius: 1.5, at: [10.2, 10], fill: 's' }] })).recipe;
+  assert.equal(at(two.frames[0], 11, 11), 'r');
+  // A pile of four rows of balls in four colours: no pixel is drawn in one colour where a ball of another lies deeper.
+  // (Ten were, each row drawn over the bottoms of the row before.)
+  const colours = ['k', 'r', 's', 'w'], f = 89;
+  const { recipe, effect } = run(scene({ frames: 90, gravity: [0, 0.3], walls: ['left', 'right', 'top', 'bottom'], bodies: colours.map((fill, i) => ({ name: `row${i}`, shape: 'circle', radius: 1.5, at: [4 + i * 0.66, 4 + i * 3.3], grid: { count: [12, 1], step: [3.3, 0] }, fill, bounce: 0.2, friction: 0.3 })) }, { width: 44, height: 32 }));
+  const balls = Object.entries(effect.paths).map(([name, p]) => ({ colour: colours[Number(name.match(/row(\d)/)[1])], x: p[f][0], y: p[f][1] }));
+  const g = grid(recipe.frames[f]), wrong = [];
+  g.rows.forEach((row, j) => [...row].forEach((c, i) => {
+    if (c === '.') return;
+    const px = g.x + i + 0.5, py = g.y + j + 0.5, depth = b => 1.5 - Math.hypot(px - b.x, py - b.y);
+    const own = Math.max(...balls.filter(b => b.colour === c).map(depth)), other = Math.max(...balls.filter(b => b.colour !== c).map(depth));
+    if (other > Math.max(own, 0) + 0.25) wrong.push([g.x + i, g.y + j]);
+  }));
+  assert.deepEqual(wrong, []);
+});
+
+test('a heavy body rests on light ones without sinking, and still ploughs through them', () => {
+  const tall = { width: 48, height: 64 }, walls = ['left', 'right', 'bottom'];
+  // A plank 50 times as dense as the three balls under it sank into them, was pushed out fast enough to bounce, and
+  // hopped 6 pixels for ever; it now settles at once.
+  const plank = run(scene({ frames: 200, gravity: [0, 0.3], walls, bodies: [{ shape: 'circle', radius: 2, at: [14, 62], grid: { count: [3, 1], step: [10, 0] }, fill: 'k' }, { name: 'plank', shape: 'box', size: [30, 3], at: [24, 58.5], density: 50, fill: 'w' }] }, tall)).effect;
+  const heights = plank.paths.plank.slice(20).map(p => p[1]);
+  assert.ok(plank.rest !== null && plank.rest < 30 && Math.max(...heights) - Math.min(...heights) < 0.05, `rest ${plank.rest}, heights ${Math.min(...heights)}–${Math.max(...heights)}`);
+  // A box 100 times as dense as the box under it slid off it and fell; it stays on top.
+  const boxes = run(scene({ frames: 200, gravity: [0, 0.3], walls, bodies: [{ name: 'light', shape: 'box', size: [8, 8], at: [24, 60], fill: 'k' }, { name: 'heavy', shape: 'box', size: [16, 6], at: [24, 53], density: 100, fill: 'w' }] }, tall)).effect;
+  const [hx, hy] = boxes.paths.heavy.at(-1), [lx, ly] = boxes.paths.light.at(-1);
+  assert.ok(Math.abs(hx - 24) < 0.5 && Math.abs(hy - 53) < 0.1 && Math.abs(lx - 24) < 0.5 && Math.abs(ly - 60) < 0.1 && boxes.rest !== null, `heavy at [${hx}, ${hy}], light at [${lx}, ${ly}], rest ${boxes.rest}`);
+  // A heavy ball thrown into a pile of light balls shoves through it as before (it would be stopped and pushed back if
+  // it were solved as lighter while it shoves).
+  const plough = run(scene({ frames: 80, gravity: [0, 0.3], walls, bodies: [{ name: 'heavy', shape: 'circle', radius: 3, at: [8, 44], velocity: [3, 0], density: 50, friction: 0.2, fill: 'w' }, { shape: 'circle', radius: 1.5, at: [40, 46.5], grid: { count: [10, 3], step: [3, -3], stagger: 1.5 }, friction: 0.2, fill: 'k' }] }, { width: 96, height: 48 })).effect;
+  assert.ok(plough.paths.heavy.at(-1)[0] > 70, `the heavy ball ends at ${plough.paths.heavy.at(-1)[0]}`);
 });
 
 test('the work estimate charges the crowd a strike can make and a smear\'s sweep', () => {

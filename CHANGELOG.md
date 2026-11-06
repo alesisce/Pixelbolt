@@ -4,6 +4,11 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Rigid bodies: heavy loads and touching pictures
+
+- A heavy body resting on much lighter ones no longer sinks into them. A body resting on top of one more than ten times lighter is solved as if it weighed ten times the lighter, so a plank 50 times as dense as the balls under it settles at once (it sank in, bounced out and hopped 6 pixels for ever), a box 100 times as dense as the box under it stays on top (it slid off), and a table holds a load 2,000 times as dense as its legs. Hits and shoves keep the true weights: a heavy ball thrown into a pile of light ones ploughs exactly as far as before.
+- Bodies that touch are drawn side by side. A pixel two bodies' pictures both claim (a small ball's square picture reaches past its round shape) is drawn for the body whose shape covers it more deeply, not for whichever is drawn last, so in a pile of balls of different colours no ball is drawn over its neighbour's place: a radius-1.5 pile drew 2,738 pixels inside the wrong ball over 120 frames and now draws 24. Ring escape, spinning hoop and blade bloom change by a pixel here and there; their motion is the same.
+
 ### Blade bloom: strikes, cuts, pivots, smears and crowds
 
 - `strikes` give a power to whatever a named body pushes, at the end of the frame, each body at most once every `rest` frames: a strike of `split` by a turning blade multiplies every ball it touches. With `cut` (pixels a frame) the body cuts instead of pushing: it passes through the free bodies it touches and what it strikes leaves the way behind it at that speed, a split's pieces fanned about it, so a blade cutting through a pile leaves its newest pieces in its wake instead of sweeping them along ahead of it. A sleeping body that is cut wakes, and a cutter is drawn over what it passes through.

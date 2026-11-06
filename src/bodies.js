@@ -30,6 +30,8 @@ const MATCH_WORK = 4000000000;
 const PI = 3.141592653589793, RADIANS = PI / 180;
 // Overlap (pixels) the solver leaves alone, the share of the rest it removes each substep, and the fastest it pushes.
 const SLOP = 0.02, BIAS = 0.2, MAX_PUSH = 1;
+// The most times heavier than the other a body resting on (or under) another is solved as (see the substep).
+const HEAVIER = 10;
 // Impacts slower than this (pixels a frame) don't bounce, so a dropped ball settles; faster ones count as hits.
 const REST_SPEED = 0.3;
 // A body slower than SLEEP_SPEED (rim included) for SLEEP_FRAMES frames sleeps: it holds exactly still, as a solid,
@@ -720,10 +722,12 @@ export function createBodyWorld(effect, context) {
 
   const velocityAt = (b, rx, ry) => b ? [b.vx - b.w * ry, b.vy + b.w * rx] : [0, 0];
   const solid = b => !b || b.fixed || b.asleep;
+  // An impulse on a contact moves each side by the inverse mass and inertia it is solved with (contact.ma … ib, set as
+  // each substep prepares its contacts: none for a solid side).
   const apply = (contact, point, px, py) => {
-    const { a, b } = contact;
-    if (!solid(a)) { a.vx -= a.invMass * px; a.vy -= a.invMass * py; a.w -= a.invInertia * (point.rax * py - point.ray * px); }
-    if (!solid(b)) { b.vx += b.invMass * px; b.vy += b.invMass * py; b.w += b.invInertia * (point.rbx * py - point.rby * px); }
+    const { a, b, ma, ia, mb, ib } = contact;
+    if (ma || ia) { a.vx -= ma * px; a.vy -= ma * py; a.w -= ia * (point.rax * py - point.ray * px); }
+    if (mb || ib) { b.vx += mb * px; b.vy += mb * py; b.w += ib * (point.rbx * py - point.rby * px); }
   };
   // A moving obstacle's face moves at its velocity (contact.move).
   const relative = (contact, point) => {
@@ -757,8 +761,7 @@ export function createBodyWorld(effect, context) {
   // Restitution on a contact's two points at once (a 2 × 2 block), so both leave at their bounce together; false where
   // the block's answer would pull rather than push.
   const bounceBoth = contact => {
-    const [p, q] = contact.points, { a, b, nx, ny } = contact;
-    const ma = solid(a) ? 0 : a.invMass, ia = solid(a) ? 0 : a.invInertia, mb = solid(b) ? 0 : b.invMass, ib = solid(b) ? 0 : b.invInertia;
+    const [p, q] = contact.points, { nx, ny, ma, ia, mb, ib } = contact;
     const pa = p.rax * ny - p.ray * nx, pb = p.rbx * ny - p.rby * nx, qa = q.rax * ny - q.ray * nx, qb = q.rbx * ny - q.rby * nx;
     const k11 = ma + mb + ia * pa * pa + ib * pb * pb, k22 = ma + mb + ia * qa * qa + ib * qb * qb, k12 = ma + mb + ia * pa * qa + ib * pb * qb, det = k11 * k22 - k12 * k12;
     if (!(det > 1e-9 * k11 * k22)) return false;
@@ -773,7 +776,7 @@ export function createBodyWorld(effect, context) {
   // An approach faster than this is an impact, that bounces and counts as a hit: REST_SPEED, or more where a substep of
   // gravity alone adds more (with one substep and strong gravity, a resting body was hit at every substep, changed colour
   // every frame and never slept).
-  const impact = Math.max(REST_SPEED, 1.5 * Math.sqrt(gravity[0] * gravity[0] + gravity[1] * gravity[1]) * dt);
+  const gravityLength = Math.sqrt(gravity[0] * gravity[0] + gravity[1] * gravity[1]), impact = Math.max(REST_SPEED, 1.5 * gravityLength * dt);
   // A woken body wakes the sleeping bodies it touches, and they theirs, as a stack is held up by its neighbours: a
   // knocked crate pushes the crates beside it instead of the still ones holding it as a wall. A weightless body leans
   // on nothing, so it wakes only when something moves into it.
@@ -862,18 +865,33 @@ export function createBodyWorld(effect, context) {
       const spinLimit = 2 * MAX_SPEED / Math.max(0.5, b.extent);
       if (b.w > spinLimit) b.w = spinLimit; else if (b.w < -spinLimit) b.w = -spinLimit;
     }
-    // Prepare each point: its arms, masses, the approach speed it bounces from, and the impulses it starts with.
+    // Prepare each point: its arms, the approach speed it bounces from, the masses it is solved with and the impulses it
+    // starts with.
     const next = new Map();
     for (const contact of contacts) {
       const { a, b, nx, ny } = contact, tx = ny, ty = -nx;
-      const ma = solid(a) ? 0 : a.invMass, ia = solid(a) ? 0 : a.invInertia, mb = solid(b) ? 0 : b.invMass, ib = solid(b) ? 0 : b.invInertia;
+      let ma = solid(a) ? 0 : a.invMass, ia = solid(a) ? 0 : a.invInertia, mb = solid(b) ? 0 : b.invMass, ib = solid(b) ? 0 : b.invInertia;
       for (const point of contact.points) {
         point.rax = point.x - a.x; point.ray = point.y - a.y; point.rbx = b ? point.x - b.x : 0; point.rby = b ? point.y - b.y : 0;
+        const [dvx, dvy] = relative(contact, point);
+        point.approach = dvx * nx + dvy * ny;
+      }
+      // A free body resting on top of a much lighter one (the contact faces within 60 degrees of gravity, and no point is
+      // an impact) is solved as if it weighed at most HEAVIER times the lighter. Sequential impulses settle a load as
+      // slowly as the weights under it differ: a plank 50 times as dense as the balls under it sank into them, was pushed
+      // out fast enough to bounce, and hopped for ever, and a heavy box on a light one slid off it. A heavy body that hits
+      // or shoves light ones keeps its true weight, so it still ploughs through them.
+      const down = contact.b && gravityLength > 0 ? (nx * gravity[0] + ny * gravity[1]) / gravityLength : 0;
+      if (ma && mb && Math.abs(down) > 0.5 && contact.points.every(point => point.approach >= -impact)) {
+        // The normal points from a to b: down along gravity, b is under a.
+        if (down > 0.5 && ma * HEAVIER < mb) { const k = mb / (HEAVIER * ma); ma *= k; ia *= k; }
+        else if (down < -0.5 && mb * HEAVIER < ma) { const k = ma / (HEAVIER * mb); mb *= k; ib *= k; }
+      }
+      contact.ma = ma; contact.ia = ia; contact.mb = mb; contact.ib = ib;
+      for (const point of contact.points) {
         const ran = point.rax * ny - point.ray * nx, rbn = point.rbx * ny - point.rby * nx, rat = point.rax * ty - point.ray * tx, rbt = point.rbx * ty - point.rby * tx;
         const kn = ma + mb + ia * ran * ran + ib * rbn * rbn, kt = ma + mb + ia * rat * rat + ib * rbt * rbt;
         point.normalMass = kn > 0 ? 1 / kn : 0; point.tangentMass = kt > 0 ? 1 / kt : 0;
-        const [dvx, dvy] = relative(contact, point);
-        point.approach = dvx * nx + dvy * ny;
         const kept = warm.get(`${contact.key}:${point.id}`);
         point.normal = kept ? kept[0] : 0; point.tangent = kept ? kept[1] : 0; point.most = 0;
       }
@@ -1290,6 +1308,43 @@ function insideCells(placed, n) {
 }
 // The bodies in the order they are drawn: in order, but those that cut last, over what they pass through.
 const drawOrder = bodies => (bodies.some(b => b.cuts) ? [...bodies.filter(b => !b.cuts), ...bodies.filter(b => b.cuts)] : bodies);
+// How far the point (x, y) lies inside a body's shape where it really is: the depth under its nearest edge, negative
+// outside.
+function depthIn(b, x, y) {
+  let best = -Infinity;
+  for (const part of b.world) {
+    let d;
+    if (part.kind === 'circle') d = part.r - Math.sqrt((x - part.x) * (x - part.x) + (y - part.y) * (y - part.y));
+    else {
+      let out = -Infinity;
+      for (let i = 0; i < part.n; i++) out = Math.max(out, part.nx[i] * (x - part.vx[i]) + part.ny[i] * (y - part.vy[i]));
+      d = part.r - out;
+    }
+    if (d > best) best = d;
+  }
+  return best;
+}
+// Puts the bodies' pixels into `grid` (W × H, n fine pixels to a world pixel). Where two bodies' pictures claim the same
+// pixel, it goes to the body whose shape covers the pixel's middle more deeply, so bodies that touch are drawn side by
+// side, each in its own pixels, as their shapes lie. (The later body was drawn over the earlier: a small ball's square
+// picture reaches past its round shape, and a pile of them was drawn with every ball partly inside its neighbours.) A
+// cutter, drawn last, covers what it passes through.
+function bodyPainter(grid, W, H, n) {
+  const owner = new Int32Array(W * H).fill(-1), drawn = [];
+  let body = null, slot = -1;
+  return {
+    start: b => { body = b; slot = drawn.length; drawn.push(b); },
+    put: (x, y, code) => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return;
+      const k = y * W + x, o = owner[k];
+      if (o >= 0 && o !== slot && !body.cuts) {
+        const px = (x + 0.5) / n, py = (y + 0.5) / n;
+        if (!(depthIn(body, px, py) > depthIn(drawn[o], px, py))) return;
+      }
+      grid[k] = code; owner[k] = slot;
+    }
+  };
+}
 // Smears, under the bodies: each one's shape swept from where it was `smear.frames` frames ago to where it is, sampled
 // so its far end moves under half a (fine) pixel a sample, the oldest part first, so the colours run from the first,
 // just behind the body, to the last at the far end of the sweep, as a pixel artist draws a fast swing.
@@ -1333,8 +1388,11 @@ export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
     }
   }
   paintSmears(bodies, n, put);
+  const painter = bodyPainter(grid, W, H, n);
   for (const b of drawOrder(bodies)) {
     if (b.gone) continue;
+    painter.start(b);
+    const put = painter.put;
     if (b.shape === 'hoop') {
       const code = b.fills[b.colour].charCodeAt(0);
       for (const [x, y] of cover(b, b.x, b.y)) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) put(x * n + i, y * n + j, code);
@@ -1385,8 +1443,11 @@ export function paintBodies(bodies, grid, width, height, symbols) {
     }
   }
   paintSmears(bodies, 1, put);
+  const painter = bodyPainter(grid, width, height, 1);
   for (const b of drawOrder(bodies)) {
     if (b.gone) continue;
+    painter.start(b);
+    const put = painter.put;
     // A box or polygon is drawn as its upright picture, fill and outline, turned by turnRows (as a symbol is): its sides
     // turned to whole pixel steps, straight and even, and its outline kept a closed line, so it stays the same crisp shape
     // as it turns. (Drawn afresh from the pixels it covered it swelled into a blob; resampled as RotSprite does it rounded

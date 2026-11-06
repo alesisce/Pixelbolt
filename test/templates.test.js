@@ -188,14 +188,14 @@ test('every template at its defaults passes its own motion checks on a plain sid
     // Near limbs stay in front of the body in both halves of a side-view cycle.
     for (const name of [`${animation}-contact-a`, `${animation}-contact-b`]) {
       const layers = recipe.frames.find(f => f.name === name).layers.map(l => l.name);
-      assert.ok(layers.indexOf('farThigh') < layers.indexOf('torso') && layers.indexOf('torso') < layers.indexOf('nearThigh'), name);
+      assert.ok(layers.indexOf('farThigh') < layers.indexOf(source.rig.body) && layers.indexOf(source.rig.body) < layers.indexOf('nearThigh'), name);
     }
   }
 });
 
 test('the rigged hero example compiles without warnings and draws the plain humanoid from an origin at its feet', async () => {
-  // The example places its torso with `at` from an origin where the feet meet the ground, so every frame's atlas
-  // anchor is a ground point; the pixels are exactly those of the plain fixture above, whose origin is its torso.
+  // The example places its hips with `at` from an origin where the feet meet the ground, so every frame's atlas
+  // anchor is a ground point; the pixels are exactly those of the plain fixture above, whose origin is its hips.
   const hero = JSON.parse(await readFile(new URL('../examples/hero.poses.json', import.meta.url), 'utf8'));
   const compiled = compilePoses(hero), plain = renderProject(compilePoses(plainRig()).recipe);
   assert.equal(compiled.warnings, undefined);

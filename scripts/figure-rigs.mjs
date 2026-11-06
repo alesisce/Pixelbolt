@@ -152,41 +152,57 @@ export function bossRig() {
   return source;
 }
 
-// A plain 32×32 side-view humanoid at template defaults: the regression fixture for "templates pass their own
-// motion checks on an ordinary body". Far limbs are a ramp step darker, as side-view sprites usually draw them.
+// The example hero's twin at 32×36 (examples/hero.poses.json): the same drawing and motions with its origin at the
+// hips instead of under the feet, so the regression fixture for "templates pass their own motion checks on an ordinary
+// body" doesn't move when the example's file does. Templates run at their defaults, apart from a jump that rises three
+// pixels a step, which keeps the head inside the canvas. Near limbs are a ramp step lighter than far ones.
 export function plainRig() {
   const limb = (length, width, ramp, base, caps = ['socket', 'round']) => ({ bone: { length, width, ramp, base, outline: 'k', caps }, points: { end: 'end' } });
   const side = (label, far) => [
-    { name: `${label}Thigh`, part: far ? 'farThigh' : 'thigh', attach: { part: 'torso', point: 'hip' }, angle: 90 },
+    { name: `${label}Thigh`, part: far ? 'farThigh' : 'thigh', attach: { part: 'hips', point: 'hip' }, angle: 90 },
     { name: `${label}Shin`, part: far ? 'farShin' : 'shin', attach: { part: `${label}Thigh`, point: 'end' }, angle: 0 },
-    { name: `${label}Boot`, part: 'boot', attach: { part: `${label}Shin`, point: 'end' } }
+    { name: `${label}Boot`, part: far ? 'farBoot' : 'boot', attach: { part: `${label}Shin`, point: 'end' } }
   ];
   const arm = (label, far) => [
-    { name: `${label}Upper`, part: far ? 'farUpper' : 'upper', attach: { part: 'torso', point: 'shoulder' }, angle: 95 },
-    { name: `${label}Fore`, part: far ? 'farFore' : 'fore', attach: { part: `${label}Upper`, point: 'end' }, angle: -15 }
+    { name: `${label}Upper`, part: far ? 'farUpper' : 'upper', attach: { part: 'chest', point: 'shoulder' }, angle: -175 },
+    { name: `${label}Fore`, part: far ? 'farFore' : 'fore', attach: { part: `${label}Upper`, point: 'end' }, angle: -15 },
+    { name: `${label}Hand`, part: far ? 'farHand' : 'hand', attach: { part: `${label}Fore`, point: 'end' } }
   ];
   return {
     format: 'pixelforge-poses', version: 1, name: 'plain-walker', width: 32, height: 36,
-    palette: { k: '#1b1626', x: '#6e3f3a', y: '#c27b5c', z: '#f0b98e', r: '#3f1c2c', s: '#7f2b3d', t: '#b8463f', u: '#e07e52',
-      p: '#222844', q: '#39476b', o: '#5a6f99', v: '#7b93c4', b: '#3a2421', c: '#6e4430', h: '#f2c14e', g: '#c08a2a' },
-    ramps: [['x', 'y', 'z'], ['r', 's', 't', 'u'], ['p', 'q', 'o', 'v']],
+    palette: { k: '#1d1726', x: '#8a4b3c', y: '#d38a62', z: '#f4c59c', d: '#3b2232', e: '#6c3d35', f: '#a0633f',
+      i: '#1e3d4c', j: '#2f7173', l: '#58ab94', m: '#a6e0bb', r: '#5a1e30', s: '#a8323e', t: '#e2614b',
+      p: '#1f2236', q: '#2f3655', o: '#48547c', b: '#3a2421', c: '#6e4430', w: '#a8774c' },
+    ramps: [['x', 'y', 'z'], ['i', 'j', 'l', 'm'], ['p', 'q', 'o'], ['r', 's', 't'], ['b', 'c', 'w']],
     light: 225,
     parts: {
-      torso: { mass: { size: [7, 9], ramp: 1, base: 2, outline: 'k' }, points: { hip: [0, 4], shoulder: [1, -3], neck: [1, -4] } },
-      head: { rows: ['..kkkk..', '.kghhhk.', 'kgghhhhk', 'kghzzkzk', '.kgzzzzk', '.kyzzzyk', '..kyyyk.', '...kkk..'], anchor: [4, 7] },
+      hips: { mass: { size: [6, 4], ramp: 2, base: 1, outline: 'k' }, points: { hip: [0, 1], waist: [0, -1] } },
+      chest: { bone: { length: 6, width: [5, 6], ramp: 1, base: 1, outline: 'k', caps: ['flat', 'round'] }, points: { end: 'end', shoulder: [4, 0], neck: [6, 0], nape: [5, -2] } },
+      head: { rows: ['..kfek...', '.kdeefkk.', 'kddeeeefk', 'kdddeffek', 'kddyzzzzk', 'kdxyzzkzk', '.kdyzzzzk', '..kyyyyk.', '...kkkk..'], anchor: [4, 8] },
+      scarf: { rows: ['.kkkk.', 'ksttsk', 'krssrk', '.kkkk.'], anchor: [2, 1] },
+      tail: limb(4, [2, 2], 3, 1), tip: limb(3, [2, 1], 3, 1, ['socket', 'point']),
       thigh: limb(5, [3, 3], 2, 2, ['round', 'round']), shin: limb(5, [3, 2], 2, 2),
       farThigh: limb(5, [3, 3], 2, 1, ['round', 'round']), farShin: limb(5, [3, 2], 2, 1),
-      upper: limb(4, [2, 2], 1, 2, ['round', 'round']), fore: limb(4, [2, 2], 0, 1),
-      farUpper: limb(4, [2, 2], 1, 1, ['round', 'round']), farFore: limb(4, [2, 2], 0, 0),
-      boot: { rows: ['kcck.', 'kbcck', 'kkkkk'], anchor: [1, 2] }
+      upper: limb(4, [2, 2], 1, 2, ['round', 'round']), fore: limb(4, [2, 2], 1, 2),
+      farUpper: limb(4, [2, 2], 1, 1, ['round', 'round']), farFore: limb(4, [2, 2], 1, 1),
+      hand: { rows: ['.kk.', 'kzzk', 'kyyk', '.kk.'], anchor: [1, 1] },
+      farHand: { rows: ['.kk.', 'kyyk', 'kxxk', '.kk.'], anchor: [1, 1] },
+      boot: { rows: ['kcck..', 'kccwck', 'kkkkkk'], anchor: [1, 1] },
+      farBoot: { rows: ['kbbk..', 'kbbcbk', 'kkkkkk'], anchor: [1, 1] }
     },
-    rig: { body: 'torso', head: 'head', ground: 34, rest: 'stand',
-      legs: [['nearThigh', 'nearShin'], ['farThigh', 'farShin']], arms: [['nearUpper', 'nearFore'], ['farUpper', 'farFore']] },
-    poses: [{ name: 'stand', duration: 200, origin: [15, 20], parts: [
+    rig: { body: 'hips', head: 'head', ground: 33, rest: 'stand',
+      legs: [['nearThigh', 'nearShin'], ['farThigh', 'farShin']], arms: [['nearUpper', 'nearFore'], ['farUpper', 'farFore']], tail: ['tail', 'tip'] },
+    poses: [{ name: 'stand', duration: 200, origin: [15, 22], parts: [
+      { name: 'tail', part: 'tail', attach: { part: 'chest', point: 'nape' }, angle: -145 },
+      { name: 'tip', part: 'tip', attach: { part: 'tail', point: 'end' }, angle: 15 },
       ...arm('far', true), ...side('far', true),
-      { name: 'torso', part: 'torso' }, { name: 'head', part: 'head', attach: { part: 'torso', point: 'neck' } },
-      ...side('near', false), ...arm('near', false)
+      { name: 'hips', part: 'hips' },
+      { name: 'chest', part: 'chest', attach: { part: 'hips', point: 'waist' }, angle: 270 },
+      ...side('near', false),
+      { name: 'head', part: 'head', attach: { part: 'chest', point: 'neck' } },
+      { name: 'scarf', part: 'scarf', attach: { part: 'chest', point: 'neck' } },
+      ...arm('near', false)
     ] }],
-    motions: Object.fromEntries(['idle', 'walk', 'run', 'jump', 'attack', 'hurt'].map(template => [template, { template }]))
+    motions: Object.fromEntries(['idle', 'walk', 'run', 'jump', 'attack', 'hurt'].map(template => [template, template === 'jump' ? { template, apex: 3 } : { template }]))
   };
 }

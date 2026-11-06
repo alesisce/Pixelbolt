@@ -170,52 +170,71 @@ const swing = { format: 'pixelforge-poses', version: 1, name: 'swing', width: 40
   ],
   animations: { swing: { frames: ['raise', 'swing-1', 'swing-2', 'strike', 'follow'], loop: false } } };
 
-// A side-view figure rigged for the motion templates: bone limbs, a mass torso, a grid head and boots. The pose origin
-// is where the feet meet the ground, exported as each frame's anchor; the torso, the only part without attach, stands
-// 15 rows above it (its `at` is an offset from the origin, not a canvas position), and every other part hangs from it.
-// Far limbs are one ramp step darker, paired limbs share rest angles, and every motion passes its own checks.
+// A side-view figure rigged for the motion templates: a young courier in a teal jacket with a red scarf (brief:
+// examples/hero.brief.md). A small mass at the hips is the rig body; the jacket is a bone standing on it, wider at the
+// shoulders than the hem; two-bone arms and legs, grid hands, boots and head, and a two-bone scarf that the templates
+// sway as rig.tail. The pose origin is the anchor under the feet, exported as each frame's anchor; the hips, the only
+// part without attach, stand 13 rows above it (their `at` is an offset from the origin, not a canvas position), and
+// every other part hangs from them. rig.ground is the ankle row, so each boot's sole covers the end of its shin. Near
+// limbs are one ramp step lighter than far ones, never on the darkest step, and every motion passes its own checks.
 const limb = (length, width, ramp, base, caps = ['socket', 'round']) => ({ bone: { length, width, ramp, base, outline: 'k', caps }, points: { end: 'end' } });
 const leg = (side, far) => [
-  { name: `${side}Thigh`, part: far ? 'farThigh' : 'thigh', attach: { part: 'torso', point: 'hip' }, angle: 90 },
+  { name: `${side}Thigh`, part: far ? 'farThigh' : 'thigh', attach: { part: 'hips', point: 'hip' }, angle: 90 },
   { name: `${side}Shin`, part: far ? 'farShin' : 'shin', attach: { part: `${side}Thigh`, point: 'end' }, angle: 0 },
-  { name: `${side}Boot`, part: 'boot', attach: { part: `${side}Shin`, point: 'end' } }
+  { name: `${side}Boot`, part: far ? 'farBoot' : 'boot', attach: { part: `${side}Shin`, point: 'end' } }
 ];
 const arm = (side, far) => [
-  { name: `${side}Upper`, part: far ? 'farUpper' : 'upper', attach: { part: 'torso', point: 'shoulder' }, angle: 95 },
-  { name: `${side}Fore`, part: far ? 'farFore' : 'fore', attach: { part: `${side}Upper`, point: 'end' }, angle: -15 }
+  { name: `${side}Upper`, part: far ? 'farUpper' : 'upper', attach: { part: 'chest', point: 'shoulder' }, angle: -175 },
+  { name: `${side}Fore`, part: far ? 'farFore' : 'fore', attach: { part: `${side}Upper`, point: 'end' }, angle: -15 },
+  { name: `${side}Hand`, part: far ? 'farHand' : 'hand', attach: { part: `${side}Fore`, point: 'end' } }
 ];
 const hero = { format: 'pixelforge-poses', version: 1, name: 'hero', width: 32, height: 36,
-  palette: { k: '#1b1626', x: '#6e3f3a', y: '#c27b5c', z: '#f0b98e', r: '#3f1c2c', s: '#7f2b3d', t: '#b8463f', u: '#e07e52',
-    p: '#222844', q: '#39476b', o: '#5a6f99', v: '#7b93c4', b: '#3a2421', c: '#6e4430', h: '#f2c14e', g: '#c08a2a' },
-  ramps: [['x', 'y', 'z'], ['r', 's', 't', 'u'], ['p', 'q', 'o', 'v']],
+  palette: { k: '#1d1726', x: '#8a4b3c', y: '#d38a62', z: '#f4c59c', d: '#3b2232', e: '#6c3d35', f: '#a0633f',
+    i: '#1e3d4c', j: '#2f7173', l: '#58ab94', m: '#a6e0bb', r: '#5a1e30', s: '#a8323e', t: '#e2614b',
+    p: '#1f2236', q: '#2f3655', o: '#48547c', b: '#3a2421', c: '#6e4430', w: '#a8774c' },
+  ramps: [['x', 'y', 'z'], ['i', 'j', 'l', 'm'], ['p', 'q', 'o'], ['r', 's', 't'], ['b', 'c', 'w']],
   light: 225,
   parts: {
-    torso: { mass: { size: [7, 9], ramp: 1, base: 2, outline: 'k' }, points: { hip: [0, 4], shoulder: [1, -3], neck: [1, -4] } },
-    head: { rows: ['..kkkk..', '.kghhhk.', 'kgghhhhk', 'kghzzkzk', '.kgzzzzk', '.kyzzzyk', '..kyyyk.', '...kkk..'], anchor: [4, 7] },
+    hips: { mass: { size: [6, 4], ramp: 2, base: 1, outline: 'k' }, points: { hip: [0, 1], waist: [0, -1] } },
+    chest: { bone: { length: 6, width: [5, 6], ramp: 1, base: 1, outline: 'k', caps: ['flat', 'round'] }, points: { end: 'end', shoulder: [4, 0], neck: [6, 0], nape: [5, -2] } },
+    head: { rows: ['..kfek...', '.kdeefkk.', 'kddeeeefk', 'kdddeffek', 'kddyzzzzk', 'kdxyzzkzk', '.kdyzzzzk', '..kyyyyk.', '...kkkk..'], anchor: [4, 8] },
+    scarf: { rows: ['.kkkk.', 'ksttsk', 'krssrk', '.kkkk.'], anchor: [2, 1] },
+    tail: limb(4, [2, 2], 3, 1), tip: limb(3, [2, 1], 3, 1, ['socket', 'point']),
     thigh: limb(5, [3, 3], 2, 2, ['round', 'round']), shin: limb(5, [3, 2], 2, 2),
     farThigh: limb(5, [3, 3], 2, 1, ['round', 'round']), farShin: limb(5, [3, 2], 2, 1),
-    upper: limb(4, [2, 2], 1, 2, ['round', 'round']), fore: limb(4, [2, 2], 0, 1),
-    farUpper: limb(4, [2, 2], 1, 1, ['round', 'round']), farFore: limb(4, [2, 2], 0, 0),
-    boot: { rows: ['kcck.', 'kbcck', 'kkkkk'], anchor: [1, 2] }
+    upper: limb(4, [2, 2], 1, 2, ['round', 'round']), fore: limb(4, [2, 2], 1, 2),
+    farUpper: limb(4, [2, 2], 1, 1, ['round', 'round']), farFore: limb(4, [2, 2], 1, 1),
+    hand: { rows: ['.kk.', 'kzzk', 'kyyk', '.kk.'], anchor: [1, 1] },
+    farHand: { rows: ['.kk.', 'kyyk', 'kxxk', '.kk.'], anchor: [1, 1] },
+    boot: { rows: ['kcck..', 'kccwck', 'kkkkkk'], anchor: [1, 1] },
+    farBoot: { rows: ['kbbk..', 'kbbcbk', 'kkkkkk'], anchor: [1, 1] }
   },
   poses: [{ name: 'stand', duration: 200, origin: [15, 35], parts: [
+    { name: 'tail', part: 'tail', attach: { part: 'chest', point: 'nape' }, angle: -145 },
+    { name: 'tip', part: 'tip', attach: { part: 'tail', point: 'end' }, angle: 15 },
     ...arm('far', true), ...leg('far', true),
-    { name: 'torso', part: 'torso', at: [0, -15] }, { name: 'head', part: 'head', attach: { part: 'torso', point: 'neck' } },
-    ...leg('near', false), ...arm('near', false)
+    { name: 'hips', part: 'hips', at: [0, -13] },
+    { name: 'chest', part: 'chest', attach: { part: 'hips', point: 'waist' }, angle: 270 },
+    ...leg('near', false),
+    { name: 'head', part: 'head', attach: { part: 'chest', point: 'neck' } },
+    { name: 'scarf', part: 'scarf', attach: { part: 'chest', point: 'neck' } },
+    ...arm('near', false)
   ] }],
-  rig: { body: 'torso', head: 'head', ground: 34, rest: 'stand',
-    legs: [['nearThigh', 'nearShin'], ['farThigh', 'farShin']], arms: [['nearUpper', 'nearFore'], ['farUpper', 'farFore']] },
+  rig: { body: 'hips', head: 'head', ground: 33, rest: 'stand',
+    legs: [['nearThigh', 'nearShin'], ['farThigh', 'farShin']], arms: [['nearUpper', 'nearFore'], ['farUpper', 'farFore']], tail: ['tail', 'tip'] },
   motions: { idle: { template: 'idle' }, walk: { template: 'walk', speed: 24, stride: 10, lift: 2, bob: 1 },
-    run: { template: 'run', speed: 48, stride: 10, lift: 4, bob: 1, lean: 8 }, jump: { template: 'jump' }, attack: { template: 'attack' }, hurt: { template: 'hurt' } },
+    run: { template: 'run', speed: 48, stride: 10, lift: 4, bob: 1, lean: 8 }, jump: { template: 'jump', apex: 3 }, attack: { template: 'attack' }, hurt: { template: 'hurt' } },
   sheet: { columns: 8 } };
 
 // The hero holding a sword: a grid prop on the near forearm's end with a relative `angle`, so the motion templates turn
 // it with the arm (back over the shoulder at the wind-up, level at the strike). An absolute `rotate`, or neither, keeps
-// the blade at one angle through the attack. The canvas is 8 pixels wider than the hero's so the blade stays on it.
+// the blade at one angle through the attack. The canvas is 8 pixels wider than the hero's so the blade stays on it. The
+// sword is drawn just before the near hand, so the fist closes over its grip, in colours of its own.
 const heroSword = { ...hero, name: 'hero-sword', width: 40,
-  palette: { ...hero.palette, w: '#e8edf5' },
-  parts: { ...hero.parts, sword: { rows: ['...k.........', '..kgk........', '..kgkkkkkkkk.', 'kbbgwwwwwwwok', '..kgkkkkkkkk.', '..kgk........', '...k.........'], anchor: [1, 3] } },
-  poses: [{ ...hero.poses[0], origin: [19, 35], parts: [...hero.poses[0].parts, { name: 'sword', part: 'sword', attach: { part: 'nearFore', point: 'end' }, angle: -45 }] }],
+  palette: { ...hero.palette, a: '#e8edf5', n: '#8d9ab3', g: '#e0b04a' },
+  parts: { ...hero.parts, sword: { rows: ['...k.........', '..kgk........', '..kgkkkkkkkk.', 'kbbgaaaaaaank', '..kgkkkkkkkk.', '..kgk........', '...k.........'], anchor: [1, 3] } },
+  poses: [{ ...hero.poses[0], origin: [19, 35], parts: hero.poses[0].parts.flatMap(part => part.name === 'nearHand'
+    ? [{ name: 'sword', part: 'sword', attach: { part: 'nearFore', point: 'end' }, angle: -45 }, part] : [part]) }],
   motions: { idle: hero.motions.idle, walk: hero.motions.walk, attack: hero.motions.attack } };
 
 // The quick start's slime at 32 × 32, breathing in a gentle squash and stretch: a flat mass keeps its base on its

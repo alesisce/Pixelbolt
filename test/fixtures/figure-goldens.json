@@ -607,151 +607,151 @@
     ]
   },
   "plain": {
-    "compiled": "0f00433e67f5b4884a79495406f6a57a5f51c65ac22bc79616b4252a8d933b10",
+    "compiled": "8599dc3df516aa0c8b2d3da214e947d03be136f8434f5d69c50171aa6f13b66f",
     "frames": [
       {
         "name": "stand",
-        "rgba": "78c6b692405cc33362bdc9e41fce9d1b0708638532e9f413b6f7ebb355a21aa0"
+        "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
       },
       {
         "name": "idle-rest",
-        "rgba": "78c6b692405cc33362bdc9e41fce9d1b0708638532e9f413b6f7ebb355a21aa0"
+        "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
       },
       {
         "name": "idle-inhale",
-        "rgba": "863397a0453f2c72845d42dfb211edb412fc4fc5b534ef590f6437320fc47400"
+        "rgba": "ea27d5c5328432bb406a76d54905865cc1be1988f4e6054e553d22ccb37458e6"
       },
       {
         "name": "idle-settle",
-        "rgba": "78c6b692405cc33362bdc9e41fce9d1b0708638532e9f413b6f7ebb355a21aa0"
+        "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
       },
       {
         "name": "idle-exhale",
-        "rgba": "dd47cf98e4d22dc551cb8b8ca4513a6a56aaa352a5f31b0cc42dfc9b37eca4ed"
+        "rgba": "1ec378a17806a9e4c36a5bf8a7ca35e7eb543f68024666a19507fd26bb60b1b4"
       },
       {
         "name": "walk-contact-a",
-        "rgba": "13d771aeba3b6b324433f52a20e63ade37dfd90220ee3f716c2b42f8536623c2"
+        "rgba": "76f63136f640ebf746266c9442c534ae4c02815120e05c7ba59e4f503124a973"
       },
       {
         "name": "walk-down-a",
-        "rgba": "41937365b9157e545bd4c932bbb378d9b5e9c98c9d53ef7af8b78a77296dde28"
+        "rgba": "9f72c91bd208883f738d84cc73b7e160a880e748e8fd1e5fae0a903fb92ab17b"
       },
       {
         "name": "walk-passing-a",
-        "rgba": "e1bc9730c5b8382e63a6710e0d250755274af619e5ee148dc1e0f5cb565b1313"
+        "rgba": "6efb10272fddda43400dc64406792667f7e86e27805abd04ee0cf353f8d96ec6"
       },
       {
         "name": "walk-up-a",
-        "rgba": "0c13524c5250cafe09dc53995d2b521658d84d08f687bf46f67075c266935848"
+        "rgba": "79ba98bec6cc1ab80afff0204eea3271aaa26ea1b053f73aa55a0a53d0d8fa54"
       },
       {
         "name": "walk-contact-b",
-        "rgba": "c503ace7e38c59fe471a082536219700f1c8b7e8871a1435a87e67f2a92602f2"
+        "rgba": "81f9f96ac9953ce878b40d9d016d4922f1a1c5c8b03982e1cb0029e0e0875026"
       },
       {
         "name": "walk-down-b",
-        "rgba": "89f6ca64287b42b8b62ee7eccb2d361e3c6c00f83ac192fcf9ddaed3f3d81aa3"
+        "rgba": "3a7470bb5acd752bf09d7c78bed0c0b58b7efe016909f4e3d1f0c446d2b2d722"
       },
       {
         "name": "walk-passing-b",
-        "rgba": "a61fda67944d34f29d6ba094c45f0a6cf2451788beea99323b67cd1c3a0a864b"
+        "rgba": "aaa993c4aa33026b3f11a3e6759a9da72fd1276d8c9e2aad345a692ec781133e"
       },
       {
         "name": "walk-up-b",
-        "rgba": "15446a19f01aa69c693aedfb6f5b613f841a9502c29b21253db446bad1be1c75"
+        "rgba": "5a735c5e119817e2dd1d77acd11bbb0dc240cdb492b360365d801363e50768cc"
       },
       {
         "name": "run-contact-a",
-        "rgba": "a0d76f4b01a693d05432114c2eeecbce18f73273cad5e1f9a4521468e884d267"
+        "rgba": "c24fded07258a836e5470a6316ef9e421e6038885672aa3a11496bff366d65e4"
       },
       {
         "name": "run-down-a",
-        "rgba": "b2803359c557ffe533f0a731a72212b87c3abf290d33622d6235a300c62053d4"
+        "rgba": "15133217c041443ca9f4860baceb91949e915e985acd00ff057de5e82cc23200"
       },
       {
         "name": "run-passing-a",
-        "rgba": "56cfa0b0a4bcafca169456ca4ac9f471659059888acefb4c2adae7665e5812f0"
+        "rgba": "b8f9d91d6bbf62439adfdae50cd530864b36f46ef55642fb96a939acae16427c"
       },
       {
         "name": "run-up-a",
-        "rgba": "c508032aa42a179612b5844bff6b08304504742302b89d6f5ead7e49c501165f"
+        "rgba": "41f00469dda4aeffa2a757410fed6f450410ad0c1f3ef53d2446fafa6a414d63"
       },
       {
         "name": "run-flight-a",
-        "rgba": "a0aad8edb364ad706c080863a20275f483f47fc9c844ab4e60b641281de8d9a5"
+        "rgba": "ad745bf58a00216171862c89babcdc71b72dedb805565d6506ccedf2f89bfc6f"
       },
       {
         "name": "run-contact-b",
-        "rgba": "8b2a0252ca0a48b6b1716691de31906ad6a1ef81ec165e86d999c29d912fc51f"
+        "rgba": "3a7659d5a1b9d9555a48386f61d16b230f10e74e3f176fbe8499cdcf74f75d48"
       },
       {
         "name": "run-down-b",
-        "rgba": "6b7b69b5871599ff049ed07103f5182ddb6131c2e8bfa18ee851c3c2222b656a"
+        "rgba": "086bf0f52148b1ae3eedd983e24ce6a3c0a4335d2f9895d4910990739d33359c"
       },
       {
         "name": "run-passing-b",
-        "rgba": "0c806033f4473b523d4e80cfbf845cc4a3399a0eb09156114e0e8126e5b7c242"
+        "rgba": "a449d95b60664723b68ac35f3abb0167732f3af379418db3d382e4cfb1634671"
       },
       {
         "name": "run-up-b",
-        "rgba": "5485feb1c0c64ec2fb916d93dbb92f3318b92d13d5801deda3cbed96bb668064"
+        "rgba": "ea1913fdfadfba82d2e0a7588f03b2abebebd77296e758a0054e7b95b0c8e1ad"
       },
       {
         "name": "run-flight-b",
-        "rgba": "4a613740f19b72f6053c6ada9c8ebbe55ab3c43a98362d9055e548fa833130b5"
+        "rgba": "e367dd05b80f5e02c8aa0ae3a18b06e5c99e99ccb65b0fbc2199140c20275aa9"
       },
       {
         "name": "jump-crouch",
-        "rgba": "e1888435905ee0703f0d3b82e83091bd342af23c44aa76a85fd04424b4881564"
+        "rgba": "d7ba2af22f7d06c6a4f811fa932b49c68e137fa46de6e2878d0887f55df5b2bd"
       },
       {
         "name": "jump-take-off",
-        "rgba": "00a249e6b96ad024faa97e1103b0b5d40aa7555f91b60b374a0c7409d9943fc6"
+        "rgba": "c5be9431cf3c68543fdbc29d93582786d7de8e5ac500e09dadeda5e3a7fb1244"
       },
       {
         "name": "jump-rise",
-        "rgba": "da0c0fd57c77bde65fb8cff986214c6eab5a29a2fb29c8835e0983ccc00708a4"
+        "rgba": "7f4bd5b58b23393f1e4f32c8e3a97953be50630de34992af88a055e946af8785"
       },
       {
         "name": "jump-apex",
-        "rgba": "7e3fbc4d796357c48bf7755cb644bbe78b4f121c602debf0abdb398e6f3ebeec"
+        "rgba": "9f33c473908bad15788ae9fb3e4f32b61878f54ff32707a30200c47811202ca1"
       },
       {
         "name": "jump-fall",
-        "rgba": "da0c0fd57c77bde65fb8cff986214c6eab5a29a2fb29c8835e0983ccc00708a4"
+        "rgba": "98c7d128c0072afa8c573bd8a20a56a39f606c68b34a426741e98206b3b3de97"
       },
       {
         "name": "jump-land",
-        "rgba": "e1888435905ee0703f0d3b82e83091bd342af23c44aa76a85fd04424b4881564"
+        "rgba": "ba733abe930e6ad28a86c265c5c4333eeb083a877f0d7443d7e6394d96623149"
       },
       {
         "name": "jump-recover",
-        "rgba": "78c6b692405cc33362bdc9e41fce9d1b0708638532e9f413b6f7ebb355a21aa0"
+        "rgba": "469c3aa9dcbae5308d5a49a26bbab29cf87efd080b2fac00bba418909bc81092"
       },
       {
         "name": "attack-anticipation",
-        "rgba": "608bc0500a5ceace513322b4e2375f55e903ada67173f052b67291349cf6444a"
+        "rgba": "44b646cf07a66d4ef3e6a706cd13e45b914191f28333b725c3c0e69131d4b709"
       },
       {
         "name": "attack-strike",
-        "rgba": "3d23230cb04cc91ac14303826f561b72a9d976daadae4ea0e7b512fd0d349e5a"
+        "rgba": "1b59d314bd515f061b1c6d28968a9adcffa6203463c7e15f0c7cfe8d419103d0"
       },
       {
         "name": "attack-follow-through",
-        "rgba": "badf086e3e5d940f56ad8f84664c5f2fe31cf584d5d9b0ba7322e4946f65ac66"
+        "rgba": "6e4b759fb412a615db09de4da3393cb98673a894a4aa518ad5512dbfa3a09e70"
       },
       {
         "name": "attack-recover",
-        "rgba": "78c6b692405cc33362bdc9e41fce9d1b0708638532e9f413b6f7ebb355a21aa0"
+        "rgba": "469c3aa9dcbae5308d5a49a26bbab29cf87efd080b2fac00bba418909bc81092"
       },
       {
         "name": "hurt-recoil",
-        "rgba": "bb835038a0924efeabf52403138b6d7dfb2ef1f63bc25295f401271f96ac6242"
+        "rgba": "5f6826c09b0e6d48f05a4dbcb909cd802093764cc89127bc75c15edb2f56d8c4"
       },
       {
         "name": "hurt-recover",
-        "rgba": "d9d20cbbd685bd538bd71222c4e0975345693bb70a8878f7b7262ffa3c0bfbc9"
+        "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
       }
     ]
   }

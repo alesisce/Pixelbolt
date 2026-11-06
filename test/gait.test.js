@@ -54,6 +54,17 @@ test('walk: contacts are centred under the hip with long legs, the body dips aft
   assert.ok(at(lifted.at(-1)) > 0, `${lifted.at(-1)}: it reaches forward before landing`);
 });
 
+test('the attack swings in the body\'s frame, though the arms hang from a chest that stands up from the hips', () => {
+  // windup -130 and strike 50 are the template's defaults; follow-through carries the strike 45° further.
+  const turn = degrees => ((degrees % 360) + 360) % 360, rest = plainRig().poses[0].parts;
+  assert.equal(rest.find(part => part.name === 'nearUpper').attach.part, 'chest');
+  assert.equal(rest.find(part => part.name === 'chest').attach.part, 'hips');
+  for (const [name, expected] of [['attack-anticipation', -130], ['attack-strike', 50], ['attack-follow-through', 95]]) {
+    const parts = pose(name);
+    assert.equal(turn(parts.nearUpper.worldAngle - (parts.hips.rotate ?? 0)), turn(expected), name);
+  }
+});
+
 // A bone across a mass, so the bone's outline crosses the body: once in the pose as written, once mirrored.
 const crossing = innerLines => ({
   format: 'pixelforge-poses', version: 1, name: 'crossing', width: 24, height: 24, ...(innerLines && { innerLines }),

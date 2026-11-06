@@ -151,7 +151,12 @@ export function expandMotions(input, compileRest, probeJoints) {
       if (template === 'idle') bodySquash = 1 + (grounded ? squashBy : breath) * sinDeg(angle);
       if (template === 'jump') { dy = [2, 0, -apex, -apex * 2, -apex, 2, 0][i]; bodySquash = [crouch, stretch, 1.05, 1, 1, crouch, 1][i]; }
       // Follow-through carries the swing well past the strike and settles the body, so it reads as its own key pose.
-      if (template === 'attack') { setAngle(parts.get(rig.arms[arm][0]), [windup, strike, strike + 45, restAngle(rig.arms[arm][0])][i]); bodySquash = [.9, 1.05, .95, 1][i]; setAngle(torso, restAngle(rig.body) + [-8, 8, 14, 0][i]); }
+      // windup and strike are angles in the body's frame. An arm that hangs from another part (a chest standing up from
+      // the hips) takes them less that part's turn from the body at rest, so the blow goes the same way on either rig.
+      if (template === 'attack') {
+        const shoulder = rig.arms[arm][0], frame = (restData.parts[instances.get(shoulder).attach?.part]?.rotate ?? 0) - (restData.parts[rig.body].rotate ?? 0);
+        setAngle(parts.get(shoulder), i < 3 ? [windup, strike, strike + 45][i] - frame : restAngle(shoulder)); bodySquash = [.9, 1.05, .95, 1][i]; setAngle(torso, restAngle(rig.body) + [-8, 8, 14, 0][i]);
+      }
       if (template === 'hurt') { setAngle(torso, restAngle(rig.body) + (i ? 0 : recoil)); bodySquash = i ? 1 : hurtSquash; }
       pose.origin[1] += dy; torso.squash = squash((body.squash ?? 1) * bodySquash);
       if (grounded) {

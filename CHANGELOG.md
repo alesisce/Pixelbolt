@@ -4,6 +4,13 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Walks and runs that read, and a new hero
+
+- Walk and run templates: arms swing against the legs, the arm on the leading leg's side furthest back at each contact (they were a quarter cycle late, so an arm stuck out forward mid-step), and an elbow bends as its arm comes forward; a run keeps the elbows bent. The planted foot's travel is centred under the hip. The body rides its legs: each pose sinks only as far as its planted feet need, so the legs are nearly straight at contact, and `bob` is the dip just after each contact (and a run's rise through flight). The lifted foot leaves behind the hip, rises with the heel up, passes under the hip and reaches forward to land. Past twelve frames, a walk's up pose sits opposite down around passing.
+- The attack template's `windup` and `strike` are angles in the body's frame, so an arm that hangs from another part (a chest standing on the hips) swings the same way. Rigs whose arms hang from the body are unchanged.
+- A posed figure keeps one outline round its silhouette: where a bone or mass outline falls inside the figure (an arm across the chest, the near leg over the far one), it takes the ramp step below the part's base colour. `"innerLines": "outline"` keeps the old black lines.
+- `examples/hero.poses.json` is a new character drawn from a brief (`examples/hero.brief.md`): a courier in a teal jacket with a red scarf the templates sway, grid hands and chunky boots on a jacket bone over a small mass at the hips. Its parts have new names (`hips` and `chest` instead of `torso`), its ankles stand on `rig.ground` 33 so the soles cover the shins' ends (the old hero had a stray pixel under each foot), and its jump rises 3 pixels a step to stay on the canvas. `hero-sword` and `hero-magic` follow it.
+
 ### Smaller frictions for agents
 
 - The presets listing (`pixel_help` topic `presets`, `pixelbolt presets`, `pixelbolt help presets`) is a line per preset, keyed by its name: kind, size, frames (and in how many animations), loop or one-shot, colours and what it is for. 72 presets were 21 KB, read on every effect request; they are now 9 KB. `full: true` (`--full`) gives the listing as before, with each preset's file and every animation's frames. What a lab preset is for no longer repeats its loop or one-shot.

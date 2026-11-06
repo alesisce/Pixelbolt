@@ -110,9 +110,11 @@ function about(entry, source, animations) {
   if (entry.kind === 'poses') {
     const templates = [...new Set(Object.values(source.motions ?? {}).map(motion => motion?.template).filter(Boolean))];
     // A grid part attached to the last bone of a rig arm in the rest pose is held: a figure with a sword lists as one.
+    // A part named as a hand is the hand itself, not something in it.
     const hands = new Set((Array.isArray(source.rig?.arms) ? source.rig.arms : []).filter(Array.isArray).map(chain => chain.at(-1)).filter(name => typeof name === 'string'));
     const rest = Array.isArray(source.poses) ? source.poses.find(pose => pose?.name === source.rig?.rest) : undefined;
-    const held = (Array.isArray(rest?.parts) ? rest.parts : []).filter(part => hands.has(part?.attach?.part) && source.parts?.[part.part]?.rows).map(part => part.name);
+    const held = (Array.isArray(rest?.parts) ? rest.parts : []).filter(part => hands.has(part?.attach?.part) && source.parts?.[part.part]?.rows
+      && !/hand/i.test(`${part.name} ${part.part}`)).map(part => part.name);
     return templates.length ? `A rig whose motion templates make ${listNames(templates)}${held.length ? `, with ${listNames(held)} in hand` : ''}.` : `Posed parts: ${listNames(names)}.`;
   }
   if (entry.kind === 'fx') return `Particles and effect shapes: ${listNames(names)}.`;

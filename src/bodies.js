@@ -1494,30 +1494,33 @@ function facesIn(segments, width, height, side) {
 
 // The pixels whose centres a body's exact shape covers, where it really is: a fluid's solid cells for it. Drawn at a
 // held pixel, a body may sit most of a pixel from them; were its solid cells drawn ones, each step of its drawing down
-// would cover a row of the sand it stands on, and it would sink for ever.
-function exactCells(b) {
+// would cover a row of the sand it stands on, and it would sink for ever. With `grow`, the shape grown (or, below 0,
+// shrunk) by that much on every side.
+function exactCells(b, grow = 0) {
   const out = [];
   for (const part of b.world) {
     if (part.kind === 'circle') {
-      for (let py = Math.floor(part.y - part.r); py <= Math.ceil(part.y + part.r); py++) for (let px = Math.floor(part.x - part.r); px <= Math.ceil(part.x + part.r); px++) {
+      const r = part.r + grow, reach = part.r + Math.max(0, grow);
+      for (let py = Math.floor(part.y - reach); py <= Math.ceil(part.y + reach); py++) for (let px = Math.floor(part.x - reach); px <= Math.ceil(part.x + reach); px++) {
         const dx = px + 0.5 - part.x, dy = py + 0.5 - part.y;
-        if (dx * dx + dy * dy <= part.r * part.r) out.push([px, py]);
+        if (r > 0 && dx * dx + dy * dy <= r * r) out.push([px, py]);
       }
       // A body smaller than a pixel still fills the one its centre is in.
-      if (!out.length) out.push([Math.floor(part.x), Math.floor(part.y)]);
+      if (!out.length && !grow) out.push([Math.floor(part.x), Math.floor(part.y)]);
       continue;
     }
-    const [x0, y0, x1, y1] = part.box;
-    for (let py = Math.floor(y0); py <= Math.ceil(y1); py++) for (let px = Math.floor(x0); px <= Math.ceil(x1); px++) {
+    const [x0, y0, x1, y1] = part.box, out0 = Math.max(0, grow);
+    for (let py = Math.floor(y0 - out0); py <= Math.ceil(y1 + out0); py++) for (let px = Math.floor(x0 - out0); px <= Math.ceil(x1 + out0); px++) {
       let inside = true;
       for (let i = 0; i < part.n && inside; i++) {
         const d = part.nx[i] * (px + 0.5 - part.vx[i]) + part.ny[i] * (py + 0.5 - part.vy[i]);
-        if (part.n === 2 ? false : d > 0) inside = false;
+        if (part.n === 2 ? false : d > grow) inside = false;
       }
       if (part.n === 2) {
         const ex = part.vx[1] - part.vx[0], ey = part.vy[1] - part.vy[0], t = Math.max(0, Math.min(1, ((px + 0.5 - part.vx[0]) * ex + (py + 0.5 - part.vy[0]) * ey) / (ex * ex + ey * ey)));
         const dx = px + 0.5 - part.vx[0] - t * ex, dy = py + 0.5 - part.vy[0] - t * ey;
-        inside = dx * dx + dy * dy <= Math.max(0.5, part.r) * Math.max(0.5, part.r);
+        const r = Math.max(0.5, part.r) + grow;
+        inside = r > 0 && dx * dx + dy * dy <= r * r;
       }
       if (inside) out.push([px, py]);
     }
@@ -1560,6 +1563,17 @@ export function areaBeyond(b, axis, level, sign) {
 }
 /** The cells a body fills now, where it really is: the fluid's solid cells for it. */
 export const bodyCells = b => (b.gone ? [] : exactCells(b));
+/** The cells a body fills now, held from `last` (the cells it held before, or null): a cell joins the body once its exact
+ * shape covers the cell's centre by `margin`, and leaves once the centre is `margin` outside it. A liquid reads a free
+ * body's cells so: taken and given back every frame as a light crate bobbed about a row, a row of water was shoved out
+ * from under it and ran back each time, and the flow kept it bobbing. */
+export function heldCells(b, last, margin) {
+  if (b.gone) return [];
+  if (!last) return exactCells(b);
+  const key = ([x, y]) => `${x},${y}`, loose = new Set(exactCells(b, margin).map(key)), out = exactCells(b, -margin), seen = new Set(out.map(key));
+  for (const cell of last) { const k = key(cell); if (loose.has(k) && !seen.has(k)) { seen.add(k); out.push(cell); } }
+  return out.length ? out : exactCells(b);
+}
 /** The cells a body fills at its own pose (x, y, c, s), placed afresh: a loop's closing frames draw the fluid against the
  * bodies where they are drawn, blended toward the warm-up's poses. */
 export const poseCells = b => { if (b.gone) return []; const placed = { ...b }; place(placed); return exactCells(placed); };

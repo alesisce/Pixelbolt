@@ -18,7 +18,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '732208a10f7603dfd3e5cc447dc62a066f732f626c7b134fde5300af8b5cfe71', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': '066de7bb6a870cd3148848e00a9f790bd68db5906b63ef7cbdb400dc824a65cb', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': '7f6a2cf2165d9647884592185d340b3f8f1fc56347a25a6fd30e16a4e93288d2'
+  'ring-escape': '732208a10f7603dfd3e5cc447dc62a066f732f626c7b134fde5300af8b5cfe71', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': '066de7bb6a870cd3148848e00a9f790bd68db5906b63ef7cbdb400dc824a65cb', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': 'c5dba208434334548f38d180769bc92ad4e497f5d39e011a9651fbec3154c84e'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -345,6 +345,7 @@ test('pivots, strikes, fills that step with time, vanishing and smears are read 
   refused(scene({ bodies: [blade, ball], strikes: [{ by: 'nobody', power: 'split' }] }), 'bodies.effects.e.strikes[0].by', /no body is named "nobody"/);
   refused(scene({ bodies: [blade, ball], events: [{ frame: 3, body: 'blade', power: 'split' }] }), 'bodies.effects.e.events[0].body', /can only vanish/);
   refused(scene({ bodies: [blade, ball], most: 5000 }), 'bodies.effects.e.most', /from 2 to 4096/);
+  refused(scene({ bodies: [blade, ball], strikes: [{ by: 'blade', power: 'split', cut: 0 }] }), 'bodies.effects.e.strikes[0].cut', /from 0.1 to 8/);
   assert.equal(compileBodies(scene({ bodies: [blade, ball], events: [{ frame: 3, body: 'blade', power: 'vanish' }] })).recipe.frames.length, 40);
 });
 
@@ -389,6 +390,32 @@ test('a strike splits what its body pushes, up to most, and copies take the fill
   // A ring that vanishes lets what it held fall out: everything has left the canvas a few seconds later.
   const burst = run(scene({ frames: 120, gravity: [0, 0.2], bodies: [ring, { ...ball, fill: 'k', fillEvery: undefined }], events: [{ frame: 40, body: 'ring', power: 'vanish' }] })).effect;
   assert.ok(burst.paths.seed.slice(0, 40).every(p => p !== null) && burst.escaped.length === 1 && burst.escaped[0].frame > 40, `escaped ${JSON.stringify(burst.escaped)}`);
+});
+
+test('a strike that cuts passes through what it strikes and leaves the pieces behind the blade, drawn over them', () => {
+  // A blade turning 6 degrees a frame about [32, 24] meets a sleeping ball 15 pixels out at 30 degrees, which splits in
+  // two. Pushed, the ball was swept along ahead of the blade (past 40 degrees by frame 6) and the pieces with it; cut,
+  // the blade passes through, and the pieces drift back behind it, apart, in the colour of the frame they split in.
+  const blade = { name: 'blade', shape: 'box', size: [20, 2], pivot: [-10, 0], at: [32, 24], fixed: true, spin: 6, fill: 'w' };
+  const ball = { name: 'seed', shape: 'circle', radius: 1, at: [32 + 15 * cosDeg(30), 24 + 15 * sinDeg(30)], fill: ['k', 'r', 's'], fillEvery: 4, asleep: true };
+  const source = cut => scene({ frames: 24, gravity: [0, 0], bodies: [blade, ball], strikes: [{ by: 'blade', power: 'split', count: 2, spread: 40, rest: 30, ...(cut && { cut }) }] }, { width: 64, height: 48 });
+  const angle = ([x, y]) => Math.atan2(y + 0.5 - 24, x + 0.5 - 32) * 180 / Math.PI, radius = ([x, y]) => Math.hypot(x + 0.5 - 32, y + 0.5 - 24);
+  const balls = frame => ['k', 'r', 's'].flatMap(key => keyCells(frame, key));
+  const pushed = run(source());
+  assert.ok(Math.max(...balls(pushed.recipe.frames[6]).map(angle)) > 40, 'pushed, the ball is swept ahead of the blade');
+  const { recipe, effect } = run(source(0.5));
+  assert.ok(effect.copies === 1 && effect.strikes === 1, `${effect.copies} copy from ${effect.strikes} strike`);
+  assert.notDeepEqual(effect.paths.seed.at(-1).slice(0, 2), effect.paths.seed[0].slice(0, 2), 'the sleeping ball woke and moved off');
+  for (let f = 6; f < 24; f++) {
+    const cells = balls(recipe.frames[f]);
+    assert.ok(cells.length && cells.every(c => angle(c) < 6 * f - 4 && angle(c) > -15), `frame ${f}: every piece behind the blade (${cells.map(c => angle(c).toFixed(0))} at ${6 * f}°)`);
+    assert.ok(keyCells(recipe.frames[f], 'k').length === 0, `frame ${f}: the taker took its frame's colour with its copy`);
+  }
+  const last = balls(recipe.frames[23]).map(radius);
+  assert.ok(Math.max(...last) - Math.min(...last) > 4, `the two pieces drift apart: ${Math.min(...last).toFixed(1)} to ${Math.max(...last).toFixed(1)} pixels out`);
+  // The cutter is drawn over what it passes through: the blade's pixels are those it has alone.
+  const alone = run(scene({ frames: 8, gravity: [0, 0], bodies: [blade] }, { width: 64, height: 48 })).recipe;
+  for (let f = 3; f < 8; f++) assert.deepEqual(keyCells(recipe.frames[f], 'w'), keyCells(alone.frames[f], 'w'), `frame ${f}: the blade drawn whole`);
 });
 
 test('the work estimate charges the crowd a strike can make and a smear\'s sweep', () => {

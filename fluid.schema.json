@@ -1575,7 +1575,7 @@
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 18000,
-                  "description": "With a list of fills: the list steps every this many frames instead of at each hit. The body keeps its fill; the copies a split makes of it take the fill of the frame they are made in, so a crowd that multiplies is washed in its newest colour."
+                  "description": "With a list of fills: the list steps every this many frames instead of at each hit. The body keeps its fill until it splits; then it and its copies take the fill of that frame, so each generation of a crowd that multiplies has its own colour."
                 },
                 "outline": {
                   "type": "string",

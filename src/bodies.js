@@ -621,6 +621,9 @@ export function createBodyWorld(effect, context) {
   };
   // Territory and powers (territory.js): cells owned by teams, pickups, events and strikes.
   const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height, fastest: MAX_SPEED }) : null;
+  // A body that cuts passes through what it cuts, so it is drawn over it (paintBodies draws it last).
+  for (const r of effect.strikes ?? []) if (r.cut) bodies[r.by].cuts = true;
+  let current = 0;
   const dynamic = b => !b.fixed && !b.gone;
   const moving = b => b.fixed ? (b.vx !== 0 || b.vy !== 0 || b.spin !== 0) : !b.gone && !b.asleep;
   const awake = b => !b.fixed && !b.gone && !b.asleep;
@@ -792,9 +795,33 @@ export function createBodyWorld(effect, context) {
       place(b);
     }
   };
+  // A cutter (a strike's body with a cut, in its frames) passes through the free bodies it meets, as a blade through
+  // fruit: their contacts are left out of the solve, and one that touches, or closes to a touch within the substep,
+  // strikes the body, with the way behind the cutter there (against its face's motion past the body). Pushed instead,
+  // what it struck was swept along ahead of it, and so were the pieces it split it into.
+  const cutters = turf ? turf.cutters : null;
+  const cut = contacts => {
+    const by = cutters(current);
+    if (!by.length) return contacts;
+    return contacts.filter(contact => {
+      const { a, b } = contact, blade = !b ? null : by.includes(a.index) && !b.fixed ? a : by.includes(b.index) && !a.fixed ? b : null;
+      if (!blade) return true;
+      const other = blade === a ? b : a;
+      for (const point of contact.points) {
+        const [vax, vay] = velocityAt(a, point.x - a.x, point.y - a.y), [vbx, vby] = velocityAt(b, point.x - b.x, point.y - b.y);
+        if (point.sep + Math.min(0, (vbx - vax) * contact.nx + (vby - vay) * contact.ny) * dt >= 0) continue;
+        const [fx, fy] = velocityAt(blade, point.x - blade.x, point.y - blade.y), [ox, oy] = velocityAt(other, point.x - other.x, point.y - other.y);
+        const ux = fx - ox, uy = fy - oy, u = Math.sqrt(ux * ux + uy * uy), side = blade === a ? 1 : -1;
+        turf.strike(a, b, u > 1e-6 ? [-ux / u, -uy / u] : [contact.nx * side, contact.ny * side]);
+        break;
+      }
+      return false;
+    });
+  };
   const substep = () => {
     placeMoving();
     let contacts = collide();
+    if (cutters) contacts = cut(contacts);
     // A body moving into a sleeping one wakes it; so does anything moving that it rests on, and a fixed body that moves
     // at all (a platform sinking slowly from under a box, or one turning under it, would leave it asleep in the air).
     const woken = new Set();
@@ -812,7 +839,7 @@ export function createBodyWorld(effect, context) {
     rouse(woken);
     // Woken bodies meet what they touch this substep too: gathered while they slept, a stack knocked from the side had
     // no contacts among its crates or with the floor, and its crates sank half a pixel into each other.
-    if (woken.size) contacts = collide();
+    if (woken.size) { contacts = collide(); if (cutters) contacts = cut(contacts); }
     // Velocities: gravity, drag, and the speed limits.
     for (const b of bodies) {
       if (!dynamic(b) || b.asleep) continue;
@@ -917,6 +944,7 @@ export function createBodyWorld(effect, context) {
     if (contact.points.some(p => p.sep < -0.5) && !stats.overlaps.includes(pair)) stats.overlaps.push(pair);
   }
   const advance = f => {
+    current = f;
     if (f > 0) for (let k = 0; k < substeps; k++) substep();
     // Moving fixed bodies are drawn (and met by a fluid) where they are at the frame's end, not where its last substep
     // started: a paddle drawn a substep behind showed a gap before the box it pushed.
@@ -1260,6 +1288,8 @@ function insideCells(placed, n) {
   }
   return out;
 }
+// The bodies in the order they are drawn: in order, but those that cut last, over what they pass through.
+const drawOrder = bodies => (bodies.some(b => b.cuts) ? [...bodies.filter(b => !b.cuts), ...bodies.filter(b => b.cuts)] : bodies);
 // Smears, under the bodies: each one's shape swept from where it was `smear.frames` frames ago to where it is, sampled
 // so its far end moves under half a (fine) pixel a sample, the oldest part first, so the colours run from the first,
 // just behind the body, to the last at the far end of the sweep, as a pixel artist draws a fast swing.
@@ -1303,7 +1333,7 @@ export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
     }
   }
   paintSmears(bodies, n, put);
-  for (const b of bodies) {
+  for (const b of drawOrder(bodies)) {
     if (b.gone) continue;
     if (b.shape === 'hoop') {
       const code = b.fills[b.colour].charCodeAt(0);
@@ -1335,7 +1365,7 @@ function drawFrame(world, width, height, context, f, hud = []) {
   return { ...crop(grid, width * n, height * n), hud: world.turf && hud.length ? world.turf.hud(f, hud, n) : [] };
 }
 
-/** Draws the bodies into `grid` (character codes, width × height): trails first, then each body in order. */
+/** Draws the bodies into `grid` (character codes, width × height): trails first, then each body in order (a cutter last). */
 export function paintBodies(bodies, grid, width, height, symbols) {
   const context = { symbols };
   const put = (x, y, code) => { if (x >= 0 && y >= 0 && x < width && y < height) grid[y * width + x] = code; };
@@ -1355,7 +1385,7 @@ export function paintBodies(bodies, grid, width, height, symbols) {
     }
   }
   paintSmears(bodies, 1, put);
-  for (const b of bodies) {
+  for (const b of drawOrder(bodies)) {
     if (b.gone) continue;
     // A box or polygon is drawn as its upright picture, fill and outline, turned by turnRows (as a symbol is): its sides
     // turned to whole pixel steps, straight and even, and its outline kept a closed line, so it stays the same crisp shape

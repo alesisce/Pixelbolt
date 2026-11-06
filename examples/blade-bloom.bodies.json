@@ -60,6 +60,7 @@
           "size": [36, 3],
           "pivot": [-16, 0],
           "at": [40, 40],
+          "angle": 170,
           "fixed": true,
           "spin": 12,
           "symbol": "katana",
@@ -76,10 +77,10 @@
           "bounce": 0.2,
           "friction": 0.15,
           "fill": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "l", "m"],
-          "fillEvery": 28
+          "fillEvery": 30
         }
       ],
-      "strikes": [{ "by": "blade", "power": "split", "count": 6, "spread": 70, "rest": 6 }],
+      "strikes": [{ "by": "blade", "power": "split", "count": 3, "spread": 60, "rest": 6, "cut": 0.5 }],
       "events": [{ "frame": 200, "body": "ring", "power": "vanish" }]
     }
   }

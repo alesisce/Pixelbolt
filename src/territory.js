@@ -152,11 +152,13 @@ export function readStrikes(list, path, context, bodies) {
   return list.map((entry, i) => {
     const p = `${path}[${i}]`;
     if (!isObject(entry)) fail(p, 'expected { by, power, … }');
-    fields(entry, ['by', 'rest', 'from', 'until', ...POWER_FIELDS], p);
+    fields(entry, ['by', 'rest', 'from', 'until', 'cut', ...POWER_FIELDS], p);
     const index = bodies.findIndex(b => b.name !== null && b.name.toLowerCase() === String(entry.by).toLowerCase());
     if (index < 0) fail(`${p}.by`, `no body is named ${JSON.stringify(entry.by)}; a strike names the body whose pushes give the power`);
     const from = integer(entry.from ?? 0, `${p}.from`, 0, 18000), until = entry.until === undefined ? null : integer(entry.until, `${p}.until`, from + 1, 18001);
-    return { by: index, rest: integer(entry.rest ?? 10, `${p}.rest`, 1, 18000), from, until, path: p, ...readPower(entry, p, context) };
+    // A cut: the strike's body passes through what it strikes, which leaves behind it at this speed (pixels a frame).
+    const cut = entry.cut === undefined ? null : number(entry.cut, `${p}.cut`, 0.1, 8);
+    return { by: index, rest: integer(entry.rest ?? 10, `${p}.rest`, 1, 18000), from, until, cut, path: p, ...readPower(entry, p, context) };
   });
 }
 
@@ -235,17 +237,24 @@ export function createTerritory(effect, { trace, scale, copy, width, height, fas
     // A strike's power is counted rather than listed (a crowd that multiplies takes thousands), and makes no news.
     const entry = what.strike === undefined ? { frame: f, [what.pickup !== undefined ? 'pickup' : 'event']: what.pickup ?? what.event, body: b.name ?? b.path, power: p.power } : null;
     if (entry) { stats.taken.push(entry); news = { label: p.label, frame: f }; } else stats.strikes++;
+    // What a cut struck leaves behind the cutter at the cut's speed (woken: a sleeper given a speed would hang still).
+    const back = p.cut && what.back ? what.back : null;
+    if (back) { b.asleep = false; b.sleepy = 0; }
     if (p.power === 'split') {
-      // Copies turned evenly about the taker's heading; the taker takes the first heading. A body whose fill list steps
-      // with time (fillEvery) makes its copies in the list's fill for this frame, and keeps its own.
+      // Copies turned evenly about the taker's heading (a cut's pieces about the way behind the cutter, each at the cut's
+      // speed on top of the taker's own); the taker takes the first heading. A body whose fill list steps with time
+      // (fillEvery) takes the list's fill for this frame, and so do its copies: every split a new generation, so a blade
+      // that cuts paints what it cuts even once the crowd is too full to grow.
       const tint = b.fillEvery && b.fills && b.fills.length > 1 ? Math.floor(f / b.fillEvery) % b.fills.length : null;
       const vx = b.vx, vy = b.vy;
       if (entry) entry.copies = 0;
       for (let k = 0; k < p.count; k++) {
         const a = (k - (p.count - 1) / 2) * p.spread, c = cosDeg(a), s = sinDeg(a), target = k === 0 ? b : copy(b);
         if (!target) break;
-        if (target !== b) { if (entry) entry.copies++; if (b.rested) target.rested = { ...b.rested }; if (tint !== null) target.colour = tint; }
-        target.vx = vx * c - vy * s; target.vy = vx * s + vy * c;
+        if (target !== b) { if (entry) entry.copies++; if (b.rested) target.rested = { ...b.rested }; }
+        if (tint !== null) target.colour = tint;
+        if (back) { target.vx = vx + p.cut * (back[0] * c - back[1] * s); target.vy = vy + p.cut * (back[0] * s + back[1] * c); }
+        else { target.vx = vx * c - vy * s; target.vy = vx * s + vy * c; }
         // A copy of a grown or hurried body shrinks back or slows down when the taker does.
         if (target !== b) for (const timer of timers.filter(other => other.body === b)) timers.push({ ...timer, body: target, undo: timer.again(target) });
       }
@@ -276,9 +285,11 @@ export function createTerritory(effect, { trace, scale, copy, width, height, fas
       // Gone, as a body that leaves the canvas is: what it held falls (bodies.js wakes what rested on it).
       b.gone = true;
     }
+    if (back && p.power !== 'split' && p.power !== 'warp' && p.power !== 'vanish') { b.vx += p.cut * back[0]; b.vy += p.cut * back[1]; }
   };
-  // The bodies each strike's body pushed this frame (by index), given its power at the frame's end.
-  const strikes = effect.strikes ?? [], struck = strikes.map(() => new Set());
+  // The bodies each strike's body pushed (or cut) this frame, by index, given its power at the frame's end; a cut body
+  // with the way behind the cutter where it was first touched.
+  const strikes = effect.strikes ?? [], struck = strikes.map(() => new Map());
 
   return {
     teams,
@@ -303,13 +314,16 @@ export function createTerritory(effect, { trace, scale, copy, width, height, fas
       flips.length = 0;
       if (any) changed();
     },
-    // A contact between two bodies that pushed (a hit or a push along): what a strike's body pushed is struck by it.
-    strike: (a, b) => {
+    // A contact between two bodies that pushed (a hit or a push along): what a strike's body pushed is struck by it. A
+    // cutter's touch (bodies.js doesn't solve it) gives `back`, the way behind the cutter there.
+    strike: (a, b, back = null) => {
       strikes.forEach((r, k) => {
-        if (a.index === r.by && !b.fixed) struck[k].add(b.index);
-        else if (b.index === r.by && !a.fixed) struck[k].add(a.index);
+        const other = a.index === r.by ? b : b.index === r.by ? a : null;
+        if (other && !other.fixed && !struck[k].has(other.index)) struck[k].set(other.index, back);
       });
     },
+    // The bodies cutting in frame f (a strike's with a cut, in its frames): they pass through the free bodies they meet.
+    cutters: f => strikes.filter(r => r.cut && f >= r.from && (r.until === null || f < r.until)).map(r => r.by),
     // A magnet's pull on a body this substep: toward its point, as steady as gravity, on bodies of other teams.
     pull: (b, dt) => {
       for (const m of magnets) {
@@ -339,14 +353,14 @@ export function createTerritory(effect, { trace, scale, copy, width, height, fas
       events.forEach((e, index) => { const b = bodies[e.body]; if (e.frame === f && !b.gone) take(b, e, f, { event: index, at: [b.x, b.y] }); });
       strikes.forEach((r, index) => {
         if (!struck[index].size) return;
-        const hit = [...struck[index]].sort((p, q) => p - q);
+        const hit = [...struck[index]].sort((p, q) => p[0] - q[0]);
         struck[index].clear();
         if (f < r.from || (r.until !== null && f >= r.until) || bodies[r.by].gone) return;
-        for (const i of hit) {
+        for (const [i, back] of hit) {
           const b = bodies[i], rested = b.rested ??= {};
           if (b.gone || (rested[index] !== undefined && f - rested[index] < r.rest)) continue;
           rested[index] = f;
-          take(b, r, f, { strike: index, at: [b.x, b.y] });
+          take(b, r, f, { strike: index, at: [b.x, b.y], back });
         }
       });
       stats.counts.push(counts());

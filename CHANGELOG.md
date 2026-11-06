@@ -4,6 +4,22 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Blade bloom: strikes, cuts, pivots, smears and crowds
+
+- `strikes` give a power to whatever a named body pushes, at the end of the frame, each body at most once every `rest` frames: a strike of `split` by a turning blade multiplies every ball it touches. With `cut` (pixels a frame) the body cuts instead of pushing: it passes through the free bodies it touches and what it strikes leaves the way behind it at that speed, a split's pieces fanned about it, so a blade cutting through a pile leaves its newest pieces in its wake instead of sweeping them along ahead of it. A sleeping body that is cut wakes, and a cutter is drawn over what it passes through.
+- An effect's `most` lets splits grow it to 4,096 bodies (default 256); the work estimate charges the crowd they can make, and the metadata counts `strikes` and `copies`. Pairs come from a grid of 4-pixel cells, the same pairs in the same order as before, 1.3 to 1.9 times faster on piles of 800 to 1,600 balls.
+- A `vanish` power takes a body away; an event may take a fixed one, so a ring bursts and what rested in it wakes and falls out.
+- A fixed body turns about its own `pivot` (a blade about its hilt), its faces moving with the turn, so the tip pushes as hard as it moves. `smear` draws a body's shape swept over its last frames, under the bodies, in bands: a sword's swish.
+- `fillEvery` steps a fill list with time instead of at each hit; a body that splits takes the frame's fill with its copies, so each generation of a crowd has its own colour.
+- The blade-bloom preset: a sword turning in a ring cuts one ball into three, and every piece it touches after, until 900 fill the ring and each turn washes a new colour round behind the blade; then the ring vanishes and they burst out.
+
+### Rigid bodies: a glitch audit
+
+- Drawing: a body steps on at halfway the way it last moved and holds only against stepping back, so one moving about a pixel a frame steps evenly (it drew 0, 2, 0, 2) while one that rocks still holds still, at whole and fine pixels, place and angle. A thin hoop no longer misses a pixel at each diagonal, small hoops no longer tremble, a small box turned a quarter keeps its shape, a turned picture sits on its body's middle, and no trail shows beside a resting ball or across a warp.
+- Physics: a contact's two points bounce together, so a box dropped flat lands flat; a moving fixed body wakes any sleeper it touches, and woken bodies meet what they touch that substep; a tireless body's energy counts its spin (tireless boxes climbed out of the canvas); a polygon past a segment's end is not inside it; faces end where the obstacle's material changes; an impact needs more than a substep of gravity, so a body resting with one substep sleeps.
+- Territory: a warped team ball takes the cells it lands on, and a cell its own team's ball is inside never changes hands (a ball flew through solid ground); coincident circles part along the way they move apart, so split fans come out in order; a held-speed ball bounces at any approach instead of sliding along a wall; the speed power stays within the speed limit.
+- Bodies in a fluid: buoyancy follows a body through its substeps and the liquid round a body moves with the grid, so a light plank on still water settles instead of rocking; moving obstacles wake and carry the bodies on them; a body in a gas has added mass, so a light crate no longer swings at the speed limit.
+
 ### Korean and Spanish READMEs
 
 - `README.ko.md` (한국어) and `README.es.md` (Español) summarize the English README like the Chinese and Japanese ones: what Pixelbolt is for, trying it, the skill, plugin, Claude Desktop and MCP setups, the eight tools, a tiny animation, fluids and rigid bodies, and the export bundle. Every README's language line links all five, llms.txt lists them, and the npm package ships them.

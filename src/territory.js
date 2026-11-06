@@ -176,8 +176,9 @@ export function readHud(list, path, context, teams) {
 
 // ---- The territory in a world -----------------------------------------------------------------------------------------
 /** The territory's state while a world runs. `trace(at, material, columns, rows, scale, x, y)` is bodies.js's face tracer;
- * `scale(b, k)` grows a body's shape by k; `copy(b)` adds a copy of a body to the world and returns it. */
-export function createTerritory(effect, { trace, scale, copy, width, height }) {
+ * `scale(b, k)` grows a body's shape by k; `copy(b)` adds a copy of a body to the world and returns it; `fastest` is the
+ * bodies' speed limit. */
+export function createTerritory(effect, { trace, scale, copy, width, height, fastest = Infinity }) {
   // Powers work without a territory too: then there are no cells and no teams.
   const t = effect.territory ?? { cell: 1, x: 0, y: 0, columns: 0, rows: 0, teams: [], start: new Int8Array(0), bounce: 1, friction: 0 };
   const { columns, rows, cell, teams } = t, owner = Int8Array.from(t.start);
@@ -191,6 +192,20 @@ export function createTerritory(effect, { trace, scale, copy, width, height }) {
   const pickups = effect.pickups.map(p => ({ ...p, taken: false })), events = effect.events, magnets = [], timers = [];
   let news = null;
   const viewerOf = b => (b.team >= 0 ? b.team : teams.length);
+  // Whether body b covers some of cell c (a circle exactly, another shape by its bounds), touching not counted.
+  const covers = (b, c) => {
+    const i = c % columns, j = (c - i) / columns, x0 = t.x + i * cell, y0 = t.y + j * cell, x1 = x0 + cell, y1 = y0 + cell;
+    if (b.shape === 'circle') {
+      const r = b.parts[0].r, cx = Math.max(x0, Math.min(x1, b.x)), cy = Math.max(y0, Math.min(y1, b.y));
+      return (cx - b.x) * (cx - b.x) + (cy - b.y) * (cy - b.y) < r * r;
+    }
+    const reach = b.extent * Math.SQRT2;
+    return b.x - reach < x1 && b.x + reach > x0 && b.y - reach < y1 && b.y + reach > y0;
+  };
+  // A cell a body of its own team is in: it holds it.
+  let all = [];
+  const held = (c, bodies = all) => bodies.some(b => !b.gone && b.team === owner[c] && covers(b, c));
+  const changed = () => { views = new Array(teams.length + 1).fill(null); generation++; };
 
   // A hit on a cell: the cell behind the face the contact touches, if it is another team's.
   const cellOf = (s, point) => {
@@ -223,10 +238,18 @@ export function createTerritory(effect, { trace, scale, copy, width, height }) {
       if (b.speed) {
         const base = b.speed, running = timers.find(timer => timer.body === b && timer.power === 'speed');
         if (running) running.until = Math.max(running.until, f + p.frames);
-        else { b.speed = base * p.factor; const again = body => () => { body.speed = base; }; timers.push({ body: b, power: 'speed', until: f + p.frames, undo: again(b), again }); }
+        else { b.speed = Math.min(fastest, base * p.factor); const again = body => () => { body.speed = base; }; timers.push({ body: b, power: 'speed', until: f + p.frames, undo: again(b), again }); }
       } else { b.vx *= p.factor; b.vy *= p.factor; }
     } else if (p.power === 'warp') {
-      b.x = p.to[0]; b.y = p.to[1];
+      // A warped body leaves no trail across the board, and a team's body lands on its own ground: the cells it lands on
+      // become its team's, the pocket it carves from. (Landed in another team's ground, it flew through it, a wall on
+      // every side, until it met a face from behind and burst out.)
+      b.x = p.to[0]; b.y = p.to[1]; b.history.length = 0;
+      if (b.team >= 0) {
+        let painted = false;
+        for (let c = 0; c < owner.length; c++) if (owner[c] >= 0 && owner[c] !== b.team && covers(b, c) && !held(c)) { owner[c] = b.team; stats.flips++; painted = true; }
+        if (painted) changed();
+      }
     } else if (p.power === 'magnet') {
       const [x, y] = p.to ?? what.at;
       magnets.push({ x, y, strength: p.strength, until: f + p.frames, team: b.team, body: b });
@@ -243,11 +266,18 @@ export function createTerritory(effect, { trace, scale, copy, width, height }) {
       const c = cellOf(s, contact.points[0]);
       if (c >= 0 && owner[c] >= 0 && owner[c] !== contact.a.team) flips.push([c, contact.a.team]);
     },
-    // The end of a substep: the cells hit change hands (first hit first) and the walls are traced again.
-    settle: () => {
+    // The end of a substep: the cells hit change hands (first hit first) and the walls are traced again. A body of the
+    // cell's own team in it holds it: painted under it, that body would be inside another team's ground, walls all
+    // round it, and fly on through it unmet.
+    settle: bodies => {
       if (!flips.length) return;
-      for (const [c, team] of flips) if (owner[c] !== team) { owner[c] = team; stats.flips++; }
-      flips.length = 0; views = new Array(teams.length + 1).fill(null); generation++;
+      let any = false;
+      for (const [c, team] of flips) {
+        if (owner[c] === team || held(c, bodies)) continue;
+        owner[c] = team; stats.flips++; any = true;
+      }
+      flips.length = 0;
+      if (any) changed();
     },
     // A magnet's pull on a body this substep: toward its point, as steady as gravity, on bodies of other teams.
     pull: (b, dt) => {
@@ -260,6 +290,7 @@ export function createTerritory(effect, { trace, scale, copy, width, height }) {
     // The end of frame f: powers run out, pickups are taken (first pickup first, by the first body to reach it), events
     // fire, and the score is counted.
     frame: (f, bodies) => {
+      all = bodies;
       for (let k = timers.length - 1; k >= 0; k--) if (timers[k].until <= f) { timers[k].undo(); timers.splice(k, 1); }
       for (let k = magnets.length - 1; k >= 0; k--) if (magnets[k].until <= f) magnets.splice(k, 1);
       pickups.forEach((p, index) => {
@@ -306,13 +337,15 @@ export function createTerritory(effect, { trace, scale, copy, width, height }) {
       for (const entry of hud) {
         if (f < entry.from || (entry.until !== null && f >= entry.until)) continue;
         if (entry.bar) {
-          const [x, y] = entry.bar.at.map(v => v * n), [w, h] = entry.bar.size.map(v => v * n);
-          if (entry.empty) ops.push({ op: 'rect', x, y, w, h, color: entry.empty });
+          // Shared out in the world's pixels, then drawn n times finer, so each team's part ends on a world pixel as the
+          // texts do.
+          const [x, y] = entry.bar.at, [w, h] = entry.bar.size;
+          if (entry.empty) ops.push({ op: 'rect', x: x * n, y: y * n, w: w * n, h: h * n, color: entry.empty });
           let sum = 0, left = x;
-          score.forEach((n, k) => {
-            sum += n;
+          score.forEach((cells, k) => {
+            sum += cells;
             const right = x + (total ? Math.floor(w * sum / total) : 0);
-            if (right > left) ops.push({ op: 'rect', x: left, y, w: right - left, h, color: teams[k].color });
+            if (right > left) ops.push({ op: 'rect', x: left * n, y: y * n, w: (right - left) * n, h: h * n, color: teams[k].color });
             left = right;
           });
           continue;

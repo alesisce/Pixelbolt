@@ -2397,12 +2397,15 @@ function stepLiquid(state, effect, dt) {
   if (grip) { const { plain, own } = state.grip; for (let c = 0; c < g.N; c++) grip[c] = effect.adhesion * plain[c] + own[c]; }
   const slopes = state.apic ? new Float64Array(2) : null, limit = effect.yield / (2 * STIFFNESS);
   const { geo } = g, stepped = geo ? geo.stepped : solid, velocity = geo ? new Float64Array(2) : null, landing = geo ? new Float64Array(2) : null;
-  const frozen = state.heat ? state.frozen : null;
+  const frozen = state.heat ? state.frozen : null, near = state.nearBodies;
   for (let k = state.n - 1; k >= 0; k--) {
     if (frozen && frozen[k]) { state.vx[k] = 0; state.vy[k] = 0; continue; }
     let x = state.x[k], y = state.y[k];
     const cell = Math.floor(y) * W + Math.floor(x), pu = sampleU(g, u, x, y), pv = sampleV(g, v, x, y);
-    const share = grains && grains.rigid[cell] ? 0 : mu ? flip / (1 + 8 * dt * mu[cell]) : flip;
+    // Beside a body the share is at most NEAR_BODY_FLIP: the noise particles keep at the faces of a moving body is what
+    // the body floats on, and at the default share it rocked a floating plank harder every frame. Further out the liquid
+    // keeps its own share, splashes and all.
+    const share = grains && grains.rigid[cell] ? 0 : Math.min(near && near[cell] ? NEAR_BODY_FLIP : 1, mu ? flip / (1 + 8 * dt * mu[cell]) : flip);
     state.vx[k] = share * (state.vx[k] + pu - sampleU(g, uOld, x, y)) + (1 - share) * pu;
     state.vy[k] = share * (state.vy[k] + pv - sampleV(g, vOld, x, y)) + (1 - share) * pv;
     if (slopes) {
@@ -3948,6 +3951,16 @@ function moveObstacles(run, cycle) {
   }
   // The solid layer for this frame; what clings to the solids reads it.
   const layout = run.layout, owner = layout.owner, solids = P ? state.solids : state.solids = solidLayer(effect, layout, places, W, H), { speed } = solids;
+  // The cells within NEAR_BODY of a body's, where the liquid's particles keep less of their own motion (see stepLiquid).
+  if (effect.bodies && effect.liquid && !effect.granular) {
+    const near = state.nearBodies ??= new Uint8Array(g.N);
+    near.fill(0);
+    for (let c = 0; c < g.N; c++) {
+      if (!layout.solid[c] || owner[c] < 0 || effect.obstacles[owner[c]].body === undefined) continue;
+      const i = c % W, j = (c - i) / W;
+      for (let y = Math.max(0, j - NEAR_BODY); y <= Math.min(H - 1, j + NEAR_BODY); y++) for (let x = Math.max(0, i - NEAR_BODY); x <= Math.min(W - 1, i + NEAR_BODY); x++) near[y * W + x] = 1;
+    }
+  }
   if (state.cling && !P) {
     if (changed) { state.cling = clingField(solids); state.grip = gripFields(solids, effect.obstacles); }
     state.carry = carryFields(solids);
@@ -4374,6 +4387,11 @@ const columns = list => Object.fromEntries(Object.keys(list[0]).map(key => [key,
 // Water drag grows with the speed between the body and the water (QUADRATIC per pixel a frame), as real drag does, so a
 // body slows hard as it hits the water and a light one rises out of it without leaping.
 const WATER_DRAG = 0.3, QUADRATIC = 1.5, VISCOUS_DRAG = 0.6, GRAIN_DRAG = 8, ADDED_MASS = 0.5, BODY_WAKE = 0.06;
+// Within NEAR_BODY cells of a body the liquid's particles keep at most NEAR_BODY_FLIP of their own motion (FLIP), the rest
+// the grid's (PIC): the noise FLIP keeps at a moving body's faces fed a floating body energy every frame. (Over eight
+// light planks on still water at the default share, four never settled; with a share of 0.2 two cells out, three still
+// rocked; pure PIC three cells out, none.)
+const NEAR_BODY = 3, NEAR_BODY_FLIP = 0;
 // Air drags a body a little, growing with the speed between them as water's does, so a blast throws crates.
 const AIR_DRAG = 0.1;
 // Sand slower than this (pixels a frame) is at rest, and bodies stand on it.
@@ -4442,17 +4460,32 @@ function fluidForces(run, crowd) {
       const rx = i + 0.5 - b.x - (across ? 0 : sign * 0.5), ry = j + 0.5 - b.y - (across ? sign * 0.5 : 0);
       load += column; loadX += column * rx; loadY += column * ry;
     }
-    if (!K && !sub && !load && !px && !py) { b.push = null; return; }
+    if (!K && !sub && !load && !px && !py) { b.push = null; b.float = null; return; }
     const m = 1 / b.invMass, added = ADDED_MASS * heavy * sub, fall = b.weightless ? 0 : 1, lift = heavy * sub;
-    const vx = ((m + added) * b.vx + Ku + px) / (m + added + K), vy = ((m + added) * b.vy + Kv + py) / (m + added + K);
     const tau = (sub ? (sx - b.x) * -lift * gy - (sy - b.y) * -lift * gx : 0) + loadX * gy - loadY * gx, inertia = b.invInertia ? 1 / b.invInertia : 0;
-    const w = inertia ? (inertia * b.w + T + pt) / (inertia + Kr) : b.w;
+    // In a gas, the body's own motion sets much of the pressure on its faces that pushes it back: met a frame at a time, a
+    // light crate overshot each frame, back and forth, faster each time, and stirred the air up after a blast had died.
+    // Half the air it fills joins its mass against those pushes, as half the water a body is under does in a liquid (the
+    // solve takes air, as water, to weigh a unit a cell); its weight is left alone, as nothing floats in air.
+    const yielding = liquid ? added : ADDED_MASS * inside.size, spun = inertia && yielding ? inertia * yielding / m : 0;
+    const vx = ((m + yielding) * b.vx + Ku + px) / (m + yielding + K), vy = ((m + yielding) * b.vy + Kv + py) / (m + yielding + K);
+    const w = inertia ? ((inertia + spun) * b.w + T + pt) / (inertia + spun + Kr) : b.w;
     // Buoyancy and the load, less what the added mass takes of the body's own weight, over its mass and the added mass.
     // Sand grips what it is in: its drag holds against the body's own weight too, by the share of the body's faces in
     // sand, so a body that has landed in sand, or stands on a slope of it, stays where it is until the sand itself moves,
     // while a plank whose tip touches sand still falls.
     const grip = granular && faces ? K / (m + K) * held / faces : 0;
     const push = [(-lift * gx + load * gx - added * gx * fall) / (m + added) - grip * gx * fall, (-lift * gy + load * gy - added * gy * fall) / (m + added) - grip * gy * fall, inertia ? tau / inertia : 0];
+    // The lift follows the body through its substeps: the level it floats at is held for the frame, and bodies.js takes
+    // the shape's area under it, and that part's centre, afresh at each substep (`float`), in place of this frame's lift
+    // in the push. (Held as one push for the frame, the lift was a spring stepped a frame at a time, which gained a little
+    // every frame: a light plank on still water rocked on and on, and with the liquid's own jostling tipped over.)
+    let float = null;
+    if (lift && Number.isFinite(level)) {
+      float = { axis: across ? 1 : 0, level, sign, gx, gy, mass: m + added, inertia };
+      push[0] += lift * gx / (m + added); push[1] += lift * gy / (m + added);
+      if (inertia) push[2] -= ((sx - b.x) * -lift * gy - (sy - b.y) * -lift * gx) / inertia;
+    }
     // A sleeping body stays asleep in still fluid: what holds it (its buoyancy, the ground or the bottom under it) holds
     // it as before. Fluid flowing past it faster than BODY_WAKE, or rising, falling or piling a row against it, wakes it.
     if (b.asleep) {
@@ -4463,8 +4496,8 @@ function fluidForces(run, crowd) {
     }
     b.restSub = undefined; b.restLoad = undefined;
     // Never hand the bodies a number that isn't one: a body keeps its own motion rather than vanish.
-    if (![vx, vy, w, ...push].every(Number.isFinite)) { b.push = null; return; }
-    b.vx = vx; b.vy = vy; b.w = w; b.push = push;
+    if (![vx, vy, w, ...push].every(Number.isFinite)) { b.push = null; b.float = null; return; }
+    b.vx = vx; b.vy = vy; b.w = w; b.push = push; b.float = float;
   });
 }
 // How much of a body is under the liquid, and the centre of that part: [area, x, y]. The level is read in the columns
@@ -4493,14 +4526,20 @@ function submerged(b, inside, lanes, run, across, sign) {
   }
   return [...areaBeyond(b, across ? 1 : 0, levels / count, sign), levels / count];
 }
-// The obstacles the bodies meet, where they are on frame `cycle`.
-const staticsAt = (statics, cycle) => statics.map(o => { const at = o.track ? o.track[cycle] : { x: o.x, y: o.y, show: true }; return { ...o, x: at.x, y: at.y, solid: o.solid && at.show }; });
+// The obstacles the bodies meet, where they are on frame `cycle`, each moving at its velocity on to its next frame's
+// place (its smooth motion, as the liquid's walls move) while the bodies step: bodies.js gives a face that velocity, so
+// a box rides a moving shelf.
+const staticsAt = (statics, cycle) => statics.map(o => {
+  const at = o.track ? o.track[cycle] : { x: o.x, y: o.y, show: true }, then = o.track && cycle + 1 < o.track.length ? o.track[cycle + 1] : null;
+  const velocity = then && at.show && then.show && !then.jump && (then.vx || then.vy) ? [then.vx, then.vy] : null;
+  return { ...o, x: at.x, y: at.y, solid: o.solid && at.show, ...(velocity && { velocity }) };
+});
 // Each body's place this frame, as its obstacle; keyed obstacles the bodies meet are retraced when they move.
 function placeBodies(run, crowd, cycle) {
   const { effect } = run, { first, statics } = effect.bodies;
   crowd.bodies.forEach((b, k) => { Object.assign(effect.obstacles[first + k], bodyPlace(bodyCells(b), b, !effect.granular)); });
   if (!effect.granular && statics.some(o => o.track)) {
-    const placed = staticsAt(statics, cycle), key = layoutKey(placed.map(o => ({ ...o, show: o.solid })));
+    const placed = staticsAt(statics, cycle), key = `${layoutKey(placed.map(o => ({ ...o, show: o.solid })))}|${placed.map(o => o.velocity ?? '').join(';')}`;
     if (key !== run.staticsKey) { run.staticsKey = key; crowd.retrace(placed); }
   }
 }

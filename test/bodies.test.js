@@ -18,7 +18,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '74e2c36fa2b6f1c05b931ebef0556342c970dd4192185632d5c4a69185fed3ea', 'bouncing-pixel': '444ad867ec4c01600cd5560353ba9e6fef9ad6a9fddd02464bf3124d2349f5bd', 'spinning-hoop': 'f8b94600b5e6a477c6146849bf738df1494adfad699c74d92ebd182a12a5ce73', 'crate-topple': '46fc517bbc175daea132767549d92a5076b8af580ce9c2e300098c1e4cbf427d', territory: '450d73ed85a146aa6f5363a98d0504cd8d620beaa44fafd3502fc79c9dfce857'
+  'ring-escape': '732208a10f7603dfd3e5cc447dc62a066f732f626c7b134fde5300af8b5cfe71', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': '066de7bb6a870cd3148848e00a9f790bd68db5906b63ef7cbdb400dc824a65cb', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -233,15 +233,99 @@ test('bodies drawn finer than the world hold still while they bob or rock, keep 
   // Bobbing a tenth of a pixel and rocking a third of a degree, it draws the same pixels every frame.
   const bob = crate(3), first = JSON.stringify(bob.draw(16.4, 12.3, 8.9));
   for (let f = 1; f < 24; f++) assert.equal(JSON.stringify(bob.draw(16.4 + 0.1 * Math.sin(f), 12.3 + 0.1 * Math.cos(f * 1.3), 8.9 + 0.3 * Math.sin(f * 0.7))), first, `frame ${f} holds still`);
-  // Sliding at a fixed angle, it moves a fine pixel at a time and its picture never changes.
-  const slide = crate(3), start = cells(slide.draw(10, 12, 20));
+  // Sliding at a fixed angle, it moves on a fine pixel at a time, never back, and its picture never changes.
+  const slide = crate(3), start = cells(slide.draw(10, 12, 20)), shifted = by => new Map([...start].map(([key, ch]) => { const [x, y] = key.split(',').map(Number); return [`${x + by},${y}`, ch]; }));
+  let shift = 0;
   for (let f = 1; f <= 30; f++) {
-    const op = slide.draw(10 + f / 9, 12, 20), shift = Math.floor(f / 3), moved = new Map([...start].map(([key, ch]) => { const [x, y] = key.split(',').map(Number); return [`${x + shift},${y}`, ch]; }));
-    assert.deepEqual(cells(op), moved, `frame ${f}: the same picture, ${shift} fine pixels on`);
+    const now = cells(slide.draw(10 + f / 9, 12, 20)), next = [shift, shift + 1].find(by => JSON.stringify([...shifted(by)]) === JSON.stringify([...now]));
+    assert.ok(next !== undefined, `frame ${f}: the same picture, ${shift} or ${shift + 1} fine pixels on`);
+    shift = next;
   }
+  assert.ok(Math.abs(shift - 10) <= 1, `it slid 10 fine pixels: ${shift}`);
   // Spinning, it is drawn at its own angle every frame: evenly turned, never held back.
   const spin = crate(3, 4.5), turned = [];
   for (let f = 0; f < 8; f++) turned.push(JSON.stringify(spin.draw(16, 12, 4.5 * f)));
   assert.equal(new Set(turned).size, 8, 'a new picture every frame');
   for (let f = 0; f < 8; f++) assert.equal(turned[f], JSON.stringify(crate(3, 4.5).draw(16, 12, 4.5 * f)), `frame ${f} is drawn at exactly its angle, as a body first drawn there is`);
+});
+
+// One body, or several, read and placed as a world places them, for drawing by hand.
+const placed = (entries, width = 64, height = 48, symbols = {}) => createBodyWorld({ substeps: 8, iterations: 6, gravity: [0, 0], walls: {}, obstacles: [],
+  bodies: readBodies(entries, 'bodies', { palette, symbols, width, height }) }, { width, height }).bodies;
+const drawnCells = (bodies, width = 64, height = 48, symbols = {}, n = 1) => {
+  const { op } = drawBodies(bodies, width, height, symbols, n), out = [];
+  if (op) op.rows.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] !== '.') out.push([op.x + i, op.y + j, row[i]]); });
+  return out;
+};
+
+test('a thin ring is one closed line at every size: no pixel missing at its diagonals, no step doubled', () => {
+  for (const off of [0, 0.5]) for (let r = 2; r <= 28; r += 0.25) {
+    const on = new Set(drawnCells(placed([{ shape: 'hoop', fixed: true, radius: r, at: [32 + off, 32 + off], fill: 'k' }], 64, 64), 64, 64).map(([x, y]) => `${x},${y}`));
+    const around = key => { const [x, y] = key.split(',').map(Number), out = []; for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if ((i || j) && on.has(`${x + i},${y + j}`)) out.push(`${x + i},${y + j}`); return out; };
+    for (const key of on) assert.equal(around(key).length, 2, `radius ${r} at +${off}: pixel ${key} has ${around(key).length} neighbours`);
+    const seen = new Set([[...on][0]]), stack = [...seen];
+    while (stack.length) for (const next of around(stack.pop())) if (!seen.has(next)) { seen.add(next); stack.push(next); }
+    assert.equal(seen.size, on.size, `radius ${r} at +${off}: one piece`);
+  }
+});
+
+test('drawn at whole pixels, a body moving steadily steps evenly, one rocking on a pixel boundary holds still, and turned pictures sit where the body is', () => {
+  const [box] = placed([{ shape: 'box', size: [8, 8], at: [10, 12], fill: 'w', outline: 'k' }]);
+  const left = b => Math.min(...drawnCells([b]).map(([x]) => x));
+  // A pixel a frame, half a pixel off the grid: held both ways, it was drawn 0, 2, 0, 2 pixels on.
+  const xs = [];
+  for (let f = 0; f < 30; f++) { box.x = 10.55 + f; xs.push(left(box)); }
+  for (let f = 3; f < 30; f++) assert.equal(xs[f] - xs[f - 1], 1, `frame ${f}: ${xs.join(' ')}`);
+  const [rocking] = placed([{ shape: 'box', size: [8, 8], at: [10.5, 12], fill: 'w', outline: 'k' }]), still = new Set();
+  for (let f = 0; f < 40; f++) { rocking.x = 10.5 + 0.25 * Math.sin(f); still.add(left(rocking)); }
+  assert.equal(still.size, 1, 'rocking a quarter pixel about a boundary, it holds still');
+  // Turned, at any place, a picture's middle is within half a pixel of the body (it sat a quarter pixel down and right on
+  // average, and up to a pixel off).
+  for (const angle of [5, 17, 30, 37, 52, 71]) for (let k = 0; k < 10; k++) {
+    const [b] = placed([{ shape: 'box', size: [8, 8], at: [20 + k / 10, 15 + k / 7], angle, fill: 'w', outline: 'k' }]), cells = drawnCells([b]);
+    const mx = cells.reduce((sum, [x]) => sum + x + 0.5, 0) / cells.length, my = cells.reduce((sum, [, y]) => sum + y + 0.5, 0) / cells.length;
+    assert.ok(Math.abs(mx - b.x) <= 0.5 + 1e-9 && Math.abs(my - b.y) <= 0.5 + 1e-9, `at ${angle}°, [${b.x}, ${b.y}] is drawn about [${mx}, ${my}]`);
+  }
+});
+
+test('a small brick on its side, a right triangle and a resting ball\'s trail are drawn as they are', () => {
+  const count = entry => drawnCells(placed([entry])).length;
+  // Snapped by its upright sides, a 5 × 4 brick on its side sat on half pixels and was drawn a 26-pixel blob.
+  assert.equal(count({ shape: 'box', size: [5, 4], at: [20.3, 15.6], angle: 90, fill: 'w' }), 20);
+  assert.equal(count({ shape: 'box', size: [3, 2], at: [20.3, 15.6], angle: 270, fill: 'w' }), 6);
+  // A right triangle's centre isn't the middle of its bounds: cut to them, it lost its tips.
+  assert.equal(count({ shape: 'polygon', points: [[0, 0], [12, 0], [0, 12]], at: [20, 15], fill: 'w', outline: 'k' }), 78);
+  // A ball at rest shows no trail beside it; moving, it leaves one.
+  const trail = velocity => run(scene({ frames: 12, gravity: [0, 0], bodies: [{ shape: 'circle', radius: 2, at: [20.3, 15.6], velocity, weightless: true, fill: 'w', trail: { color: 'r', length: 3 } }] }))
+    .recipe.frames.map(frame => frame.ops.find(op => op.op === 'grid').rows.join('').split('r').length - 1);
+  assert.ok(trail([0, 0]).every(n => n === 0), `resting: ${trail([0, 0]).join(' ')}`);
+  assert.ok(trail([1.5, 0]).slice(3).every(n => n > 0), 'moving');
+});
+
+test('a box dropped flat lands flat, a tireless box never climbs, and bodies wake when what holds them moves', () => {
+  // Bounced one corner at a time, a box dropped flat set itself spinning: most drops with bounce turned, some flipped.
+  const flat = run(scene({ frames: 120, walls: ['bottom'], bodies: [0.5, 0.9, 1].map((bounce, k) => ({ name: `b${k}`, shape: 'box', size: [8, 8], at: [8 + 16 * k + 0.3 * k, 8], bounce, fill: 'k' })) })).effect.paths;
+  for (const [name, path] of Object.entries(flat)) assert.ok(path.every(([, , a]) => Math.min(a, 360 - a) < 0.5), `${name} stays flat: ${Math.max(...path.map(([, , a]) => Math.min(a, 360 - a)))}°`);
+  // Its spin left out of the energy it keeps, a tireless box gained height at every bounce that set it spinning.
+  const tireless = run(scene({ frames: 240, walls: ['left', 'right', 'bottom'], bodies: [0, 12, 25, 40].map((angle, k) => ({ name: `t${k}`, shape: 'box', size: [12, 3], at: [6 + 12 * k, 8], angle, bounce: 1, friction: 0.4, tireless: true, fill: 'k' })) }, { width: 64, height: 48 })).effect.paths;
+  for (const [name, path] of Object.entries(tireless)) assert.ok(path.every(p => p && p[1] > 6.5), `${name} never rises past where it was dropped: ${Math.min(...path.map(p => (p ? p[1] : -99)))}`);
+  // A box asleep on a deck sinking slower than it sleeps follows it down (left asleep, it hung in the air).
+  const sinking = run(scene({ frames: 200, bodies: [{ name: 'deck', shape: 'box', size: [20, 2], at: [24, 20], fixed: true, velocity: [0, 0.02], fill: 'w' }, { name: 'box', shape: 'box', size: [4, 4], at: [24, 17], fill: 'k' }] })).effect.paths.box;
+  assert.ok(sinking.at(-1)[1] > 17 + 0.02 * 199 - 0.5, `the box rides the deck down to ${sinking.at(-1)[1]}`);
+});
+
+test('a plank lying onto a low step rests on it, a bouncy floor beside a dead one keeps its bounce, and few substeps don\'t count rest as hits', () => {
+  const ground = { floor: Array.from({ length: 4 }, () => 's'.repeat(64)), step: ['s'.repeat(24), 's'.repeat(24)] };
+  // Its centre below the step's top, past the step's end, the plank lost the step's faces and sank into it.
+  const plank = run(scene({ frames: 80, obstacles: [{ symbol: 'floor', x: 0, y: 44 }, { symbol: 'step', x: 40, y: 42 }], bodies: [{ name: 'plank', shape: 'box', size: [48, 1], at: [24, 38], fill: 'k' }] }, { width: 64, height: 48, symbols: ground })).effect.paths.plank;
+  const [x, y, a] = plank.at(-1), right = x + 24 * cosDeg(a) - 0.5 * sinDeg(a), low = y + 24 * sinDeg(a) + 0.5 * cosDeg(a);
+  assert.ok(right > 40 && low <= 42.1, `the plank's end rests on the step: [${right}, ${low}]`);
+  // A run of faces took the material of the cell it started on: the bouncy half of the floor didn't bounce.
+  const floors = { dead: ['s'.repeat(24)], live: ['s'.repeat(24)] };
+  const bounced = run(scene({ frames: 60, obstacles: [{ symbol: 'dead', x: 0, y: 30, bounce: 0 }, { symbol: 'live', x: 24, y: 30, bounce: 1 }], bodies: [{ name: 'ball', shape: 'circle', radius: 2, at: [36, 10], bounce: 0, fill: 'k' }] }, { symbols: floors })).effect.paths.ball;
+  const landed = bounced.findIndex(p => p[1] > 26.5);
+  assert.ok(landed > 0 && Math.min(...bounced.slice(landed).map(p => p[1])) < 20, 'the ball on the bouncy half bounces high');
+  // With one substep, a substep's gravity is past REST_SPEED: a resting box counted a hit every frame and never slept.
+  const resting = run(scene({ frames: 60, substeps: 1, gravity: [0, 0.5], walls: ['bottom'], bodies: [{ shape: 'box', size: [4, 4], at: [24, 20], bounce: 0.5, fill: ['k', 'w'] }] })).effect;
+  assert.ok(resting.hits <= 3 && resting.rest !== null, `${resting.hits} hits, at rest from ${resting.rest}`);
 });

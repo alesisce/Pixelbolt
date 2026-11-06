@@ -291,8 +291,11 @@ function readEffect(effect, path, context) {
 // The solid pixels (and closed edges beyond the canvas) traced into one-sided segments: every exposed pixel edge, joined
 // along straight runs, with its outward normal. An end is convex where the solid stops (the run turns a corner away from
 // the body); only convex ends round off, so a concave corner is two faces meeting and a flat floor has no seams.
+// `hard` marks the pixels of obstacles that aren't soft (a fluid's resting sand is), for waking the bodies beside one
+// that moves. An obstacle's `velocity` (a fluid's moving obstacle, pixels a frame) is its faces' too, so a box on a
+// moving shelf rides it rather than being shoved out of it as it steps.
 function traceObstacles(effect, width, height) {
-  const N = width * height, solid = new Uint8Array(N), owner = new Int16Array(N).fill(-1);
+  const N = width * height, solid = new Uint8Array(N), hard = new Uint8Array(N), owner = new Int16Array(N).fill(-1);
   effect.obstacles.forEach((o, index) => {
     if (!o.solid) return;
     o.rows.forEach((row, j) => {
@@ -301,7 +304,7 @@ function traceObstacles(effect, width, height) {
       for (let k = 0; k < row.length; k++) {
         const x = o.x + k;
         if (x < 0 || x >= width || row[k] === '.' || row[k] === ' ') continue;
-        solid[y * width + x] = 1; if (owner[y * width + x] < 0) owner[y * width + x] = index;
+        solid[y * width + x] = 1; if (!o.soft) hard[y * width + x] = 1; if (owner[y * width + x] < 0) owner[y * width + x] = index;
       }
     });
   });
@@ -314,7 +317,7 @@ function traceObstacles(effect, width, height) {
     const o = i >= 0 && i < width && j >= 0 && j < height ? owner[j * width + i] : -1;
     return o < 0 ? SURFACE : effect.obstacles[o];
   };
-  return { ...traceGrid(at, material, width, height, 1, 0, 0, width, height), solid };
+  return { ...traceGrid(at, material, width, height, 1, 0, 0, width, height), solid, hard };
 }
 
 // The faces of a grid of cells, `at(i, j)` solid (it may answer past the grid's edges), as one-sided segments in canvas
@@ -330,14 +333,23 @@ function traceGrid(at, material, width, height, scale, ox, oy, canvasWidth, canv
     const convexA = !at(Math.floor(ai - dx * 0.5 - nx * 0.5), Math.floor(aj - dy * 0.5 - ny * 0.5));
     const convexB = !at(Math.floor(bi + dx * 0.5 - nx * 0.5), Math.floor(bj + dy * 0.5 - ny * 0.5));
     const m = material(cell[0], cell[1]), ax = ox + ai * scale, ay = oy + aj * scale, bx = ox + bi * scale, by = oy + bj * scale;
-    segments.push({ ax, ay, bx, by, nx, ny, convexA, convexB, bounce: m.bounce, friction: m.friction, soft: !!m.soft,
+    segments.push({ ax, ay, bx, by, nx, ny, convexA, convexB, bounce: m.bounce, friction: m.friction, soft: !!m.soft, move: m.velocity ?? null,
       part: polygonPart([[ax, ay], [bx, by]]) });
   };
-  // Horizontal faces at y = j, between cell (i, j − 1) above and (i, j) below.
+  // Horizontal faces at y = j, between cell (i, j − 1) above and (i, j) below. A run ends where the solid's material
+  // changes, so a bouncy floor beside a dead one keeps its own bounce (one run took the material it started on).
+  const same = (i, j, k, l) => {
+    const m = material(i, j), o = material(k, l), mv = m.velocity ?? [0, 0], ov = o.velocity ?? [0, 0];
+    return m === o || (m.bounce === o.bounce && m.friction === o.friction && !!m.soft === !!o.soft && mv[0] === ov[0] && mv[1] === ov[1]);
+  };
   for (let j = 0; j <= height; j++) for (const up of [true, false]) {
     let start = -1;
     for (let i = 0; i <= width; i++) {
       const face = i < width && (up ? at(i, j) && !at(i, j - 1) : at(i, j - 1) && !at(i, j));
+      if (face && start >= 0 && !same(i, up ? j : j - 1, start, up ? j : j - 1)) {
+        if (up) add(start, j, i, j, 0, -1, [start, j]); else add(i, j, start, j, 0, 1, [start, j - 1]);
+        start = -1;
+      }
       if (face && start < 0) start = i;
       if (!face && start >= 0) {
         if (up) add(start, j, i, j, 0, -1, [start, j]); else add(i, j, start, j, 0, 1, [start, j - 1]);
@@ -350,6 +362,10 @@ function traceGrid(at, material, width, height, scale, ox, oy, canvasWidth, canv
     let start = -1;
     for (let j = 0; j <= height; j++) {
       const face = j < height && (left ? at(i, j) && !at(i - 1, j) : at(i - 1, j) && !at(i, j));
+      if (face && start >= 0 && !same(left ? i : i - 1, j, left ? i : i - 1, start)) {
+        if (left) add(i, j, i, start, -1, 0, [i, start]); else add(i, start, i, j, 1, 0, [i - 1, start]);
+        start = -1;
+      }
       if (face && start < 0) start = j;
       if (!face && start >= 0) {
         if (left) add(i, j, i, start, -1, 0, [i, start]); else add(i, start, i, j, 1, 0, [i - 1, start]);
@@ -412,10 +428,12 @@ const partBox = part => part.kind === 'circle' ? [part.x - part.r, part.y - part
 
 // Contact manifolds: { nx, ny } from the first shape to the second and up to two points { x, y, sep, id }, with
 // separation negative where they overlap and up to `margin` where they are about to touch.
-function circleCircle(a, b, margin) {
+// Circles on the same centre push apart along `apart` (the way they are moving apart, if they are): a split's copies
+// start on their taker and fly off along their own headings, where pushed along y they lost them.
+function circleCircle(a, b, margin, apart = [0, 1]) {
   const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy), sep = d - a.r - b.r;
   if (sep > margin) return null;
-  const nx = d > 1e-9 ? dx / d : 0, ny = d > 1e-9 ? dy / d : 1;
+  const nx = d > 1e-9 ? dx / d : apart[0], ny = d > 1e-9 ? dy / d : apart[1];
   return { nx, ny, points: [{ x: a.x + nx * (a.r + sep / 2), y: a.y + ny * (a.r + sep / 2), sep, id: 0 }] };
 }
 
@@ -510,10 +528,16 @@ function partSegment(part, s, margin) {
     const gap = part.r + sep / 2;
     return { nx, ny, points: [{ x: part.x + nx * gap, y: part.y + ny * gap, sep, id }] };
   }
-  // A polygon's centre behind the segment is inside the solid; the faces around it push.
+  // A polygon's centre behind the segment, across from it, is inside the solid; the faces around it push. (Behind the
+  // segment's line but past its end, it isn't: a long plank lying from the floor onto a low step has its centre below
+  // the step's top, and dropping the step's faces let it sink into the step.)
   let cx = 0, cy = 0;
   for (let i = 0; i < part.n; i++) { cx += part.vx[i]; cy += part.vy[i]; }
-  if ((cx / part.n - s.ax) * s.nx + (cy / part.n - s.ay) * s.ny < 0) return null;
+  cx /= part.n; cy /= part.n;
+  if ((cx - s.ax) * s.nx + (cy - s.ay) * s.ny < 0) {
+    const ex = s.bx - s.ax, ey = s.by - s.ay, t = ((cx - s.ax) * ex + (cy - s.ay) * ey) / (ex * ex + ey * ey);
+    if (t >= 0 && t <= 1) return null;
+  }
   const m = polygonPolygon(part, s.part, margin);
   if (!m) return null;
   // Only the open face pushes: the segment's back face (its edge 1) never does, nor a normal leaning out of the solid.
@@ -534,10 +558,13 @@ export function createBodyWorld(effect, context) {
     ...b, index, c: cosDeg(b.angle), s: sinDeg(b.angle), w: b.spin * RADIANS, x0: b.x, y0: b.y, angle0: b.angle,
     gone: false, sleepy: 0, hit: false, struck: false, colour: 0, hits: 0, history: [], extent: Math.max(b.size[0], b.size[1]) / 2
   }));
-  // A tireless body's energy (motion plus height against gravity), which every hit restores: the cheat that keeps a
-  // toy ball bouncing at full height in a ring of loose blocks, whose every knock would otherwise cost it speed.
+  // A tireless body's energy (motion and spin, plus height against gravity, per unit of mass), which every hit sets back:
+  // the cheat that keeps a toy ball bouncing at full height in a ring of loose blocks, whose every knock would otherwise
+  // cost it speed. (Without its spin, and only ever made up, a tireless box gained height at every bounce that set it
+  // spinning, and flew out of the canvas.)
   const pull = b => b.weightless ? [0, 0] : gravity;
-  const energy = b => (b.vx * b.vx + b.vy * b.vy) / 2 - pull(b)[0] * b.x - pull(b)[1] * b.y;
+  const spinEnergy = b => (b.invInertia ? b.invMass / b.invInertia : 0) * b.w * b.w / 2;
+  const energy = b => (b.vx * b.vx + b.vy * b.vy) / 2 + spinEnergy(b) - pull(b)[0] * b.x - pull(b)[1] * b.y;
   for (const b of bodies) if (b.tireless) b.energy = energy(b);
   bodies.forEach(place);
   // A body's shape scaled by k about its centre (the grow power): its mass follows its area, its inertia that squared.
@@ -556,7 +583,7 @@ export function createBodyWorld(effect, context) {
     return twin;
   };
   // Territory and powers (territory.js): cells owned by teams, pickups and events.
-  const turf = effect.territory || (effect.pickups && effect.pickups.length) || (effect.events && effect.events.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height }) : null;
+  const turf = effect.territory || (effect.pickups && effect.pickups.length) || (effect.events && effect.events.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height, fastest: MAX_SPEED }) : null;
   const dynamic = b => !b.fixed && !b.gone;
   const moving = b => b.fixed ? (b.vx !== 0 || b.vy !== 0 || b.spin !== 0) : !b.gone && !b.asleep;
   const awake = b => !b.fixed && !b.gone && !b.asleep;
@@ -590,7 +617,10 @@ export function createBodyWorld(effect, context) {
       a.world.forEach((pa, ia) => b.world.forEach((pb, ib) => {
         if (!overlaps(partBox(pa), partBox(pb), margin)) return;
         let m;
-        if (pa.kind === 'circle' && pb.kind === 'circle') m = circleCircle(pa, pb, margin);
+        if (pa.kind === 'circle' && pb.kind === 'circle') {
+          const ux = b.vx - a.vx, uy = b.vy - a.vy, u = Math.sqrt(ux * ux + uy * uy);
+          m = circleCircle(pa, pb, margin, u > 1e-9 ? [ux / u, uy / u] : undefined);
+        }
         else if (pa.kind === 'circle') { m = polygonCircle(pb, pa, margin); if (m) { m.nx = -m.nx; m.ny = -m.ny; } }
         else if (pb.kind === 'circle') m = polygonCircle(pa, pb, margin);
         else m = polygonPolygon(pa, pb, margin);
@@ -604,7 +634,7 @@ export function createBodyWorld(effect, context) {
         const s = world.segments[index];
         a.world.forEach((pa, ia) => {
           const m = partSegment(pa, s, margin);
-          if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), soft: s.soft });
+          if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), soft: s.soft, move: s.move });
         });
       }
       // Cells of the other teams' territory are walls to it.
@@ -625,8 +655,9 @@ export function createBodyWorld(effect, context) {
     if (!solid(a)) { a.vx -= a.invMass * px; a.vy -= a.invMass * py; a.w -= a.invInertia * (point.rax * py - point.ray * px); }
     if (!solid(b)) { b.vx += b.invMass * px; b.vy += b.invMass * py; b.w += b.invInertia * (point.rbx * py - point.rby * px); }
   };
+  // A moving obstacle's face moves at its velocity (contact.move).
   const relative = (contact, point) => {
-    const [vax, vay] = velocityAt(contact.a, point.rax, point.ray), [vbx, vby] = velocityAt(contact.b, point.rbx, point.rby);
+    const [vax, vay] = velocityAt(contact.a, point.rax, point.ray), [vbx, vby] = contact.b || !contact.move ? velocityAt(contact.b, point.rbx, point.rby) : contact.move;
     return [vbx - vax, vby - vay];
   };
   const solve = (contacts, bias) => {
@@ -653,14 +684,47 @@ export function createBodyWorld(effect, context) {
     }
   };
 
-  const substep = () => {
-    // Fixed bodies move exactly as their velocity and spin say.
+  // Restitution on a contact's two points at once (a 2 × 2 block), so both leave at their bounce together; false where
+  // the block's answer would pull rather than push.
+  const bounceBoth = contact => {
+    const [p, q] = contact.points, { a, b, nx, ny } = contact;
+    const ma = solid(a) ? 0 : a.invMass, ia = solid(a) ? 0 : a.invInertia, mb = solid(b) ? 0 : b.invMass, ib = solid(b) ? 0 : b.invInertia;
+    const pa = p.rax * ny - p.ray * nx, pb = p.rbx * ny - p.rby * nx, qa = q.rax * ny - q.ray * nx, qb = q.rbx * ny - q.rby * nx;
+    const k11 = ma + mb + ia * pa * pa + ib * pb * pb, k22 = ma + mb + ia * qa * qa + ib * qb * qb, k12 = ma + mb + ia * pa * qa + ib * pb * qb, det = k11 * k22 - k12 * k12;
+    if (!(det > 1e-9 * k11 * k22)) return false;
+    const along = point => { const [dvx, dvy] = relative(contact, point); return dvx * nx + dvy * ny; };
+    const bp = -(along(p) + contact.bounce * p.approach), bq = -(along(q) + contact.bounce * q.approach);
+    const xp = (k22 * bp - k12 * bq) / det, xq = (k11 * bq - k12 * bp) / det;
+    if (p.normal + xp < 0 || q.normal + xq < 0) return false;
+    p.normal += xp; q.normal += xq;
+    apply(contact, p, nx * xp, ny * xp); apply(contact, q, nx * xq, ny * xq);
+    return true;
+  };
+  // An approach faster than this is an impact, that bounces and counts as a hit: REST_SPEED, or more where a substep of
+  // gravity alone adds more (with one substep and strong gravity, a resting body was hit at every substep, changed colour
+  // every frame and never slept).
+  const impact = Math.max(REST_SPEED, 1.5 * Math.sqrt(gravity[0] * gravity[0] + gravity[1] * gravity[1]) * dt);
+  // A woken body wakes the sleeping bodies it touches, and they theirs, as a stack is held up by its neighbours: a
+  // knocked crate pushes the crates beside it instead of the still ones holding it as a wall. A weightless body leans
+  // on nothing, so it wakes only when something moves into it.
+  const rouse = woken => {
+    for (const queue = [...woken]; queue.length;) {
+      const w = queue.shift();
+      for (const o of bodies) if (o.asleep && !o.weightless && !o.gone && overlaps(w.box, o.box, 0.25)) { o.asleep = false; o.sleepy = 0; queue.push(o); }
+    }
+  };
+  // Fixed bodies move exactly as their velocity and spin say.
+  const placeMoving = () => {
     for (const b of bodies) if (b.fixed && moving(b)) {
       b.x = b.x0 + b.vx * time; b.y = b.y0 + b.vy * time;
       const a = b.angle0 + b.spin * time; b.c = cosDeg(a); b.s = sinDeg(a); place(b);
     }
-    const contacts = collide();
-    // A body moving into a sleeping one wakes it; so does anything moving that it rests on.
+  };
+  const substep = () => {
+    placeMoving();
+    let contacts = collide();
+    // A body moving into a sleeping one wakes it; so does anything moving that it rests on, and a fixed body that moves
+    // at all (a platform sinking slowly from under a box, or one turning under it, would leave it asleep in the air).
     const woken = new Set();
     for (const contact of contacts) {
       const { a, b } = contact;
@@ -670,23 +734,28 @@ export function createBodyWorld(effect, context) {
         const point = contact.points[0], rax = point.x - a.x, ray = point.y - a.y, rbx = point.x - b.x, rby = point.y - b.y;
         const [vax, vay] = velocityAt(a, rax, ray), [vbx, vby] = velocityAt(b, rbx, rby), vn = (vbx - vax) * contact.nx + (vby - vay) * contact.ny;
         const otherSpeed = Math.sqrt(other.vx * other.vx + other.vy * other.vy) + Math.abs(other.w) * other.extent;
-        if (vn < -WAKE_SPEED || (!sleeper.weightless && otherSpeed > 4 * SLEEP_SPEED)) { sleeper.asleep = false; sleeper.sleepy = 0; woken.add(sleeper); }
+        if (vn < -WAKE_SPEED || other.fixed || (!sleeper.weightless && otherSpeed > 4 * SLEEP_SPEED)) { sleeper.asleep = false; sleeper.sleepy = 0; woken.add(sleeper); }
       }
     }
-    // A woken body wakes the sleeping bodies it touches, and they theirs, as a stack is held up by its neighbours: a
-    // knocked crate pushes the crates beside it instead of the still ones holding it as a wall. A weightless body leans
-    // on nothing, so it wakes only when something moves into it.
-    for (const queue = [...woken]; queue.length;) {
-      const w = queue.shift();
-      for (const o of bodies) if (o.asleep && !o.weightless && !o.gone && overlaps(w.box, o.box, 0.25)) { o.asleep = false; o.sleepy = 0; queue.push(o); }
-    }
+    rouse(woken);
+    // Woken bodies meet what they touch this substep too: gathered while they slept, a stack knocked from the side had
+    // no contacts among its crates or with the floor, and its crates sank half a pixel into each other.
+    if (woken.size) contacts = collide();
     // Velocities: gravity, drag, and the speed limits.
     for (const b of bodies) {
       if (!dynamic(b) || b.asleep) continue;
       if (!b.weightless) { b.vx += gravity[0] * dt; b.vy += gravity[1] * dt; }
       if (turf) turf.pull(b, dt);
-      // A force from outside the solver (a fluid's buoyancy), steady through the frame as gravity is.
+      // A force from outside the solver (a fluid's load and grip, and its lift where the body has no level to float at),
+      // steady through the frame as gravity is.
       if (b.push) { b.vx += b.push[0] * dt; b.vy += b.push[1] * dt; b.w += b.push[2] * dt; }
+      // A liquid's lift, from the body's shape under the level it floats at as it is now (fluid.js holds the level for
+      // the frame), so the lift follows the body as it bobs and rolls within a frame.
+      if (b.float) {
+        const f = b.float, [area, cx, cy] = areaBeyond(b, f.axis, f.level, f.sign);
+        b.vx -= area * f.gx / f.mass * dt; b.vy -= area * f.gy / f.mass * dt;
+        if (f.inertia) b.w += ((cx - b.x) * -area * f.gy - (cy - b.y) * -area * f.gx) / f.inertia * dt;
+      }
       if (b.drag) { const k = 1 / (1 + b.drag * dt); b.vx *= k; b.vy *= k; }
       if (b.spinDrag) b.w *= 1 / (1 + b.spinDrag * dt);
       const v2 = b.vx * b.vx + b.vy * b.vy;
@@ -715,9 +784,11 @@ export function createBodyWorld(effect, context) {
       apply(contact, point, nx * point.normal + ny * point.tangent, ny * point.normal - nx * point.tangent);
     }
     for (let k = 0; k < iterations; k++) solve(contacts, true);
-    // Positions.
+    // Positions, at no more than the speed limit (bodies started on top of each other were thrown at twice it).
     for (const b of bodies) {
       if (!dynamic(b) || b.asleep) continue;
+      const v2 = b.vx * b.vx + b.vy * b.vy;
+      if (v2 > MAX_SPEED * MAX_SPEED) { const k = MAX_SPEED / Math.sqrt(v2); b.vx *= k; b.vy *= k; }
       b.x += b.vx * dt; b.y += b.vy * dt;
       if (b.w) {
         const turn = b.w * dt, c = b.c - b.s * turn, s = b.s + b.c * turn, m = Math.sqrt(c * c + s * s);
@@ -727,12 +798,17 @@ export function createBodyWorld(effect, context) {
     }
     // Relax: the push out of overlaps leaves no velocity behind.
     for (let k = 0; k < Math.max(1, iterations >> 1); k++) solve(contacts, false);
-    // Restitution, from the approach speed before the solve, on points that pushed.
+    // Restitution, from the approach speed before the solve, on points that pushed. An approach slower than `impact`
+    // doesn't bounce, so a dropped ball settles; a body with a held speed bounces at any approach (it slid along a wall
+    // it met at a glance, kept there for hundreds of frames by its held speed). A contact's two points that both bounce
+    // are solved together, so a box landing flat leaves flat: one at a time, the second was often already moving apart
+    // and the first alone pushed back, setting the box spinning.
     for (const contact of contacts) {
       if (contact.bounce === 0) continue;
-      const { nx, ny } = contact;
+      const { nx, ny } = contact, least = contact.a.speed || (contact.b && contact.b.speed) ? 1e-9 : impact;
+      if (contact.points.length === 2 && contact.points.every(point => point.approach < -least) && contact.points.some(point => point.most > 0) && bounceBoth(contact)) continue;
       for (const point of contact.points) {
-        if (point.approach > -REST_SPEED || point.most === 0) continue;
+        if (point.approach > -least || point.most === 0) continue;
         const [dvx, dvy] = relative(contact, point), vn = dvx * nx + dvy * ny;
         const old = point.normal, more = Math.max(old - point.normalMass * (vn + contact.bounce * point.approach), 0), impulse = more - old;
         point.normal = more;
@@ -741,10 +817,10 @@ export function createBodyWorld(effect, context) {
     }
     for (const contact of contacts) for (const point of contact.points) {
       next.set(`${contact.key}:${point.id}`, [point.normal, point.tangent]);
-      if (point.approach < -REST_SPEED && point.most > 0) { contact.a.hit = contact.a.struck = true; if (contact.b) contact.b.hit = contact.b.struck = true; }
+      if (point.approach < -impact && point.most > 0) { contact.a.hit = contact.a.struck = true; if (contact.b) contact.b.hit = contact.b.struck = true; }
     }
     // The cells hit change hands; a body with a held speed goes on at it, along its own heading.
-    if (turf) { for (const contact of contacts) if (contact.cell) turf.hit(contact, contact.cell); turf.settle(); }
+    if (turf) { for (const contact of contacts) if (contact.cell) turf.hit(contact, contact.cell); turf.settle(bodies); }
     for (const b of bodies) {
       if (!b.speed || !dynamic(b) || b.asleep) continue;
       const v = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
@@ -754,8 +830,8 @@ export function createBodyWorld(effect, context) {
       if (!b.struck) continue;
       b.struck = false;
       if (!b.tireless || b.asleep || b.gone) continue;
-      const [gx, gy] = pull(b), want = 2 * (b.energy + gx * b.x + gy * b.y), has = b.vx * b.vx + b.vy * b.vy;
-      if (want > has && has > 1e-12) { const k = Math.sqrt(want / has); b.vx *= k; b.vy *= k; }
+      const [gx, gy] = pull(b), want = 2 * (b.energy + gx * b.x + gy * b.y - spinEnergy(b)), has = b.vx * b.vx + b.vy * b.vy;
+      if (want > 0 && has > 1e-12) { const k = Math.sqrt(want / has); b.vx *= k; b.vy *= k; }
     }
     warm = next;
     time += dt;
@@ -768,6 +844,9 @@ export function createBodyWorld(effect, context) {
   }
   const advance = f => {
     if (f > 0) for (let k = 0; k < substeps; k++) substep();
+    // Moving fixed bodies are drawn (and met by a fluid) where they are at the frame's end, not where its last substep
+    // started: a paddle drawn a substep behind showed a gap before the box it pushed.
+    placeMoving();
     // Powers run out and are taken, and the score is counted, between frames.
     if (turf) { turf.frame(f, bodies); for (const b of bodies) if (!b.gone) place(b); }
     // Hits change colour once a frame; slow bodies fall asleep; bodies far outside the canvas are gone. A named body's path
@@ -788,7 +867,25 @@ export function createBodyWorld(effect, context) {
     }
     if (stats.rest === null && f > 0 && bodies.every(b => b.gone || b.fixed && !moving(b) || b.asleep)) stats.rest = f;
   };
-  return { bodies, stats, gravity, advance, turf, retrace: obstacles => { world = traceObstacles({ obstacles, walls: effect.walls }, width, height); } };
+  // New obstacles (a fluid's that move, or its resting sand) wake the sleeping bodies within a pixel of a hard pixel that
+  // came or went, and those resting on them: a crate asleep on a shelf that slid away hung in the air, and one beside a
+  // shelf rising into it was passed through.
+  const retrace = obstacles => {
+    const before = world.hard;
+    world = traceObstacles({ obstacles, walls: effect.walls }, width, height);
+    const woken = [];
+    for (const b of bodies) {
+      if (!b.asleep || b.gone || b.fixed) continue;
+      const [x0, y0, x1, y1] = b.box;
+      let moved = false;
+      for (let y = Math.max(0, Math.floor(y0) - 1); y <= Math.min(height - 1, Math.floor(y1) + 1) && !moved; y++) {
+        for (let x = Math.max(0, Math.floor(x0) - 1); x <= Math.min(width - 1, Math.floor(x1) + 1); x++) if (before[y * width + x] !== world.hard[y * width + x]) { moved = true; break; }
+      }
+      if (moved) { b.asleep = false; b.sleepy = 0; woken.push(b); }
+    }
+    rouse(woken);
+  };
+  return { bodies, stats, gravity, advance, turf, retrace };
 }
 
 function simulate(effect, context) {
@@ -801,15 +898,27 @@ function simulate(effect, context) {
 // A shape whose size is odd centres on a pixel's middle and an even one on a pixel corner, so a body at rest draws the
 // same pixels as its sprite at angle 0 and moves in whole pixels.
 const snap = (value, size) => (size % 2 ? Math.floor(value) + 0.5 : Math.round(value));
-// A body keeps the pixel it is drawn at until it has moved HOLD past the halfway mark to the next, and its drawn angle
-// until it has turned TURN_HOLD of a step past halfway, so a body rocking about a boundary (a crate bobbing on water, a
-// box settling) holds still instead of flickering between two pixels. A fluid's solid cells for it are where it really
-// is (exactCells), and the fluid draws its liquid in those its drawing leaves uncovered.
-const HOLD = 0.3, TURN_HOLD = 0.2;
+// A body steps to the next pixel it is drawn at as soon as it passes halfway there, the way it last stepped, but steps
+// back only once it has moved HOLD past halfway, and its drawn angle likewise by TURN_HOLD of a step, so a body rocking
+// about a boundary (a crate bobbing on water, a box settling) holds still instead of flickering between two pixels,
+// while one sliding or turning steadily steps evenly. (Held both ways, a body moving about a pixel a frame was drawn
+// 0, 2, 0, 2 pixels on.) A fluid's solid cells for it are where it really is (exactCells), and the fluid draws its
+// liquid in those its drawing leaves uncovered.
+const HOLD = 0.3, TURN_HOLD = 0.2, SIDES_BOW = 0.75;
+// The drawn value `memory[key]` ({ at, way }) moves to `next`, the value `apart` from it now: at once the way it last
+// moved, the other way only once `apart` is `back` or more. Its first step holds as a step back does.
+function holdStep(memory, key, next, apart, back, extra = {}) {
+  const was = memory[key];
+  if (was === undefined) memory[key] = { at: next, way: 0, ...extra };
+  else if (next !== was.at) {
+    const way = Math.sign(next - was.at);
+    if (way === was.way || apart >= back) memory[key] = { at: next, way, ...extra };
+  }
+  return memory[key].at;
+}
 function held(b, axis, size) {
-  const value = axis ? b.y : b.x, next = snap(value, size), memory = b.held ??= {}, key = `${axis}:${size}`, was = memory[key];
-  if (was === undefined || (next !== was && Math.abs(value - was) >= 0.5 + HOLD)) memory[key] = next;
-  return memory[key];
+  const value = axis ? b.y : b.x, memory = b.held ??= {}, key = `${axis}:${size}`;
+  return holdStep(memory, key, snap(value, size), Math.abs(value - (memory[key]?.at ?? value)), 0.5 + HOLD);
 }
 // The drawing caches below live as long as the module (an MCP worker's whole life), so each is bounded: past CACHED
 // entries it starts again. A moving hoop alone made a new ring for every pixel it moved, until memory ran out.
@@ -826,8 +935,11 @@ function disc(d) {
 }
 
 // A circle of pixels around a centre: one pixel thick, each column's top and bottom pixel on the top and bottom arcs
-// and each row's outer pixels on the side arcs, so it is 8-connected with no doubled steps; thicker, every pixel whose
-// centre lies within half the thickness of the circle.
+// where the arc runs flatter than the diagonal, and each row's outer pixels on the side arcs where it runs steeper, then
+// any pixel with a neighbour across and one above or below dropped (the two meet corner to corner without it), so it is
+// 8-connected with no doubled steps; thicker, every pixel whose centre lies within half the thickness of the circle.
+// (Columns and rows stopped where the arc's middle crosses the diagonal, and a quarter of all rings, the spinning-hoop
+// preset's among them, had a pixel missing at each diagonal.)
 const rings = new Map();
 // Cached about the centre's place within its pixel (a whole or half pixel) and moved to the centre, so a hoop that moves
 // reuses one ring instead of making one for every pixel it passes.
@@ -837,19 +949,24 @@ function ring(x, y, r, thickness) {
   if (rings.has(key)) return at(rings.get(key));
   const seen = new Set(), cells = [], add = (px, py) => { if (!seen.has(py * 65536 + px)) { seen.add(py * 65536 + px); cells.push([px, py]); } };
   if (thickness <= 1) {
-    const reach = r / Math.sqrt(2);
-    for (let px = Math.floor(cx - reach); px <= Math.ceil(cx + reach); px++) {
+    for (let px = Math.floor(cx - r); px <= Math.ceil(cx + r); px++) {
       const dx = px + 0.5 - cx;
-      if (Math.abs(dx) > reach) continue;
+      if (Math.abs(dx) > r) continue;
       const dy = Math.sqrt(r * r - dx * dx);
-      add(px, Math.floor(cy - dy)); add(px, Math.floor(cy + dy));
+      for (const py of [Math.floor(cy - dy), Math.floor(cy + dy)]) if (Math.abs(py + 0.5 - cy) >= Math.abs(dx)) add(px, py);
     }
-    for (let py = Math.floor(cy - reach); py <= Math.ceil(cy + reach); py++) {
+    for (let py = Math.floor(cy - r); py <= Math.ceil(cy + r); py++) {
       const dy = py + 0.5 - cy;
-      if (Math.abs(dy) > reach) continue;
+      if (Math.abs(dy) > r) continue;
       const dx = Math.sqrt(r * r - dy * dy);
-      add(Math.floor(cx - dx), py); add(Math.floor(cx + dx), py);
+      for (const px of [Math.floor(cx - dx), Math.floor(cx + dx)]) if (Math.abs(px + 0.5 - cx) >= Math.abs(dy)) add(px, py);
     }
+    const kept = [];
+    for (const [px, py] of cells) {
+      const across = seen.has(py * 65536 + px - 1) || seen.has(py * 65536 + px + 1), upDown = seen.has((py - 1) * 65536 + px) || seen.has((py + 1) * 65536 + px);
+      if (across && upDown) seen.delete(py * 65536 + px); else kept.push([px, py]);
+    }
+    cells.length = 0; cells.push(...kept);
   } else {
     const half = thickness / 2;
     for (let py = Math.floor(cy - r - half); py <= Math.ceil(cy + r + half); py++) for (let px = Math.floor(cx - r - half); px <= Math.ceil(cx + r + half); px++) {
@@ -874,8 +991,10 @@ function cover(b, x, y) {
     const { r, points, thickness, gap, sides } = b.parts.hoop;
     // A round hoop looks the same at every angle, so it is drawn as one fixed ring of pixels and only its gap turns;
     // redrawn from its turning walls, half its pixels would change every frame and the ring would tremble. A hoop
-    // with few sides (a hexagon) really changes shape as it turns, so it is drawn from its walls.
-    if (r * (1 - cosDeg(180 / sides)) < 0.35) {
+    // with few sides (a hexagon) really changes shape as it turns, so it is drawn from its walls, at a held place and
+    // angle as a box is. Round means its sides bow less than SIDES_BOW from the circle: a small hoop's few default sides
+    // (a radius-10 hoop has 10) bow half a pixel, and drawn from its walls it changed 40% of its pixels a frame.
+    if (r * (1 - cosDeg(180 / sides)) < SIDES_BOW) {
       const cx = held(b, 0, b.size[0]), cy = held(b, 1, b.size[1]), facing = atan2Deg(b.s, b.c);
       for (const [px, py] of ring(cx, cy, r, thickness)) {
         if (gap > 0) {
@@ -886,7 +1005,8 @@ function cover(b, x, y) {
       }
       return out;
     }
-    const world = points.map(([px, py]) => [x + b.c * px - b.s * py, y + b.s * px + b.c * py]);
+    const hx = held(b, 0, b.size[0]), hy = held(b, 1, b.size[1]), degrees = drawnDegrees(b), c = cosDeg(degrees), s = sinDeg(degrees);
+    const world = points.map(([px, py]) => [hx + c * px - s * py, hy + s * px + c * py]);
     if (thickness <= 1) {
       for (let k = 0; k + 1 < world.length; k++) traceLine(Math.floor(world[k][0]), Math.floor(world[k][1]), Math.floor(world[k + 1][0]), Math.floor(world[k + 1][1]), (px, py) => out.push([px, py]));
       return out;
@@ -901,7 +1021,10 @@ function cover(b, x, y) {
     }
     return out;
   }
-  const cx = x === b.x ? held(b, 0, b.size[0]) : snap(x, b.size[0]), cy = y === b.y ? held(b, 1, b.size[1]) : snap(y, b.size[1]), n = part.n, vx = [], vy = [], nx = [], ny = [], [c, s] = drawnTurn(b);
+  // Turned a quarter, its width runs down and its height across, so its centre snaps by those sides' sizes: snapped by
+  // its upright sizes, a 5 × 4 brick lying on its side sat on half pixels and was drawn a 5 × 6 blob.
+  const degrees = drawnDegrees(b), c = cosDeg(degrees), s = sinDeg(degrees), [w, h] = Math.round(degrees / 90) % 2 ? [b.size[1], b.size[0]] : b.size;
+  const cx = x === b.x ? held(b, 0, w) : snap(x, w), cy = y === b.y ? held(b, 1, h) : snap(y, h), n = part.n, vx = [], vy = [], nx = [], ny = [];
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (let i = 0; i < n; i++) {
     vx.push(cx + c * part.vx[i] - s * part.vy[i]); vy.push(cy + s * part.vx[i] + c * part.vy[i]);
@@ -927,26 +1050,32 @@ function cover(b, x, y) {
 // paintBodies). A body under 6 pixels every way is always drawn square: a 4-pixel box turned 30 degrees is a pinwheel in
 // pixels and at 45 a plus sign. The physics keeps the exact angle.
 const turnStep = size => (Math.max(size[0], size[1]) < 6 ? 90 : 1);
+// The shorter turn from angle a to angle b, in degrees (−180 to 180).
+const turnBetween = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
 function drawnDegrees(b, size = b.size) {
-  const step = turnStep(size), exact = atan2Deg(b.s, b.c);
-  let degrees = Math.round(exact / step) * step;
+  const every = turnStep(size), exact = atan2Deg(b.s, b.c);
+  let degrees = Math.round(exact / every) * every;
   if (degrees >= 360) degrees -= 360;
-  const memory = b.held ??= {}, key = `turn:${step}`, was = memory[key];
-  if (was !== undefined && degrees !== was) {
-    const apart = Math.abs(((exact - was) % 360 + 540) % 360 - 180);
-    if (apart < step / 2 + step * TURN_HOLD) degrees = was;
+  const memory = b.held ??= {}, key = `turn:${every}`, was = memory[key];
+  if (was === undefined) memory[key] = { at: degrees, way: 0 };
+  else if (degrees !== was.at) {
+    const way = Math.sign(turnBetween(was.at, degrees));
+    if (way === was.way || Math.abs(turnBetween(was.at, exact)) >= every / 2 + every * TURN_HOLD) memory[key] = { at: degrees, way };
   }
-  memory[key] = degrees;
-  return degrees;
+  return memory[key].at;
 }
-function drawnTurn(b) { const degrees = drawnDegrees(b); return [cosDeg(degrees), sinDeg(degrees)]; }
 
 // A box or polygon upright: its cells at angle 0 around its middle, the edge in its outline's key and the rest in its
-// fill (the fill it has now, for a body that changes colour at each hit).
+// fill (the fill it has now, for a body that changes colour at each hit). The picture's middle is the body's centre, so
+// it turns about it: a polygon whose centre isn't the middle of its bounds (a right triangle) gets room for its far
+// side, the picture as many pixels wider (and taller) on each side. (Cut to its bounds about its centre, a right
+// triangle lost its tips and showed its fill there.)
 const uprights = new Map();
 function uprightRows(b) {
-  const [w, h] = b.size, fill = b.fills[b.colour], key = `${b.shape}:${b.size}:${b.parts[0].vx.join()}:${b.parts[0].vy.join()}:${fill}:${b.outline ?? ''}`;
+  const part = b.parts[0], fill = b.fills[b.colour], key = `${b.shape}:${b.size}:${part.vx.join()}:${part.vy.join()}:${fill}:${b.outline ?? ''}`;
   if (uprights.has(key)) return uprights.get(key);
+  const room = (size, values) => size + 2 * Math.max(0, Math.ceil(Math.max(...Array.from(values, Math.abs)) - size / 2 - 1e-9));
+  const w = room(b.size[0], part.vx), h = room(b.size[1], part.vy);
   const flat = { ...b, c: 1, s: 0, held: undefined, x: w / 2, y: h / 2 }, cells = cover(flat, flat.x, flat.y), inside = new Set(cells.map(([x, y]) => y * 65536 + x));
   const rows = Array.from({ length: h }, () => Array(w).fill('.'));
   for (const [x, y] of cells) {
@@ -1001,26 +1130,31 @@ function pictureOf(b, symbols) {
   return picture;
 }
 
-// Drawn finer than the world's pixels, a body holds its drawn place to the fine pixel until it has moved HOLD past
-// halfway to the next, as at whole pixels, and its drawn angle until it has turned more than half a step and TURN_HOLD
-// of one (a step is a degree, or less for a body so long that a degree would move its ends more than a fine pixel), then
-// takes its own: a crate bobbing on the water or a box rocking as it settles holds still instead of shimmering, one that
-// slides moves a fine pixel at a time with its picture unchanged, and one that spins turns evenly. Its place is snapped
-// so its picture's pixel edges, turned to the nearest quarter turn, fall between the fine pixels' centres: sampled on
-// them, a box at rest a hundredth of a degree off square was drawn sheared, one half of each side a fine pixel off the
-// other.
+// Drawn finer than the world's pixels, a body steps its drawn place to the next fine pixel as it passes halfway there
+// the way it last stepped, and back only once HOLD past halfway, as at whole pixels; its drawn angle takes its own once
+// it has turned half a step on the way it last turned, or half a step and TURN_HOLD of one back (a step is a degree, or
+// less for a body so long that a degree would move its ends more than a fine pixel): a crate bobbing on the water or a
+// box rocking as it settles holds still instead of shimmering, one that slides moves a fine pixel at a time with its
+// picture unchanged, and one that spins turns evenly. Its place is snapped so its picture's pixel edges, turned to the
+// nearest quarter turn, fall between the fine pixels' centres: sampled on them, a box at rest a hundredth of a degree
+// off square was drawn sheared, one half of each side a fine pixel off the other.
 function heldTurn(b, reach, n) {
-  let step = 1;
-  while (step > 1 / 16 && reach * n * step * RADIANS > 1) step /= 2;
+  let every = 1;
+  while (every > 1 / 16 && reach * n * every * RADIANS > 1) every /= 2;
   const exact = atan2Deg(b.s, b.c), memory = b.held ??= {}, was = memory.fineTurn;
-  if (was === undefined || Math.abs(((exact - was) % 360 + 540) % 360 - 180) >= step * (0.5 + TURN_HOLD)) memory.fineTurn = exact;
-  return memory.fineTurn;
+  if (was === undefined) memory.fineTurn = { at: exact, way: 0 };
+  else {
+    const turn = turnBetween(was.at, exact), way = Math.sign(turn);
+    if (Math.abs(turn) >= every * (way === was.way ? 0.5 : 0.5 + TURN_HOLD)) memory.fineTurn = { at: exact, way };
+  }
+  return memory.fineTurn.at;
 }
 // `offset` is where the picture's edges lie from its centre, in this quarter turn: the drawn centre is that far off a
 // fine pixel's edge. A new quarter turn (or picture) starts the hold afresh.
 function heldFine(b, axis, offset, n, q) {
   const value = ((axis ? b.y : b.x) - offset) * n, next = Math.round(value), memory = b.held ??= {}, key = `fine:${axis}`, was = memory[key];
-  if (!was || was.q !== q || was.offset !== offset || was.n !== n || (next !== was.at && Math.abs(value - was.at) >= 0.5 + HOLD)) memory[key] = { at: next, q, offset, n };
+  if (!was || was.q !== q || was.offset !== offset || was.n !== n) memory[key] = undefined;
+  holdStep(memory, key, next, Math.abs(value - (memory[key]?.at ?? value)), 0.5 + HOLD, { q, offset, n });
   return memory[key].at / n + offset;
 }
 
@@ -1082,7 +1216,9 @@ function drawFrame(world, width, height, context, f, hud = []) {
 export function paintBodies(bodies, grid, width, height, symbols) {
   const context = { symbols };
   const put = (x, y, code) => { if (x >= 0 && y >= 0 && x < width && y < height) grid[y * width + x] = code; };
-  // Trails first, under every body: the body's own shape shrunk by a pixel, along where it was in recent frames.
+  // Trails first, under every body: the body's own shape shrunk by a pixel, along where it was in recent frames, but not
+  // under where it is now: a disc a pixel narrower snaps to the other kind of pixel place, and a body at rest showed a
+  // pixel of trail beside it.
   for (const b of bodies) {
     if (b.gone || !b.trail || b.history.length < 2) continue;
     const code = b.trail.color.charCodeAt(0), points = b.history.slice(-1 - b.trail.length), d = Math.max(1, Math.min(b.size[0], b.size[1]) - 1);
@@ -1090,6 +1226,7 @@ export function paintBodies(bodies, grid, width, height, symbols) {
       const [ax, ay] = points[k], [bx, by] = points[k + 1], steps = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay))));
       for (let t = 0; t < steps; t++) {
         const x = ax + (bx - ax) * t / steps, y = ay + (by - ay) * t / steps, left = snap(x, d) - d / 2, top = snap(y, d) - d / 2;
+        if (Math.abs(x - b.x) < 0.5 && Math.abs(y - b.y) < 0.5) continue;
         for (const [i, j] of disc(d)) put(left + i, top + j, code);
       }
     }
@@ -1105,10 +1242,13 @@ export function paintBodies(bodies, grid, width, height, symbols) {
     if (b.symbol || upright) {
       const rows = upright ?? context.symbols[b.symbol], degrees = b.shape === 'circle' ? 0 : Math.round(drawnDegrees(b, [rows[0].length, rows.length])) % 360;
       const { rows: turned, origin } = sprite(rows, b.shape === 'circle' ? 0 : degrees);
-      // Turned about its centre, which sits on the body's drawn centre (the picture's top-left at angle 0 a whole pixel);
-      // the turned picture lies there to the nearest pixel.
-      const w = rows[0].length, h = rows.length, cx = held(b, 0, w), cy = held(b, 1, h);
-      const left = Math.round(cx - w / 2 + origin[0]), top = Math.round(cy - h / 2 + origin[1]);
+      // Turned about its centre, which sits on the body's drawn centre: on a pixel's middle where the turned picture's
+      // middle is one (mx a half), else on a pixel corner, so the turned picture lies on whole pixels with its middle
+      // where the body is. (Snapped as the upright picture, then rounded, a turned picture sat a quarter pixel down and
+      // right on average and hopped half a pixel diagonally as a degree's turn changed its middle.)
+      const w = rows[0].length, h = rows.length, mx = w / 2 - origin[0], my = h / 2 - origin[1];
+      const parity = m => (((Math.round(2 * m) % 2) + 2) % 2 ? 1 : 2), cx = held(b, 0, parity(mx)), cy = held(b, 1, parity(my));
+      const left = Math.round(cx - mx), top = Math.round(cy - my);
       turned.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] !== '.' && row[i] !== ' ') put(left + i, top + j, row.charCodeAt(i)); });
       continue;
     }
@@ -1287,7 +1427,9 @@ function readSource(source, frames) {
   const palette = source.palette ?? {};
   if (!isObject(palette)) fail('bodies.palette', 'expected a palette object');
   const width = integer(source.width, 'bodies.width', 4, 256), height = integer(source.height, 'bodies.height', 4, 256);
-  const n = readSubpixels(source.subpixels, 'bodies', width, height, source.effects);
+  // A recipe's frames share the exporter's pixels, so its hint counts them; a match written as video frames (bodiesFrames)
+  // keeps none of them, and is held only to 256 a side.
+  const n = readSubpixels(source.subpixels, 'bodies', width, height, frames === LIMITS.frames ? source.effects : undefined);
   const symbols = source.symbols ?? {};
   if (!isObject(symbols)) fail('bodies.symbols', 'expected named symbols for obstacles and sprites');
   for (const [name, rows] of Object.entries(symbols)) {

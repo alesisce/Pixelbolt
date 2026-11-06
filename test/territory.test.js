@@ -170,3 +170,46 @@ test('what the renderer or a sequence would refuse is refused before simulating,
   assert.equal(again, first);
   assert.ok(!later.equals(first));
 });
+
+// The pieces of colour `key` in a frame's grid (8-connected), as their centres.
+const blobs = (frame, key) => {
+  const grid = frame.ops.find(op => op.op === 'grid'), on = new Set();
+  grid.rows.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] === key) on.add(`${grid.x + i},${grid.y + j}`); });
+  const out = [];
+  for (const start of on) {
+    if (!on.has(start)) continue;
+    const stack = [start], cells = [];
+    on.delete(start);
+    while (stack.length) {
+      const [x, y] = stack.pop().split(',').map(Number);
+      cells.push([x, y]);
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (on.has(`${x + i},${y + j}`)) { on.delete(`${x + i},${y + j}`); stack.push(`${x + i},${y + j}`); }
+    }
+    out.push([cells.reduce((s, [x]) => s + x + 0.5, 0) / cells.length, cells.reduce((s, [, y]) => s + y + 0.5, 0) / cells.length]);
+  }
+  return out;
+};
+
+test('a split\'s copies fly off along their own headings, a warped ball takes the ground it lands on, and a ball meeting a wall at a glance bounces off it', () => {
+  // Made on their taker, the copies were pushed apart along y, whatever their headings: a ball falling down the board
+  // split into balls that kept falling one behind another.
+  const source = match({ walls: [], bodies: [ball('ball', [32, 6], [0, 1.5])], pickups: [{ at: [32, 12], power: 'split', count: 5, spread: 20 }], frames: 24 }, { width: 64, height: 64 });
+  const { recipe, metadata } = compileBodies(source), split = Object.values(metadata.effects)[0], taken = split.powers[0].frame, [sx, sy] = split.paths.ball[taken];
+  const headings = blobs(recipe.frames.at(-1), 'w').map(([x, y]) => Math.atan2(y - sy, x - sx) * 180 / Math.PI).sort((a, b) => a - b);
+  assert.equal(headings.length, 5, `five balls: ${headings.map(h => h.toFixed(1)).join(', ')}`);
+  headings.forEach((a, k) => assert.ok(Math.abs(a - (90 + (k - 2) * 20)) < 3, `headings ${headings.map(h => h.toFixed(1)).join(', ')}`));
+  // Warped into ember ground, a tide ball takes the cells it lands on, and its trail doesn't streak across the board (it
+  // flew on through the ember ground unmet, walls all round it, until it burst out from behind a face).
+  const warpSource = match({ territory: board, bodies: [ball('tide', [6, 16], [1, 0.4], { team: 'tide', trail: { color: 'p', length: 3 } })], events: [{ frame: 4, body: 'tide', power: 'warp', to: [26, 16] }], frames: 8 });
+  const warped = compileBodies(warpSource), counts = Object.values(warped.metadata.effects)[0].territory.counts;
+  assert.ok(counts[4][0] >= counts[3][0] + 2, `the landing's cells change hands: ${counts[3]} → ${counts[4]}`);
+  for (const frame of warped.recipe.frames.slice(5)) for (const [x] of blobs(frame, 'p')) assert.ok(x > 20, `${frame.name}: no trail back where it was (${x})`);
+  // Met at a glance, too slowly across to count as a hit, a wall left a held-speed ball sliding along it for good.
+  const glance = figures(match({ walls: ['top', 'bottom'], bodies: [ball('ball', [4, 3], [3, -0.1])], frames: 60 }, { width: 256, height: 32 })).paths.ball;
+  assert.ok(glance.at(-1)[1] > 2.5, `it leaves the wall: ${glance.slice(-3).map(p => p[1]).join(' ')}`);
+});
+
+test('drawn finer, the share bar ends each team\'s part on a world pixel', () => {
+  const { recipe } = compileBodies(match({ territory: board, frames: 60, bodies: [ball('tide', [8, 13], [2, 0.7], { team: 'tide' })], hud: [{ bar: { at: [0, 30], size: [32, 2] } }] }, { subpixels: 2 }));
+  for (const frame of recipe.frames) for (const op of frame.ops.filter(op => op.op === 'rect')) assert.ok(op.x % 2 === 0 && op.w % 2 === 0, `${frame.name}: a part from ${op.x / 2} across ${op.w / 2} world pixels`);
+});

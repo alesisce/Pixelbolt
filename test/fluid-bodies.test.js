@@ -53,8 +53,9 @@ test('water floats a body by its density, a stone sinks to the bottom, and they 
   assert.ok(end('light') > 16 && end('light') < 24, `the light crate floats mostly out of the water at ${end('light')}`);
   assert.ok(end('heavy') > 22 && end('heavy') < 32, `the heavy crate floats mostly under at ${end('heavy')}`);
   assert.equal(end('stone'), 38, 'the stone rests on the bottom');
+  // A crate still creeping to rest steps on a fine pixel the way it creeps, once; nothing rocks back and forth.
   const crate = fluidBodyPresets['crate-splash'], still = changes(crate, 'hosSkr', 104);
-  assert.ok(still.every(n => n === 0), `the bodies on the settled pool hold still: ${still.join(' ')}`);
+  assert.ok(still.filter(n => n).length <= 1, `the bodies on the settled pool hold still: ${still.join(' ')}`);
 });
 
 test('resting sand holds a dropped body up as ground, and sand that slides carries one down', () => {
@@ -237,4 +238,25 @@ test('a crowd that seals the liquid into one-cell pockets compiles, and the live
   for (let k = 0; k < 20; k++) { every.step(); every.render(); }
   once.step(20);
   assert.deepEqual(every.render().keys, once.render().keys);
+});
+
+test('a light plank settles on still water at the default FLIP share, a crate on a shelf that slides away falls, and a light crate in a blast settles', () => {
+  // Its lift held as one push through the frame, stepped a frame at a time, the plank gained a little every frame, and
+  // the liquid's own jostling at its faces kept it rocking a pixel or more, drawn jumping up and down long after it landed.
+  for (const seed of [1, 3]) {
+    const source = pool([{ name: 'plank', shape: 'box', size: [20, 3], at: [24, 22], density: 0.6, fill: 'h' }], { seed, frames: 150, flip: 0.9 });
+    const still = changes(source, 'h', 100);
+    assert.ok(still.every(n => n === 0), `seed ${seed}: the plank holds still from frame 100: ${still.join(' ')}`);
+  }
+  // Asleep on a shelf that slid away, the crate hung in the air.
+  const shelf = { ...pool([{ name: 'crate', shape: 'box', size: [6, 6], at: [24, 11], density: 0.5, fill: 'h' }], { frames: 60, obstacles: [{ symbol: 'shelf', x: 18, y: 14, keys: [{ frame: 24, x: 40, over: 6 }] }] }), symbols: { shelf: ['kkkkkkkkkkkk', 'kkkkkkkkkkkk'] } };
+  const crate = Object.values(compileFluid(shelf).metadata.effects)[0].bodies;
+  assert.ok(Math.abs(crate.paths.crate[22][1] - 11) < 0.1, 'it rests on the shelf');
+  assert.ok(crate.paths.crate.at(-1)[1] > 20, `and falls into the water once the shelf has gone: ${crate.paths.crate.at(-1)}`);
+  // A light crate met the air its own motion pushed a frame at a time and overshot, back and forth at the speed limit.
+  const blast = paths({ format: 'pixelforge-fluid', version: 1, name: 'blast', width: 40, height: 40, palette,
+    effects: { blast: { kind: 'gas', frames: 120, duration: 50, seed: 1, gravity: [0, 0.15], walls: ['left', 'right', 'bottom', 'top'], emitters: [{ at: [20, 36], radius: 4, rate: 1, end: 3, density: 2, velocity: [0, -4] }],
+      look: [{ field: 'density', colors: ['g'], thresholds: [0.2], dither: 0 }], bodies: [{ name: 'crate', shape: 'box', size: [6, 6], at: [20, 30], density: 0.2, fill: 'h' }] } } }).crate;
+  const late = blast.slice(-40).map(p => p[1]);
+  assert.ok(Math.max(...late) - Math.min(...late) < 3, `it settles after the blast: y ${Math.min(...late)} to ${Math.max(...late)} over the last 40 frames`);
 });

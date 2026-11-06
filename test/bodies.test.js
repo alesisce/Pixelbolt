@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderProject, PixelError } from '../src/core.js';
-import { compileBodies, createBodyWorld, readBodies, drawBodies } from '../src/bodies.js';
+import { compileBodies, createBodyWorld, readBodies, drawBodies, bodiesFrames } from '../src/bodies.js';
 import { cosDeg, sinDeg } from '../src/craft.js';
 import { startMCP } from '../src/mcp.js';
 import { packageFiles } from '../scripts/build-studio.mjs';
@@ -101,6 +101,10 @@ test('the presets do what they show: the ball escapes the ring, the pixel and th
   assert.equal(ring.escaped[0].body, 'ball');
   assert.ok(ring.escaped[0].frame > 120 && ring.rest !== null, `escaped at ${ring.escaped[0].frame}, at rest from ${ring.rest}`);
   assert.ok(ring.hits > 40, `${ring.hits} hits`);
+  // A body that has left keeps a place in its path for every frame: null from the frame it left.
+  assert.equal(ring.paths.ball.length, ring.frames);
+  assert.equal(ring.paths.ball.findIndex(p => p === null), ring.escaped[0].frame);
+  assert.ok(ring.paths.ball.slice(ring.escaped[0].frame).every(p => p === null));
   const pixel = run(bodiesPresets['bouncing-pixel']).effect;
   assert.ok(pixel.rest !== null && pixel.hits >= 8, `the pixel bounced ${pixel.hits} times and rests from ${pixel.rest}`);
   const crates = run(bodiesPresets['crate-topple']).effect;
@@ -108,6 +112,25 @@ test('the presets do what they show: the ball escapes the ring, the pixel and th
   // The hoop's centre is [36, 30] and its radius 24: a ball past 27 from the centre is out.
   const hoop = run(bodiesPresets['spinning-hoop']).effect, out = name => hoop.paths[name].some(([x, y]) => (x - 36) ** 2 + (y - 30) ** 2 > 27 * 27);
   assert.ok(['red', 'yellow', 'green'].filter(out).length >= 2, 'at least two balls found the gap and fell out of the hoop');
+});
+
+test('the work estimate counts the obstacle faces near each body and the pixels drawn finer, so a heavy source is refused before it runs', () => {
+  // A checkerboard has a face on every pixel edge, and a box over one meets a face a pixel. Counting bodies alone, these
+  // 8 boxes kept moving over one were 2.7 million updates of the 400 million allowed, and took 10 seconds where the same
+  // boxes without it take a third of one.
+  const checker = Array.from({ length: 112 }, (_, y) => Array.from({ length: 112 }, (_, x) => ((x + y) % 2 ? 's' : '.')).join(''));
+  const board = (obstacles, frames = 256) => ({ format: 'pixelforge-bodies', version: 1, name: 'checker', width: 128, height: 128, palette, symbols: { checker },
+    effects: { e: { frames, gravity: [0, 0], walls: ['left', 'right', 'top', 'bottom'], obstacles, bodies: [{ shape: 'box', size: [24, 24], at: [20, 20], grid: { count: [4, 2], step: [28, 28] }, fill: 'r', weightless: true, tireless: true, velocity: [1, 0.5] }] } } });
+  const faces = [{ symbol: 'checker', x: 8, y: 8, draw: 'none' }];
+  refused(board(faces), 'bodies.effects.e', /need about \d+ million updates, more than 400 million; .*the obstacle faces near them \(a checkerboard has one on every pixel edge\)/);
+  assert.throws(() => bodiesFrames(board(faces, 18000)), error => error instanceof PixelError && /the match needs about \d+ million updates, more than 4000 million/.test(error.message));
+  assert.equal(bodiesFrames(board([], 18000)).frames, 18000);
+  // Drawn 8 times finer, each of 256 boxes visits the whole fine canvas every frame: as a long match that ran for an
+  // hour. The same match at whole pixels is within the limit (bodiesFrames simulates nothing until asked for a frame).
+  const fine = subpixels => ({ format: 'pixelforge-bodies', version: 1, name: 'heavy', width: 32, height: 32, ...(subpixels > 1 && { subpixels }), palette,
+    effects: { e: { frames: 18000, substeps: 1, iterations: 1, gravity: [0, 0], bodies: [{ shape: 'box', size: [40, 40], at: [16, 16], angle: 30, grid: { count: [16, 16], step: [0.001, 0.001] }, asleep: true, fill: 'r', outline: 'k' }] } } });
+  assert.equal(bodiesFrames(fine(1)).frames, 18000);
+  assert.throws(() => bodiesFrames(fine(8)), error => error instanceof PixelError && error.path === 'bodies.effects.e' && /the match needs about \d+ million updates, more than 4000 million; .*or subpixels/.test(error.message));
 });
 
 test('every rigid-body example compiles to its golden recipe and draws only palette keys', async () => {

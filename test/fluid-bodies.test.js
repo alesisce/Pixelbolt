@@ -121,6 +121,41 @@ test('a gas pushes and drags a body; with heat, a hot body boils the water it la
   assert.ok(hot > 100 && cold === 0, `the hot stone makes steam (${hot} pixels over the last frames), a cold one none (${cold})`);
 });
 
+test('a loop with bodies closes on its warm-up: the seam is no larger than one of its own steps', () => {
+  // The closing frames draw the liquid against the bodies where they are drawn, blended back to the warm-up's places, so
+  // the last frame is the warm-up's last and frame 0 follows it as it followed that. Drawn against the duck and crate
+  // where the cycle left them, the water wheel's seam changed 82 cells of its liquid, against at most 56 a step.
+  const { recipe } = compileFluid(fluidBodyPresets['water-wheel']);
+  const fluid = renderProject({ ...recipe, frames: recipe.frames.map(frame => ({ ...frame, ops: (frame.ops ?? []).filter(op => op.scale) })) }).frames.map(frame => frame.data);
+  const differ = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) n++; return n; };
+  const steps = fluid.slice(1).map((frame, k) => differ(fluid[k], frame)), seam = differ(fluid.at(-1), fluid[0]);
+  assert.ok(seam <= Math.max(...steps), `the seam changes ${seam} pixels, the largest step ${Math.max(...steps)}`);
+});
+
+test('a loop reports its bodies over its cycle, and warns of a body that leaves before it ends', () => {
+  const leak = (warmup, ball, walls = ['left', 'bottom']) => ({ format: 'pixelforge-fluid', version: 1, name: 'leak', width: 32, height: 24, palette,
+    effects: { leak: { kind: 'liquid', frames: 40, loop: true, warmup, seed: 1, walls, gravity: [0, 0], fill: [{ x: 0, y: 20, w: 4, h: 4 }], emitters: [],
+      look: [{ field: 'density', colors: ['b'], thresholds: [0.5], dither: 0 }], bodies: [{ name: 'ball', shape: 'circle', radius: 2, fill: 'h', ...ball }] } } });
+  // A ball bouncing between walls hits as often in the cycle however long the warm-up: counted from the start, a loop's
+  // hits grew with its warm-up.
+  const hits = warmup => compileFluid(leak(warmup, { at: [16, 8], velocity: [2, 0], bounce: 1, tireless: true }, ['left', 'right', 'top', 'bottom'])).metadata.effects.leak.bodies.hits;
+  assert.ok(hits(1) > 0);
+  assert.equal(hits(3), hits(1));
+  // Gone in the cycle: its escape at its frame of the loop, its path null from there, and the jump back at frame 0 warned of.
+  const slow = { at: [20, 8], velocity: [0.5, 0] }, during = compileFluid(leak(1, slow)), cycle = during.metadata.effects.leak.bodies;
+  assert.equal(cycle.escaped.length, 1);
+  assert.ok(cycle.escaped[0].frame > 0 && cycle.escaped[0].frame < 40);
+  assert.equal(cycle.paths.ball.length, 40);
+  assert.equal(cycle.paths.ball.findIndex(p => p === null), cycle.escaped[0].frame);
+  assert.match(during.warnings.join('\n'), /fluid\.effects\.leak\.bodies\[0\] \(ball\) leaves the canvas on frame \d+ of the loop and is back on frame 0/);
+  // Gone in the warm-up: no escape in the loop, which never shows it (its path all null), and warned so; counted from
+  // the start, it escaped on a frame past the loop's last and its path was empty.
+  const before = compileFluid(leak(2, slow)), warm = before.metadata.effects.leak;
+  assert.deepEqual(warm.bodies.escaped, []);
+  assert.ok(warm.bodies.paths.ball.length === 40 && warm.bodies.paths.ball.every(p => p === null));
+  assert.match(warm.warnings.join('\n'), /\(ball\) leaves the canvas in the warm-up \(its frame \d+ of 80\), so the loop never shows it/);
+});
+
 test('in a loop, floating bodies come round to where they started', () => {
   const { duck, crate } = paths(fluidBodyPresets['water-wheel']);
   for (const [name, p] of Object.entries({ duck, crate })) {

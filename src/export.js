@@ -406,10 +406,20 @@ export async function writeBundle(bundle, directory, { force = false, inputs = [
   const stale = force ? await leftovers(bundle, root) : [];
   if (force) for (const filename of await respelled(bundle, root)) await rm(path.join(root, filename), { force: true });
   await mkdir(root, { recursive: true });
-  for (const [filename, data] of bundle.files) {
-    const target = path.join(root, filename);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, data, { flag: force ? 'w' : 'wx' });
+  // A file's bytes may be a function that makes them, called as the file is written, in order, so a long sequence is
+  // made a frame at a time. If one fails, the files this export has written so far are removed again (with force they
+  // replaced earlier files, so they stay), and nothing of a half-made export is left in a new folder.
+  const made = [];
+  try {
+    for (const [filename, data] of bundle.files) {
+      const target = path.join(root, filename);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, typeof data === 'function' ? await data() : data, { flag: force ? 'w' : 'wx' });
+      made.push(target);
+    }
+  } catch (error) {
+    if (!force) for (const target of made) await rm(target, { force: true });
+    throw error;
   }
   for (const filename of stale) await rm(path.join(root, filename), { force: true });
   const written = [...bundle.files.keys()].map(filename => path.join(root, filename));

@@ -403,7 +403,8 @@ try {
       const document = bodies ? input.document : Object.hasOwn(COMPILERS, input.document?.format ?? '') ? COMPILERS[input.document.format](input.document).recipe : input.document;
       const numeric = key => options[key] === undefined ? {} : { [key]: Number(options[key]) }, text = key => options[key] === undefined ? {} : { [key]: options[key] };
       const settings = { ...text('fps'), ...text('animation'), ...text('size'), ...numeric('scale'), ...text('fit'), ...text('align'), ...(options.offset !== undefined && { offset: options.offset.split(',').map(Number) }), ...text('background'), ...numeric('loops'), ...numeric('seconds'), ...numeric('step') };
-      const sequence = bodies ? createBodiesSequence(document, settings) : document?.format === 'pixelforge-scene' ? createSceneSequence(prepareScene(document), document.name, settings) : createSequence(renderProject(document), settings);
+      // A match is simulated, drawn and written a frame at a time, so its length isn't bounded by memory.
+      const sequence = bodies ? createBodiesSequence(document, settings, { stream: true }) : document?.format === 'pixelforge-scene' ? createSceneSequence(prepareScene(document), document.name, settings) : createSequence(renderProject(document), settings);
       const files = await writeBundle(sequence, options.out, { force: options.force, inputs: inputsOf(input) }), { timing, figures, ...info } = sequence.info;
       // A match's every-frame figures stay in sequence.json; the reply carries their summary, after where the files went.
       console.log(JSON.stringify({ ok: true, ...info, directory: path.resolve(options.out), files: files.length, ...removedBy(files), ...referenced(input), ...(figures && { figures: figuresSummary(figures) }) }, null, 2));

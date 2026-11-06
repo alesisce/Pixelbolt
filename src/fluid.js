@@ -17,7 +17,7 @@ import { fields } from './authoring.js';
 import { patternProblem, ditherThreshold, cleanupIds, traceLine, random, sinDeg, cosDeg } from './craft.js';
 import { atan2Deg } from './shapes.js';
 import { readElectric, readElectrode, createElectric, stepElectric, electricFields, electricWork, ELECTRODE_FIELDS, MATTER } from './electric.js';
-import { readBodies, createBodyWorld, bodyCells, startCells, paintBodies, drawBodies, areaBeyond, readSubpixels, framesFit, scaleAnchor } from './bodies.js';
+import { readBodies, createBodyWorld, bodyCells, poseCells, startCells, paintBodies, drawBodies, areaBeyond, readSubpixels, framesFit, scaleAnchor } from './bodies.js';
 
 export const FLUID_KINDS = ['gas', 'liquid'];
 export const FLUID_FIELDS = ['density', 'temperature', 'speed', 'depth', 'light', 'shadow', 'strand', 'ionization', 'current'];
@@ -4531,13 +4531,53 @@ function stepBodies(run, crowd, cycle, next) {
 }
 // Where each body is, to draw a loop's closing frames blended toward (the poses of the warm-up's closing frames).
 const posesOf = crowd => crowd.bodies.map(b => ({ x: b.x, y: b.y, c: b.c, s: b.s }));
+// What a warm-up's closing frame drew its fluid against: its solid cells and its bodies' wakes.
+const sceneOf = (run, state) => ({ solid: Uint8Array.from(run.view.solid), wakes: state.wake ? { fluid: Uint8Array.from(state.fluid), left: Uint8Array.from(state.wake.left) } : null });
 // The bodies as drawn on a loop's closing frame: each moved toward its pose then by `w` (0 to 1), its turn along the
-// shorter way.
+// shorter way. At the last (w = 1) each is exactly where the warm-up's was.
 function blendPoses(crowd, poses, w) {
   return crowd.bodies.map((b, k) => {
-    const p = poses[k], c = b.c * (1 - w) + p.c * w, s = b.s * (1 - w) + p.s * w, m = Math.sqrt(c * c + s * s);
+    const p = poses[k];
+    if (w >= 1) return { ...b, x: p.x, y: p.y, c: p.c, s: p.s, history: [] };
+    const c = b.c * (1 - w) + p.c * w, s = b.s * (1 - w) + p.s * w, m = Math.sqrt(c * c + s * s);
     return { ...b, x: b.x * (1 - w) + p.x * w, y: b.y * (1 - w) + p.y * w, c: m > 1e-9 ? c / m : p.c, s: m > 1e-9 ? s / m : p.s, history: [] };
   });
+}
+// A loop's closing frame with bodies draws its fluid against them where they are drawn, not where they really are:
+// against `shown`'s cells (the bodies blended toward the warm-up's poses), with the wakes handed to the warm-up's cell
+// by cell as the drawing's memory is (handBack). Drawn against the bodies where the cycle left them, the last frame
+// showed the liquid round a duck and a crate the warm-up's last frame had elsewhere, and the loop jumped there.
+function closingView(run, shown, cycle, then, w, seed) {
+  const { effect, state } = run, { first } = effect.bodies, { W, H } = state.g;
+  const obstacles = effect.obstacles.map((o, i) => (i < first || i >= first + shown.length ? o : { ...o, ...bodyPlace(poseCells(shown[i - first]), shown[i - first], !effect.granular) }));
+  const layout = buildLayout(obstacles, W, H, placementsAt(obstacles, cycle));
+  let wakes = run.view.wakes;
+  if (then.wakes && state.wake) {
+    const fluid = Uint8Array.from(state.fluid), left = Uint8Array.from(state.wake.left);
+    for (let c = 0; c < fluid.length; c++) if (random(seed, SEAM, c) < w) { fluid[c] = then.wakes.fluid[c]; left[c] = then.wakes.left[c]; }
+    wakes = { fluid, left };
+  }
+  return { ...run.view, solid: layout.solid, front: layout.front, smooth: layout.smooth, see: layout.see, wakes };
+}
+// The bodies' figures for the metadata. A loop's are its cycle's, in its frames: the hits from the warm-up's last frame
+// on, the bodies that leave in it (at their frame of the loop) and each named body's path through it (null where it is
+// gone). A body that leaves before the cycle ends is warned about: the loop never shows one gone in the warm-up, and
+// brings one gone in the cycle back at frame 0. (Counted from the start, a loop's hits and escapes took in its warm-up,
+// and a body gone in the warm-up had an empty path.)
+function bodiesFigures(crowd, hitsAt, effect, begin) {
+  const { stats } = crowd, { frames, loop } = effect, paths = Object.keys(stats.paths).length ? stats.paths : null;
+  if (!loop) return { bodies: { hits: stats.hits, escaped: stats.escaped, rest: stats.rest, ...(paths && { paths }) } };
+  const last = begin + frames - 1, notes = [];
+  for (const { body, frame } of stats.escaped) {
+    if (frame > last) continue;
+    const b = crowd.bodies.find(other => (other.name ?? other.path) === body), who = !b ? body : b.name === null ? b.path : `${b.path} (${b.name})`;
+    notes.push(frame < begin ? `${who} leaves the canvas in the warm-up (its frame ${frame} of ${begin}), so the loop never shows it: keep it on the canvas (a wall on that side, a slower start)`
+      : `${who} leaves the canvas on frame ${frame - begin} of the loop and is back on frame 0, so the loop jumps there: keep it on the canvas (a wall on that side, a slower start)`);
+  }
+  return {
+    bodies: { hits: hitsAt[last] - (begin ? hitsAt[begin - 1] : 0), escaped: stats.escaped.filter(e => e.frame >= begin && e.frame <= last).map(e => ({ ...e, frame: e.frame - begin })), rest: null, ...(paths && { paths: Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, path.slice(begin, begin + frames)])) }) },
+    ...(notes.length && { notes })
+  };
 }
 function simulate(effect, context) {
   // Bodies move their obstacles each frame, so a run works on its own copies of them.
@@ -4546,6 +4586,8 @@ function simulate(effect, context) {
   const run = createRun(effect, width, height, path), { state, base } = run, all = run.fields;
   const crowd = effect.bodies ? createBodyWorld({ substeps: 8, iterations: 6, gravity: effect.gravity, walls: effect.walls, obstacles: effect.bodies.statics, bodies: effect.bodies.list }, { width, height }) : null;
   if (crowd) crowd.advance(0);
+  // The bodies' hits so far after each frame, so a loop counts its cycle's own.
+  const hitsAt = crowd ? [crowd.stats.hits] : null;
   // A loop warms up for whole cycles under its periodic forcing, keeps the fields of the last cycle's closing frames,
   // and blends its own closing frames toward them: the last frame then flows into frame 0 as that cycle's did.
   const begin = effect.warmup * frames, total = simulatedFrames(effect), blend = effect.blend;
@@ -4559,8 +4601,9 @@ function simulate(effect, context) {
   const tail = loop ? Array.from({ length: blend }, () => all.map(() => new Float64Array(N))) : [], seam = loop ? Array.from({ length: blend + 1 }, () => null) : null;
   const chars = Array.from({ length: frames }, () => null), drawn = Array.from({ length: frames }, () => []), n = context.subpixels ?? 1, fine = [];
   const peak = { density: 0, temperature: 0, speed: 0, ...(effect.electric && { ionization: 0, current: 0 }) }, figures = Array.from({ length: frames }, () => null), layouts = Array.from({ length: frames }, () => effect.layout);
-  // A loop's bodies, where they were in the warm-up's closing frames, which its own closing frames are drawn blended toward.
-  const poses = crowd && loop ? Array.from({ length: blend }, () => null) : null;
+  // A loop's bodies, where they were in the warm-up's closing frames, which its own closing frames are drawn blended toward,
+  // and what those frames drew the fluid against (see closingView).
+  const poses = crowd && loop ? Array.from({ length: blend }, () => null) : null, scenes = poses ? poses.map(() => null) : null;
   let ran = 0;
   for (let t = 0; t < total; t++, ran++) {
     if (shown && t >= done && !run.sparks.some(p => p.born !== undefined && shown(p))) break;
@@ -4572,14 +4615,14 @@ function simulate(effect, context) {
     if (liquid && state.full) crowded(path);
     if (state.overflow) fail(path, `more than ${LIMITS.carriers} carriers are in the air at once; lower the carrying emitters' size or rate, or raise their release`);
     // Bodies step on every simulated frame, warm-up included; what reads the fields reads this frame's.
-    const onward = () => { if (crowd && t + 1 < total) stepBodies(run, crowd, cycle, t + 1); };
+    const onward = () => { if (crowd && t + 1 < total) { stepBodies(run, crowd, cycle, t + 1); hitsAt[t + 1] = crowd.stats.hits; } };
     fieldsOf(run);
     if (loop && out < 0) {
       // The warm-up's closing frames keep their fields for the seam; its sparks and bubbles move on through it (held still
       // there, bubbles waited `blend` frames under the water while it flowed on).
       if (out >= -blend) {
         tail[out + blend].forEach((field, f) => field.set(all[f]));
-        if (poses) poses[out + blend] = posesOf(crowd);
+        if (poses) { poses[out + blend] = posesOf(crowd); scenes[out + blend] = sceneOf(run, state); }
       }
       if (run.sparks.length || bubbling) { const full = sparkFrame(run, here, cycle, false, bubbling); if (full) fail(path, full); }
       // The warm-up is drawn too, unseen, so the drawing's memory of each pixel's bands (see renderFields) runs on into
@@ -4598,11 +4641,26 @@ function simulate(effect, context) {
     const list = loop && out < 0 ? null : drawn[(loop ? out : t) % frames];
     if (list) drawSparks(run, (x, y, code) => { if (x >= 0 && y >= 0 && x < width && y < height && !run.view.front[y * width + x]) list.push(y * width + x, code); }, shown);
     if (!recording) { onward(); continue; }
-    const frame = loop ? out : t;
-    if (loop && frame >= frames - blend) {
-      const k = frame - (frames - blend), w = smooth((k + 1) / blend);
-      for (let f = 0; f < all.length; f++) { const a = all[f], b = tail[k][f]; for (let c = 0; c < N; c++) a[c] = a[c] * (1 - w) + b[c] * w; }
+    const frame = loop ? out : t, k = frame - (frames - blend), closing = loop && k >= 0;
+    // A loop's closing frame with bodies: the bodies as drawn (blended toward the warm-up's poses) and the view its fluid
+    // is drawn against (see closingView), so the last frame draws the warm-up's last exactly and frame 0 follows it.
+    const shownBodies = crowd && closing && poses[k] ? blendPoses(crowd, poses[k], smooth((k + 1) / blend)) : crowd ? crowd.bodies : null;
+    if (crowd && state.wake) run.view.wakes = { fluid: state.fluid, left: state.wake.left };
+    const view = run.view, closingScene = crowd && closing && scenes[k] ? scenes[k] : null;
+    if (closing) {
+      const w = smooth((k + 1) / blend);
+      if (!closingScene) for (let f = 0; f < all.length; f++) { const a = all[f], b = tail[k][f]; for (let c = 0; c < N; c++) a[c] = a[c] * (1 - w) + b[c] * w; }
+      else {
+        // Where a body is now but wasn't then, the fluid is the warm-up's; where it was then but isn't now, the cycle's own
+        // until the last frame: blended there, each body left a hole of its shape in the liquid between the two.
+        const now = view.solid, then = closingScene.solid;
+        for (let f = 0; f < all.length; f++) {
+          const a = all[f], b = tail[k][f];
+          for (let c = 0; c < N; c++) { const wc = w >= 1 || now[c] === then[c] ? w : now[c] ? 1 : 0; a[c] = a[c] * (1 - wc) + b[c] * wc; }
+        }
+      }
       handBack(run.hold, seam[k], w, effect.seed);
+      if (closingScene) run.view = closingView(run, shownBodies, cycle, closingScene, w, effect.seed);
     }
     for (let c = 0; c < N; c++) {
       if (base[0][c] > peak.density) peak.density = base[0][c];
@@ -4610,15 +4668,14 @@ function simulate(effect, context) {
       if (base[2][c] > peak.speed) peak.speed = base[2][c];
     }
     if (effect.electric) { const plasma = liquid ? run.vapourBase : base; for (let c = 0; c < N; c++) { if (plasma[4][c] > peak.ionization) peak.ionization = plasma[4][c]; if (plasma[5][c] > peak.current) peak.current = plasma[5][c]; } }
-    if (crowd && state.wake) run.view.wakes = { fluid: state.fluid, left: state.wake.left };
     chars[frame] = drawFrame(run, width, height);
     figures[frame] = measureFrame(chars[frame], base, run.view.solid, width, height, liquid ? state.n : null);
     if (state.heat) Object.assign(figures[frame], heatAmounts(run));
     layouts[frame] = run.layout;
     // Bodies are drawn where the fluid met them this frame (a loop's closing frames blended toward where the warm-up's
     // were, as its fields are), then pulled by it and stepped to the next.
+    run.view = view;
     if (crowd) {
-      const k = frame - (frames - blend), shownBodies = poses && k >= 0 && poses[k] ? blendPoses(crowd, poses[k], smooth((k + 1) / blend)) : crowd.bodies;
       // Finer than the fluid's pixels (subpixels), they are drawn on their own over it; else into its pixels.
       if (n > 1) fine[frame] = drawBodies(shownBodies, width, height, effect.bodies.symbols, n);
       else paintBodies(shownBodies, chars[frame], width, height, effect.bodies.symbols);
@@ -4646,7 +4703,7 @@ function simulate(effect, context) {
   const round = value => Math.floor(value * 1000 + 0.5) / 1000;
   const { totals } = run;
   return {
-    ...(crowd && { bodies: { hits: crowd.stats.hits, escaped: crowd.stats.escaped, rest: loop ? null : crowd.stats.rest, ...(Object.keys(crowd.stats.paths).length && { paths: loop ? Object.fromEntries(Object.entries(crowd.stats.paths).map(([name, path]) => [name, path.slice(begin, begin + frames)])) : crowd.stats.paths }) } }),
+    ...(crowd && bodiesFigures(crowd, hitsAt, effect, begin)),
     output, steps: ran * effect.substeps, peak: { density: round(peak.density), ...(!liquid && { temperature: round(peak.temperature) }), speed: round(peak.speed), ...(effect.electric && { ionization: round(peak.ionization), current: round(peak.current) }) },
     ...(liquid && { particles: run.maxParticles }), sparks: { spawned: totals.spawned, maxAlive: totals.maxAlive }, figures: columns(figures)
   };
@@ -4703,12 +4760,12 @@ export function compileFluid(source) {
     // summed over the source's effects. The presets need at most 61 million.
     work += context.width * context.height * simulatedFrames(effect) * effect.substeps * stepWork(effect);
     if (work > LIMITS.work) fail(context.path, `the simulations need about ${Math.round(work / 1e6)} million cell updates, more than ${LIMITS.work / 1e6} million; lower frames, warmup, substeps, iterations or the canvas size`);
-    const run = simulate(effect, context);
-    warnings.push(...effect.warnings);
+    const run = simulate(effect, context), effectWarnings = [...effect.warnings, ...(run.notes ?? [])];
+    warnings.push(...effectWarnings);
     metadata.effects[name] = {
       kind: effect.kind, frames: effect.frames, loop: effect.loop, seed: effect.seed, steps: run.steps, ...(effect.loop && { warmup: effect.warmup, blend: effect.blend }),
       peak: run.peak, ...(run.particles !== undefined && { particles: run.particles }), sparks: run.sparks,
-      pixels: run.output.map(frame => frame.pixels), ...(!effect.loop && { residue: run.output.at(-1).pixels }), figures: run.figures, ...(run.bodies && { bodies: run.bodies }), ...(effect.warnings.length && { warnings: effect.warnings })
+      pixels: run.output.map(frame => frame.pixels), ...(!effect.loop && { residue: run.output.at(-1).pixels }), figures: run.figures, ...(run.bodies && { bodies: run.bodies }), ...(effectWarnings.length && { warnings: effectWarnings })
     };
     return run.output.map(frame => frame.ops);
   });

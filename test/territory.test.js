@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises';
 import { PassThrough } from 'node:stream';
 import os from 'node:os';
 import path from 'node:path';
@@ -124,6 +124,8 @@ test('a long match goes out as numbered video frames, and a short one matches it
   const written = JSON.parse((await call('tools/call', { name: 'pixel_compile', arguments: { source: long, sequence: { fps: 25 } } })).result.content[0].text);
   assert.deepEqual([written.ok, written.sequence.frames, written.figures.frames], [true, 300, 300]);
   assert.equal((await readdir(path.join(written.directory, 'sequence'))).filter(name => name.endsWith('.png')).length, 300);
+  // The command line writes each frame as it is made; what it writes is what MCP, making them all first, writes.
+  for (const name of await readdir(path.join(dir, 'frames'))) assert.ok((await readFile(path.join(dir, 'frames', name))).equals(await readFile(path.join(written.directory, 'sequence', name))), name);
   const wrong = await call('tools/call', { name: 'pixel_compile', arguments: { preset: 'smoke-puff', sequence: { fps: 25 } } });
   assert.match(wrong.result.content[0].text, /pixelforge-bodies match/);
 });
@@ -155,5 +157,16 @@ test('what the renderer or a sequence would refuse is refused before simulating,
   refused({ ...match({ bodies: [ball('b', [8, 16], [1, 0])] }), width: 256, height: 256, effects: { m: { frames: 65, gravity: [0, 0], bodies: [ball('b', [8, 16], [1, 0])] } } }, 'bodies.effects', /4,194,304.*fewer frames or a smaller canvas/);
   // A match longer than a sequence holds at its size is refused before it is simulated.
   const long = match({ frames: 2200, duration: 34, territory: board, bodies: [ball('b', [8, 16], [1, 0], { team: 'tide' })] });
-  assert.throws(() => createBodiesSequence(long, { fps: 30, size: 'vertical' }), error => error instanceof PixelError && /holds at most 2071 at that size/.test(error.message));
+  assert.throws(() => createBodiesSequence(long, { fps: 30, size: 'vertical' }), error => error instanceof PixelError && /holds at most 2071 at that size.*pixelbolt sequence/.test(error.message));
+  // Streamed, as the command line writes it, nothing is made until it is written, a frame at a time, and nothing caps it:
+  // every frame's PNG kept, this match passed the 4,294,967,296 pixels a sequence held.
+  const streamed = createBodiesSequence(long, { fps: 30, size: 'vertical' }, { stream: true }), files = [...streamed.files];
+  assert.equal(streamed.info.frames, 2244);
+  assert.ok(files.every(([, bytes]) => typeof bytes === 'function') && files.length === 2246);
+  assert.equal(streamed.info.figures, undefined, 'the match has not run');
+  // Video frames 0 and 1 show the match's frame 0 (34 ms at 30 frames a second), made once; the ball has moved by frame 60.
+  const first = files[0][1](), again = files[1][1](), later = files[60][1]();
+  assert.ok(first.subarray(1, 4).equals(Buffer.from('PNG')));
+  assert.equal(again, first);
+  assert.ok(!later.equals(first));
 });

@@ -5,6 +5,7 @@ import { compileEffects } from '../src/fx.js';
 import { compileWaves } from '../src/wave.js';
 import { spellLibrary } from '../scripts/spell-library.mjs';
 import { spellPresets } from '../scripts/spell-presets.mjs';
+import { readShapes, renderShapes, holdBands, settleHolds } from '../src/shapes.js';
 import { wavePresets } from '../scripts/wave-presets.mjs';
 
 // Flicker as the eye sees it: pixels drawn in frames t − 1 and t + 1 in one colour but changed in frame t (a band that
@@ -121,4 +122,43 @@ test('a dissolving particle fades out once as it moves, instead of blinking acro
     const shown = compileEffects(fx).recipe.frames.map(frame => (frame.ops?.length ? 1 : 0)).join('');
     assert.match(shown, /^1+0*$/, `${JSON.stringify(pattern)} seed ${seed}: ${shown}`);
   }
+});
+
+test('a loop whose looks hold paints its cycle once, as one without a hold does, and draws what painting it draws', () => {
+  // Counted in pixels painted: the fireball loops with held looks. It painted its cycle twice (to settle the holds, then
+  // to draw), taking twice as long; now it is drawn from what the first painting noted.
+  const unheld = structuredClone(spellPresets.fireball);
+  for (const effect of Object.values(unheld.effects)) for (const look of Object.values(effect.looks ?? {})) look.hold = 0;
+  const held = compileEffects(spellPresets.fireball, { stats: true }), plain = compileEffects(unheld, { stats: true });
+  assert.ok(held.work.painted > 0);
+  assert.equal(held.work.painted, plain.work.painted);
+  // A frame drawn from the tape is the frame painted with the same memory: held looks with lit and shade bands beside one
+  // without a hold, a look drawn in front, a layer behind a character (split), and pixels that never settle (drawn loose).
+  const W = 40, H = 40, frames = 12, split = true;
+  const shapes = readShapes({
+    looks: { warm: { colors: ['o', 'y', 'W'], thresholds: [0.2, 0.5, 0.8], lit: { colors: ['W'], thresholds: [0.3] }, shade: { colors: ['k'], thresholds: [0.4] } }, cool: { colors: ['b', 'c'], thresholds: [0.3, 0.7], hold: 0 }, top: { colors: ['c'], thresholds: [0.4], front: true, hold: 0.4 } },
+    layers: [{ kind: 'burst', look: 'warm', at: [20, 20], radius: 12, noise: 0.5, boil: 8, depth: 'split' }, { kind: 'ring', look: 'cool', at: [20, 20], radius: 10, noise: 0.6 }, { kind: 'burst', look: 'top', at: [14, 14], radius: 6, noise: 0.4, flicker: 0.2 }]
+  }, 'fx.effects.e', { palette, seed: 3, frames, loop: true });
+  const draw = (f, memory) => [false, true].map(front => renderShapes(shapes, f, W, H, [], { spent: 0 }, front, split, 0, memory));
+  const memory = holdBands(), reads = shapes.looks.map(() => []), tape = Array.from({ length: frames }, () => []);
+  let at = 0;
+  memory.trace = (look, codes) => reads[look].push(codes);
+  memory.tape = (look, record) => { tape[at][look] = record; };
+  for (; at < frames; at++) assert.deepEqual(draw(at, memory), [null, null], 'a taped frame is drawn later');
+  memory.tape = null;
+  settleHolds(memory, reads, W * H);
+  for (const loose of memory.loose) if (loose) for (let c = 0; c < loose.length; c += 3) loose[c] = 1;
+  const copy = () => ({ held: memory.held.map(held => held && Object.fromEntries(Object.entries(held).map(([name, bands]) => [name, Uint8Array.from(bands)]))), loose: memory.loose, trace: null, tape: null, replay: null });
+  const painting = copy(), replaying = copy();
+  let drawn = 0;
+  for (let f = 0; f < frames; f++) {
+    replaying.replay = tape[f];
+    const want = draw(f, painting), got = draw(f, replaying);
+    replaying.replay = null;
+    assert.deepEqual(got, want, `frame ${f}`);
+    drawn += want.filter(Boolean).length;
+  }
+  assert.ok(drawn >= frames, 'the frames draw something');
+  // Painted on from there, both memories draw the same frames.
+  for (let f = 0; f < 3; f++) assert.deepEqual(draw(f, replaying), draw(f, painting), `frame ${f} after the cycle`);
 });

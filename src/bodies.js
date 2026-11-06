@@ -770,9 +770,10 @@ export function createBodyWorld(effect, context) {
     if (f > 0) for (let k = 0; k < substeps; k++) substep();
     // Powers run out and are taken, and the score is counted, between frames.
     if (turf) { turf.frame(f, bodies); for (const b of bodies) if (!b.gone) place(b); }
-    // Hits change colour once a frame; slow bodies fall asleep; bodies far outside the canvas are gone.
+    // Hits change colour once a frame; slow bodies fall asleep; bodies far outside the canvas are gone. A named body's path
+    // has a place for every frame: null once it is gone.
     for (const b of bodies) {
-      if (b.gone) continue;
+      if (b.gone) { if (b.name !== null && !b.fixed) stats.paths[b.name].push(null); continue; }
       if (b.hit) { b.hits++; stats.hits++; if (b.fills && b.fills.length > 1) b.colour = (b.colour + 1) % b.fills.length; b.hit = false; }
       if (dynamic(b) && !b.asleep) {
         const fast = Math.max(Math.sqrt(b.vx * b.vx + b.vy * b.vy), Math.abs(b.w) * b.extent);
@@ -1151,11 +1152,58 @@ export function framesFit(frames, width, height, n, path) {
 }
 export const scaleAnchor = (anchor, n) => (n > 1 && Array.isArray(anchor) && anchor.length === 2 && anchor.every(Number.isInteger) ? [anchor[0] * n, anchor[1] * n] : anchor);
 
-// About how many pair tests and contact updates a simulation needs, so a source can't ask for minutes of work.
-const work = effect => {
-  const n = effect.bodies.length;
-  return effect.frames * effect.substeps * (n * n / 2 + n * (effect.iterations + 2) * 16 + n * 32);
-};
+// About how much a simulation does, so a source can't ask for minutes of work (or a match for hours): every substep the
+// pair tests and each body's contacts and upkeep, and the obstacle faces each moving body is tested against, each a
+// contact the solver may work through; every frame the pixels its drawing visits. A body is charged the faces in the
+// densest patch its size (with the reach of a fast step) holds anywhere: a floor or a crate is a few faces, while a
+// checkerboard has one on every pixel edge, so a box over one meets a face per pixel. A territory's cells may come to
+// hold up to two a cell (another team's cells, every other one). Drawn finer (subpixels), each body's picture is visited
+// a fine pixel at a time over its reach, its trail a disc a step, and the whole fine canvas once more. (Counting bodies
+// alone, eight boxes kept moving over a checkerboard counted 2.7 million updates and ran for 10 seconds, and a match of
+// 256 boxes drawn finer ran for an hour within the budget.) Weighed against time, a unit is about what the presets'
+// pair tests and contacts cost: these cases and the presets run at 18 to 85 ms a million.
+const FACE_WORK = 1, PIXEL_WORK = 0.25;
+function work(effect, { width, height, n = 1, symbols = {} }) {
+  const count = effect.bodies.length, moving = effect.bodies.filter(b => !b.fixed);
+  let step = count * count / 2 + count * (effect.iterations + 2) * 16 + count * 32, frame = width * height * n * n;
+  const segments = moving.length ? traceObstacles(effect, width, height).segments : [], densest = new Map(), margin = MAX_SPEED / effect.substeps + 0.1;
+  for (const b of moving) {
+    // The area a substep's search covers: the body's bounds turned to 45 degrees, and a step at the speed limit each way.
+    const side = Math.ceil(Math.max(b.size[0], b.size[1]) * Math.SQRT2 + 2 * margin) + 1;
+    if (!densest.has(side)) densest.set(side, facesIn(segments, width, height, side));
+    const t = effect.territory, cells = t ? Math.min(t.columns * t.rows, (Math.ceil(side / t.cell) + 2) ** 2) : 0;
+    step += (densest.get(side) + 2 * cells) * (effect.iterations + 3) * FACE_WORK;
+  }
+  for (const b of effect.bodies) {
+    // A body's picture (its symbol, or its shape) within its reach, turned (a circle doesn't turn), then its trail.
+    const picture = b.symbol ? symbols[b.symbol] : null, w = Math.max(b.size[0], picture ? picture[0].length : 0), h = Math.max(b.size[1], picture ? picture.length : 0);
+    const reach = b.shape === 'circle' ? Math.max(w, h) / 2 : Math.sqrt(w * w + h * h) / 2, across = 2 * reach * n + 2;
+    frame += Math.min(width * height * n * n, across * across);
+    if (b.trail) { const d = Math.max(1, Math.min(b.size[0], b.size[1]) - 1) * n; frame += b.trail.length * (MAX_SPEED * n + 1) * d * d; }
+  }
+  return effect.frames * (effect.substeps * step + frame * PIXEL_WORK);
+}
+// The most segments whose bounds meet one square patch `side` pixels across, anywhere on (or overlapping) the canvas.
+function facesIn(segments, width, height, side) {
+  if (!segments.length) return 0;
+  // Patch corners from -side to width (and height), a count added over the corners whose patch meets each segment.
+  const W = width + side + 2, H = height + side + 2, sums = new Int32Array((W + 1) * (H + 1));
+  const at = (v, most) => Math.max(0, Math.min(most, v + side));
+  for (const s of segments) {
+    const x0 = at(Math.ceil(Math.min(s.ax, s.bx) - side), W), x1 = at(Math.floor(Math.max(s.ax, s.bx)), W - 1) + 1;
+    const y0 = at(Math.ceil(Math.min(s.ay, s.by) - side), H), y1 = at(Math.floor(Math.max(s.ay, s.by)), H - 1) + 1;
+    sums[y0 * (W + 1) + x0]++; sums[y0 * (W + 1) + x1]--; sums[y1 * (W + 1) + x0]--; sums[y1 * (W + 1) + x1]++;
+  }
+  let most = 0;
+  for (let y = 0; y <= H; y++) for (let x = 0; x <= W; x++) {
+    const c = y * (W + 1) + x;
+    if (x) sums[c] += sums[c - 1];
+    if (y) sums[c] += sums[c - W - 1];
+    if (x && y) sums[c] -= sums[c - W - 2];
+    if (sums[c] > most) most = sums[c];
+  }
+  return most;
+}
 
 // The pixels whose centres a body's exact shape covers, where it really is: a fluid's solid cells for it. Drawn at a
 // held pixel, a body may sit most of a pixel from them; were its solid cells drawn ones, each step of its drawing down
@@ -1225,6 +1273,9 @@ export function areaBeyond(b, axis, level, sign) {
 }
 /** The cells a body fills now, where it really is: the fluid's solid cells for it. */
 export const bodyCells = b => (b.gone ? [] : exactCells(b));
+/** The cells a body fills at its own pose (x, y, c, s), placed afresh: a loop's closing frames draw the fluid against the
+ * bodies where they are drawn, blended toward the warm-up's poses. */
+export const poseCells = b => { if (b.gone) return []; const placed = { ...b }; place(placed); return exactCells(placed); };
 /** The cells a body as read (before any step) fills. */
 export const startCells = b => { const placed = { ...b, c: cosDeg(b.angle), s: sinDeg(b.angle) }; place(placed); return exactCells(placed); };
 
@@ -1279,8 +1330,8 @@ export function compileBodies(source) {
   for (const { name, path, effect } of effects) {
     if (frames.length + effect.frames > LIMITS.frames) fail('bodies.effects', `the effects make more than ${LIMITS.frames} frames; a recipe holds at most ${LIMITS.frames}`);
     framesFit(frames.length + effect.frames, width, height, n, 'bodies');
-    total += work(effect);
-    if (total > LIMITS.work) fail(path, `the simulations need about ${Math.round(total / 1e6)} million updates, more than ${LIMITS.work / 1e6} million; lower frames, substeps, iterations or the number of bodies`);
+    total += work(effect, { width, height, n, symbols });
+    if (total > LIMITS.work) fail(path, `the simulations need about ${Math.round(total / 1e6)} million updates, more than ${LIMITS.work / 1e6} million; lower frames, substeps, iterations, the number or size of the bodies, the obstacle faces near them (a checkerboard has one on every pixel edge) or subpixels`);
     const run = simulate(effect, { width, height, symbols, subpixels: n }), names = [];
     run.drawn.forEach((frame, i) => {
       const ops = frameOps(effect, frame, width, height, n);
@@ -1311,7 +1362,8 @@ export function bodiesFrames(source, effectName) {
   const chosen = effectName === undefined ? effects[0] : effects.find(entry => entry.name === effectName);
   if (!chosen) fail('sequence.animation', `no effect named "${effectName}"; choose one of: ${effects.map(entry => entry.name).join(', ')}`);
   const { name, path, effect } = chosen;
-  if (work(effect) > MATCH_WORK) fail(path, `the match needs about ${Math.round(work(effect) / 1e6)} million updates, more than ${MATCH_WORK / 1e6} million; lower frames, substeps, iterations or the number of bodies`);
+  const needs = work(effect, { width, height, n, symbols });
+  if (needs > MATCH_WORK) fail(path, `the match needs about ${Math.round(needs / 1e6)} million updates, more than ${MATCH_WORK / 1e6} million; lower frames, substeps, iterations, the number or size of the bodies, the obstacle faces near them (a checkerboard has one on every pixel edge) or subpixels`);
   const world = createBodyWorld(effect, { width, height }), context = { width, height, symbols, subpixels: n };
   let at = -1, image = null;
   return {

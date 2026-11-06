@@ -513,9 +513,9 @@ const bodyMaterial = {
   bounce: num(0, 1, 'How much of its approach speed a body keeps in a bounce: 0 lands dead, 1 bounces back as fast. A pair bounces with the larger. Default 0.3.'),
   friction: num(0, 2, 'Sliding friction; a pair uses the square root of the product. Default 0.4.')
 };
-// A power, for pickups and events.
+// A power, for pickups, events and strikes.
 const powerFields = {
-  power: { enum: ['split', 'grow', 'speed', 'warp', 'magnet'], description: 'split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams\' bodies toward to (default the pickup) for frames.' },
+  power: { enum: ['split', 'grow', 'speed', 'warp', 'magnet', 'vanish'], description: 'split: copies turned about its heading; grow: a bigger body for frames; speed: its held speed (or speed) times factor for frames; warp: moves it to to; magnet: pulls the other teams\' bodies toward to (default the pickup) for frames; vanish: the body is gone (an event may take a fixed body away: a ring bursts).' },
   label: { type: 'string', maxLength: 40, description: 'For {news}. Default the power in capitals.' },
   count: int(2, 8, 'split: bodies after. Default 3.'), spread: num(1, 180, 'split: degrees between headings. Default 30.'), scale: num(1.25, 4, 'grow. Default 2.'), factor: num(0.25, 4, 'speed. Default 1.5.'),
   to: { ...pairOf(num(-4096, 8192)), description: 'warp, magnet: a canvas point [x, y], each from minus the canvas side to twice it.' }, strength: num(0.001, 1, 'magnet: pixels a frame² . Default 0.05.'), frames: int(1, 18000, 'grow, speed, magnet: how long. Default 120.')
@@ -532,7 +532,8 @@ const body = object({
   sides: int(3, 96, 'hoop: straight walls around it. Default: its radius, from 8 to 64.'),
   gap: num(0, 330, 'hoop: degrees left open, centred on the hoop\'s angle (0 points right, 90 down). Default 0, closed.'),
   thickness: num(1, 8, 'hoop: wall thickness in pixels. Default 1.'),
-  at: { ...pairOf(num(-4096, 4096)), description: 'Centre [x, y] in canvas pixels; [10.5, 10.5] is the middle of pixel (10, 10). The centre of a ring or the first copy of a grid.' },
+  at: { ...pairOf(num(-4096, 4096)), description: 'Centre [x, y] in canvas pixels; [10.5, 10.5] is the middle of pixel (10, 10). The centre of a ring or the first copy of a grid. With pivot, where the pivot is.' },
+  pivot: { ...pairOf(num(-128, 128)), description: 'Fixed body: the point it turns about, [x, y] from its centre before it turns (a blade about its hilt: [-length / 2, 0]); at places it. Default its centre.' },
   angle: num(-3600, 3600, 'Degrees clockwise. Default 0. Drawn to the whole degree with straight, even sides (under 6 pixels across, always square); collisions use the exact angle.'),
   velocity: { ...pairOf(num(-8, 8)), description: 'Starting velocity [x, y] in pixels a frame; for a fixed body, how it moves for ever. Speeds stop at 8.' },
   spin: num(-45, 45, 'Starting spin in degrees a frame, clockwise; for a fixed body, how it turns for ever.'),
@@ -547,9 +548,11 @@ const body = object({
   drag: num(0, 1, 'About the share of its speed lost each frame. Default 0.'),
   spinDrag: num(0, 1, 'About the share of its spin lost each frame. Default 0.02.'),
   fill: { oneOf: [bodyKey, { ...array(bodyKey, 16), minItems: 1 }], description: 'Palette key, or a list the body steps through at each hit.' },
+  fillEvery: int(1, 18000, 'With a list of fills: the list steps every this many frames instead of at each hit. The body keeps its fill; the copies a split makes of it take the fill of the frame they are made in, so a crowd that multiplies is washed in its newest colour.'),
   outline: { ...bodyKey, description: 'Key for the pixels on the shape\'s edge.' },
   symbol: { type: 'string', description: 'Draw this symbol instead of fill and outline, centred on the body and turned with it to the whole degree, its outline kept a closed line (under 6 pixels across, in quarter turns).' },
   trail: object({ color: bodyKey, length: int(1, 16, 'Frames of trail. Default 2.') }, ['color']),
+  smear: { ...object({ colors: { ...array(bodyKey, 8), minItems: 1, description: 'The most recent part of the sweep first.' }, frames: int(1, 8, 'Frames of sweep. Default 1.') }, ['colors']), description: 'The shape swept over its last frames, drawn under it, banded from the first colour behind it to the last: a blade\'s swish. Not for a hoop.' },
   ring: object({ radius: num(1, 256), count: int(2, 256), from: num(-3600, 3600, 'Degrees of the first copy. Default 0.'), to: num(-3600, 3600, 'Degrees of the last; default a full turn, spaced evenly.') }, ['radius', 'count']),
   grid: object({ count: { ...pairOf(int(1, 256)), description: '[columns, rows].' }, step: { ...pairOf(num(-256, 256)), description: '[x, y] between copies.' }, stagger: num(-256, 256, 'Shifts odd rows across. Default 0.') }, ['count', 'step'])
 }, ['shape', 'at']);
@@ -692,8 +695,10 @@ const bodies = {
           split: { enum: ['columns', 'rows'], description: 'Instead of rows: the board shared out among the teams in order, side by side or one above the next.' },
           bounce: num(0, 1, 'Default 1.'), friction: num(0, 2, 'Default 0.') }, ['teams']), description: 'Cells owned by teams, drawn in their colours: a team\'s body passes its own and bounces off the others\', claiming each it hits (the metadata counts them each frame).' },
         bodies: { ...array(body, 64), minItems: 1, description: 'At most 256 bodies with their copies.' },
+        most: int(1, 4096, 'The most bodies split powers may make in all, copies included: at least the bodies listed. Default 256.'),
         pickups: { ...array(object({ at: { ...pairOf(num(0, 4096)), description: 'Centre [x, y] in canvas pixels.' }, size: int(1, 64, 'Pixels a side; default the symbol\'s size, or 5.'), from: int(0, 18000, 'First frame it waits. Default 0.'), until: int(1, 18001), symbol: { type: 'string', description: 'Drawn while it waits.' }, color: { ...bodyKey, description: 'Or a plain square.' }, ...powerFields }, ['at', 'power']), 64), description: 'Power-ups the first body to reach one takes.' },
         events: { ...array(object({ frame: int(1, 18000), body: { type: 'string', description: 'A named body.' }, ...powerFields }, ['frame', 'body', 'power']), 64), description: 'Powers given to a named body at the end of a frame.' },
+        strikes: { ...array(object({ by: { type: 'string', description: 'A named body: what it pushes (a hit, or a push along) takes the power.' }, rest: int(1, 18000, 'Frames before a body can take this strike again. Default 10.'), from: int(0, 18000, 'First frame it works. Default 0.'), until: int(1, 18001), ...powerFields }, ['by', 'power']), 16), description: 'Powers given at the end of a frame to every body a named body struck in it: with split, a blade that multiplies each ball it touches (raise most for a crowd).' },
         hud: { ...array({ oneOf: [object({ text: { type: 'string', maxLength: 80, description: '{team} cells, {team%} share, {leader}, {news} (the last power\'s label, for news frames), {frame}.' }, at: point2, color: bodyKey, align: { enum: ['left', 'center', 'right'] }, back: { ...bodyKey, description: 'A box behind the text.' }, pad: int(0, 16), scale: int(1, 8, 'Default 1; at most 16 divided by subpixels.'), news: int(1, 18000, 'Frames {news} shows. Default 45.'), from: int(0, 18000), until: int(1, 18001) }, ['text', 'at', 'color']), object({ bar: object({ at: { ...pairOf(int(0, 4096)), description: 'Top-left [x, y] in canvas pixels.' }, size: { ...pairOf(int(1, 512)), description: '[width, height] in canvas pixels; at most 512 divided by subpixels.' } }, ['at', 'size']), empty: bodyKey, from: int(0, 18000), until: int(1, 18001) }, ['bar'])] }, 16), description: 'With a territory: the score drawn over everything, every frame.' }
       }, ['frames', 'bodies']) }
   }, ['format', 'version', 'name', 'width', 'height', 'palette', 'effects'])

@@ -17,11 +17,13 @@ import { PixelError, renderProject } from './core.js';
 import { fields } from './authoring.js';
 import { sinDeg, cosDeg, traceLine, turnRows } from './craft.js';
 import { atan2Deg } from './shapes.js';
-import { readTerritory, readPickups, readEvents, readHud, createTerritory } from './territory.js';
+import { readTerritory, readPickups, readEvents, readStrikes, readHud, createTerritory } from './territory.js';
 
 export const BODY_SHAPES = ['circle', 'box', 'polygon', 'hoop'];
 export const BODY_WALLS = ['left', 'right', 'top', 'bottom'];
 const LIMITS = { effects: 16, entries: 64, bodies: 256, obstacles: 32, frames: 256, work: 400000000 };
+// Split powers may make a crowd of up to this many bodies (an effect's `most`).
+export const CROWD = 4096;
 // A match written as numbered video frames (bodiesFrames) may run this long, and do this much work.
 export const MATCH_FRAMES = 18000;
 const MATCH_WORK = 4000000000;
@@ -112,7 +114,7 @@ function readMaterial(value, path, fixed) {
   };
 }
 
-const BODY_FIELDS = ['temperature', 'team', 'speed', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'outline', 'symbol', 'trail', 'ring', 'grid'];
+const BODY_FIELDS = ['temperature', 'team', 'speed', 'name', 'shape', 'radius', 'size', 'points', 'sides', 'gap', 'thickness', 'at', 'pivot', 'angle', 'velocity', 'spin', 'fixed', 'weightless', 'asleep', 'tireless', 'density', 'bounce', 'friction', 'drag', 'spinDrag', 'fill', 'fillEvery', 'outline', 'symbol', 'trail', 'smear', 'ring', 'grid'];
 
 // One entry of `bodies`: a body, or copies of it laid out on a ring or a grid. Returns the bodies it makes.
 function readBody(entry, path, context) {
@@ -204,6 +206,29 @@ function readBody(entry, path, context) {
     if (fixed) fail(`${path}.trail`, 'a trail follows a body that moves freely');
     trail = { color: paletteKey(entry.trail.color, `${path}.trail.color`, palette), length: integer(entry.trail.length ?? 2, `${path}.trail.length`, 1, 16) };
   }
+  // A fill list steps at each hit; with fillEvery it steps with time instead: a body keeps its fill through its knocks,
+  // and the copies a split makes of it take the list's fill for the frame they are made in, the list stepping every
+  // fillEvery frames, so a crowd that multiplies is washed in its newest colour (stepped at each split, it speckled).
+  const fillEvery = entry.fillEvery === undefined ? null : integer(entry.fillEvery, `${path}.fillEvery`, 1, 18000);
+  if (fillEvery !== null && !(fills && fills.length > 1)) fail(`${path}.fillEvery`, 'fillEvery steps a list of fills; give fill a list');
+  // A smear: the shape swept over its last `frames` frames, drawn under it, the most recent part in the first colour, as
+  // a pixel artist draws a fast swing (a blade's swish).
+  let smear = null;
+  if (entry.smear !== undefined) {
+    if (!isObject(entry.smear)) fail(`${path}.smear`, 'expected { colors, frames }');
+    fields(entry.smear, ['colors', 'frames'], `${path}.smear`);
+    if (shape === 'hoop') fail(`${path}.smear`, 'a hoop is drawn as its outline; a smear goes with a body that swings');
+    if (!Array.isArray(entry.smear.colors) || !entry.smear.colors.length || entry.smear.colors.length > 8) fail(`${path}.smear.colors`, 'expected 1–8 palette keys, the most recent part of the sweep first');
+    smear = { colors: entry.smear.colors.map((key, i) => paletteKey(key, `${path}.smear.colors[${i}]`, palette)), frames: integer(entry.smear.frames ?? 1, `${path}.smear.frames`, 1, 8) };
+  }
+  // A fixed body may turn about a pivot of its own (a blade about its hilt): `pivot` is that point, measured from the
+  // body's centre before it turns, and `at` places the pivot. A free body turns about its centre of mass.
+  let pivot = null;
+  if (entry.pivot !== undefined) {
+    if (!fixed) fail(`${path}.pivot`, 'a pivot goes with a fixed body; a body that moves freely turns about its centre of mass');
+    pivot = pair(entry.pivot, `${path}.pivot`, -128, 128);
+    if (pivot[0] === 0 && pivot[1] === 0) pivot = null;
+  }
   // Copies on a ring (each turned to face out from its centre, `at`) or on a grid (from `at`).
   if (entry.ring !== undefined && entry.grid !== undefined) fail(`${path}.grid`, 'copies go on a ring or a grid, not both');
   let places = [[at[0], at[1], angle]];
@@ -233,8 +258,15 @@ function readBody(entry, path, context) {
     shape, parts, size, fixed, x, y, angle: a, vx: velocity[0], vy: velocity[1], spin,
     invMass: fixed ? 0 : 1 / mass, invInertia: fixed || shape === 'hoop' ? 0 : 1 / (mass * inertia),
     bounce: material.bounce, friction: material.friction, drag: material.drag, spinDrag: material.spinDrag,
-    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, team, speed, fills, outline, symbol, trail
+    weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, team, speed, fills, fillEvery, outline, symbol, trail, smear,
+    ...(pivot && pivoted(x, y, a, pivot, velocity, spin))
   }));
+}
+// A fixed body turning about a pivot: `at` (x, y) is the pivot, its velocity the pivot's; the body's centre and its
+// centre's velocity (the pivot's plus the turn about it) follow from its angle.
+function pivoted(x, y, angle, pivot, velocity, spin) {
+  const c = cosDeg(angle), s = sinDeg(angle), dx = -(c * pivot[0] - s * pivot[1]), dy = -(s * pivot[0] + c * pivot[1]), w = spin * RADIANS;
+  return { pivot, anchor: [x, y], drift: velocity, x: x + dx, y: y + dy, vx: velocity[0] - w * dy, vy: velocity[1] + w * dx };
 }
 
 /** A list of body entries (as a bodies source's or a fluid effect's `bodies`) → the bodies they make, copies included. */
@@ -250,7 +282,7 @@ export function readBodies(list, path, context) {
 
 function readEffect(effect, path, context) {
   if (!isObject(effect)) fail(path, 'expected an effect');
-  fields(effect, ['frames', 'duration', 'substeps', 'iterations', 'gravity', 'background', 'walls', 'obstacles', 'territory', 'bodies', 'pickups', 'events', 'hud'], path);
+  fields(effect, ['frames', 'duration', 'substeps', 'iterations', 'gravity', 'background', 'walls', 'obstacles', 'territory', 'bodies', 'most', 'pickups', 'events', 'strikes', 'hud'], path);
   const { width, height, symbols, palette } = context, most = context.frames ?? LIMITS.frames;
   const background = effect.background === undefined ? null : paletteKey(effect.background, `${path}.background`, palette);
   if (Number.isInteger(effect.frames) && effect.frames > most && effect.frames <= MATCH_FRAMES) fail(`${path}.frames`, `a recipe holds at most ${most} frames; write a longer match as numbered video frames: pixelbolt sequence <source> --out <folder> --fps 30, or pixel_compile with sequence`);
@@ -283,8 +315,11 @@ function readEffect(effect, path, context) {
   const territory = effect.territory === undefined ? null : readTerritory(effect.territory, `${path}.territory`, { width, height, palette });
   const bodies = readBodies(effect.bodies, `${path}.bodies`, { ...context, teams: territory ? territory.teams : null });
   const pickups = readPickups(effect.pickups, `${path}.pickups`, context), events = readEvents(effect.events, `${path}.events`, context, bodies);
+  const strikes = readStrikes(effect.strikes, `${path}.strikes`, context, bodies);
   const hud = readHud(effect.hud, `${path}.hud`, context, territory ? territory.teams : null);
-  return { frames, duration, substeps, iterations, gravity, background, walls: Object.fromEntries(BODY_WALLS.map(edge => [edge, walls.includes(edge)])), obstacles, territory, bodies, pickups, events, hud };
+  // The most bodies there may be once split powers have made copies: 256 by default, up to CROWD.
+  const crowd = integer(effect.most ?? Math.max(LIMITS.bodies, bodies.length), `${path}.most`, bodies.length, CROWD);
+  return { frames, duration, substeps, iterations, gravity, background, walls: Object.fromEntries(BODY_WALLS.map(edge => [edge, walls.includes(edge)])), obstacles, territory, bodies, most: crowd, pickups, events, strikes, hud };
 }
 
 // ---- Pixel obstacles --------------------------------------------------------------------------------------------------
@@ -555,9 +590,11 @@ export function createBodyWorld(effect, context) {
   const { width, height } = context, { substeps, iterations, gravity } = effect, dt = 1 / substeps, invDt = substeps;
   let world = traceObstacles(effect, width, height);
   const bodies = effect.bodies.map((b, index) => ({
-    ...b, index, c: cosDeg(b.angle), s: sinDeg(b.angle), w: b.spin * RADIANS, x0: b.x, y0: b.y, angle0: b.angle,
-    gone: false, sleepy: 0, hit: false, struck: false, colour: 0, hits: 0, history: [], extent: Math.max(b.size[0], b.size[1]) / 2
+    ...b, index, c: cosDeg(b.angle), s: sinDeg(b.angle), w: b.spin * RADIANS, x0: b.anchor ? b.anchor[0] : b.x, y0: b.anchor ? b.anchor[1] : b.y, angle0: b.angle,
+    gone: false, sleepy: 0, hit: false, struck: false, colour: 0, hits: 0, history: [], poses: [], extent: Math.max(b.size[0], b.size[1]) / 2
   }));
+  // The most bodies the world may hold once powers split them (the effect's `most`).
+  const most = effect.most ?? LIMITS.bodies;
   // A tireless body's energy (motion and spin, plus height against gravity, per unit of mass), which every hit sets back:
   // the cheat that keeps a toy ball bouncing at full height in a ring of loose blocks, whose every knock would otherwise
   // cost it speed. (Without its spin, and only ever made up, a tireless box gained height at every bounce that set it
@@ -577,13 +614,13 @@ export function createBodyWorld(effect, context) {
   };
   // A copy of a body (the split power), added after the others, while there is room.
   const copy = b => {
-    if (bodies.length >= LIMITS.bodies) return null;
-    const twin = { ...b, index: bodies.length, name: null, path: `${b.path} (split ${bodies.length})`, history: [], held: undefined, hits: 0, hit: false, struck: false, sleepy: 0, asleep: false };
+    if (bodies.length >= most) return null;
+    const twin = { ...b, index: bodies.length, name: null, path: `${b.path} (split ${bodies.length})`, history: [], poses: [], held: undefined, hits: 0, hit: false, struck: false, sleepy: 0, asleep: false };
     place(twin); bodies.push(twin);
     return twin;
   };
-  // Territory and powers (territory.js): cells owned by teams, pickups and events.
-  const turf = effect.territory || (effect.pickups && effect.pickups.length) || (effect.events && effect.events.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height, fastest: MAX_SPEED }) : null;
+  // Territory and powers (territory.js): cells owned by teams, pickups, events and strikes.
+  const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, width, height, fastest: MAX_SPEED }) : null;
   const dynamic = b => !b.fixed && !b.gone;
   const moving = b => b.fixed ? (b.vx !== 0 || b.vy !== 0 || b.spin !== 0) : !b.gone && !b.asleep;
   const awake = b => !b.fixed && !b.gone && !b.asleep;
@@ -593,43 +630,73 @@ export function createBodyWorld(effect, context) {
   for (const b of bodies) if (b.name !== null && !b.fixed) stats.paths[b.name] = [];
   let time = 0;
 
-  // Contacts between bodies (pairs in index order) and between each awake body and the segments near it.
-  const collide = () => {
-    const contacts = [];
-    const speed = b => b.fixed ? Math.sqrt(b.vx * b.vx + b.vy * b.vy) + Math.abs(b.w) * b.extent : b.asleep ? 0 : Math.sqrt(b.vx * b.vx + b.vy * b.vy) + Math.abs(b.w) * b.extent;
-    const order = bodies.filter(b => !b.gone).sort((a, b) => a.box[0] - b.box[0] || a.index - b.index);
-    const reach = 2 * Math.max(0, ...order.map(speed)) * dt + 0.1, pairs = [];
-    for (let i = 0; i < order.length; i++) {
-      const a = order[i];
-      for (let j = i + 1; j < order.length; j++) {
-        const b = order[j];
-        if (b.box[0] > a.box[2] + reach) break;
-        if (a.fixed && b.fixed) continue;
-        // An awake body meets anything; a moving fixed body meets sleeping ones, to wake them.
-        if (!awake(a) && !awake(b) && !(a.asleep && b.fixed && moving(b)) && !(b.asleep && a.fixed && moving(a))) continue;
-        pairs.push(a.index < b.index ? [a, b] : [b, a]);
+  // Contacts between bodies (pairs in index order) and between each awake body and the segments near it. The pairs come
+  // from a grid: each live body's bounds are binned into square cells (each cell's list in index order), and each body
+  // is tried against the later bodies in the cells its bounds reach, widened by the most a pair can close in a substep.
+  // (Swept along x alone, every ball in a pile was tried against every ball in its columns, and sorting those pairs
+  // took as long again: two thirds of a frame at 800 balls.)
+  const speed = b => b.fixed ? Math.sqrt(b.vx * b.vx + b.vy * b.vy) + Math.abs(b.w) * b.extent : b.asleep ? 0 : Math.sqrt(b.vx * b.vx + b.vy * b.vy) + Math.abs(b.w) * b.extent;
+  let seen = new Int32Array(0), cellStart = new Int32Array(0), cellItems = new Int32Array(0);
+  const near = [];
+  // A pair's contacts, a before b in index order: an awake body meets anything; a moving fixed body meets sleeping ones,
+  // to wake them; two fixed bodies never meet.
+  const pairWith = (a, b, speeds, contacts) => {
+    if (a.fixed && b.fixed) return;
+    if (!awake(a) && !awake(b) && !(a.asleep && b.fixed && moving(b)) && !(b.asleep && a.fixed && moving(a))) return;
+    const margin = (speeds[a.index] + speeds[b.index]) * dt + 0.1;
+    if (!overlaps(a.box, b.box, margin)) return;
+    a.world.forEach((pa, ia) => b.world.forEach((pb, ib) => {
+      if (!overlaps(partBox(pa), partBox(pb), margin)) return;
+      let m;
+      if (pa.kind === 'circle' && pb.kind === 'circle') {
+        const ux = b.vx - a.vx, uy = b.vy - a.vy, u = Math.sqrt(ux * ux + uy * uy);
+        m = circleCircle(pa, pb, margin, u > 1e-9 ? [ux / u, uy / u] : undefined);
       }
+      else if (pa.kind === 'circle') { m = polygonCircle(pb, pa, margin); if (m) { m.nx = -m.nx; m.ny = -m.ny; } }
+      else if (pb.kind === 'circle') m = polygonCircle(pa, pb, margin);
+      else m = polygonPolygon(pa, pb, margin);
+      if (m) contacts.push({ a, b, key: `${a.index}:${b.index}:${ia}:${ib}`, ...m, bounce: Math.max(a.bounce, b.bounce), friction: Math.sqrt(a.friction * b.friction) });
+    }));
+  };
+  const collide = () => {
+    const contacts = [], count = bodies.length, speeds = new Float64Array(count);
+    let fastest = 0, gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity, live = 0;
+    for (const b of bodies) {
+      if (b.gone) continue;
+      const v = speed(b); speeds[b.index] = v; if (v > fastest) fastest = v; live++;
+      gx0 = Math.min(gx0, b.box[0]); gy0 = Math.min(gy0, b.box[1]); gx1 = Math.max(gx1, b.box[2]); gy1 = Math.max(gy1, b.box[3]);
     }
-    pairs.sort((p, q) => p[0].index - q[0].index || p[1].index - q[1].index);
-    for (const [a, b] of pairs) {
-      const margin = (speed(a) + speed(b)) * dt + 0.1;
-      if (!overlaps(a.box, b.box, margin)) continue;
-      a.world.forEach((pa, ia) => b.world.forEach((pb, ib) => {
-        if (!overlaps(partBox(pa), partBox(pb), margin)) return;
-        let m;
-        if (pa.kind === 'circle' && pb.kind === 'circle') {
-          const ux = b.vx - a.vx, uy = b.vy - a.vy, u = Math.sqrt(ux * ux + uy * uy);
-          m = circleCircle(pa, pb, margin, u > 1e-9 ? [ux / u, uy / u] : undefined);
+    const reach = 2 * fastest * dt + 0.1;
+    if (live > 1) {
+      // Cells of at least 4 pixels, coarser where the bodies spread so far that the grid would pass 65,536 cells.
+      const cell = Math.max(4, Math.sqrt((gx1 - gx0 + 1) * (gy1 - gy0 + 1) / 65536)), columns = Math.floor((gx1 - gx0) / cell) + 1, rows = Math.floor((gy1 - gy0) / cell) + 1;
+      const column = x => Math.max(0, Math.min(columns - 1, Math.floor((x - gx0) / cell))), row = y => Math.max(0, Math.min(rows - 1, Math.floor((y - gy0) / cell)));
+      if (cellStart.length < columns * rows + 1) cellStart = new Int32Array(columns * rows + 1); else cellStart.fill(0, 0, columns * rows + 1);
+      let total = 0;
+      for (const b of bodies) if (!b.gone) for (let j = row(b.box[1]); j <= row(b.box[3]); j++) for (let i = column(b.box[0]); i <= column(b.box[2]); i++) { cellStart[j * columns + i + 1]++; total++; }
+      for (let c = 0; c < columns * rows; c++) cellStart[c + 1] += cellStart[c];
+      if (cellItems.length < total) cellItems = new Int32Array(total);
+      const fill = cellStart.slice(0, columns * rows);
+      for (const b of bodies) if (!b.gone) for (let j = row(b.box[1]); j <= row(b.box[3]); j++) for (let i = column(b.box[0]); i <= column(b.box[2]); i++) cellItems[fill[j * columns + i]++] = b.index;
+      if (seen.length < count) seen = new Int32Array(count);
+      seen.fill(-1, 0, count);
+      for (const a of bodies) {
+        if (a.gone) continue;
+        near.length = 0;
+        for (let j = row(a.box[1] - reach); j <= row(a.box[3] + reach); j++) for (let i = column(a.box[0] - reach); i <= column(a.box[2] + reach); i++) {
+          for (let k = cellStart[j * columns + i], end = cellStart[j * columns + i + 1]; k < end; k++) {
+            const other = cellItems[k];
+            if (other <= a.index || seen[other] === a.index) continue;
+            seen[other] = a.index; near.push(other);
+          }
         }
-        else if (pa.kind === 'circle') { m = polygonCircle(pb, pa, margin); if (m) { m.nx = -m.nx; m.ny = -m.ny; } }
-        else if (pb.kind === 'circle') m = polygonCircle(pa, pb, margin);
-        else m = polygonPolygon(pa, pb, margin);
-        if (m) contacts.push({ a, b, key: `${a.index}:${b.index}:${ia}:${ib}`, ...m, bounce: Math.max(a.bounce, b.bounce), friction: Math.sqrt(a.friction * b.friction) });
-      }));
+        near.sort((p, q) => p - q);
+        for (const index of near) pairWith(a, bodies[index], speeds, contacts);
+      }
     }
     for (const a of bodies) {
       if (!dynamic(a) || a.asleep) continue;
-      const margin = speed(a) * dt + 0.1, [x0, y0, x1, y1] = a.box;
+      const margin = speeds[a.index] * dt + 0.1, [x0, y0, x1, y1] = a.box;
       for (const index of world.near(x0 - margin, y0 - margin, x1 + margin, y1 + margin)) {
         const s = world.segments[index];
         a.world.forEach((pa, ia) => {
@@ -713,11 +780,16 @@ export function createBodyWorld(effect, context) {
       for (const o of bodies) if (o.asleep && !o.weightless && !o.gone && overlaps(w.box, o.box, 0.25)) { o.asleep = false; o.sleepy = 0; queue.push(o); }
     }
   };
-  // Fixed bodies move exactly as their velocity and spin say.
+  // Fixed bodies move exactly as their velocity and spin say; one with a pivot turns about it, its centre and its centre's
+  // velocity following.
   const placeMoving = () => {
     for (const b of bodies) if (b.fixed && moving(b)) {
-      b.x = b.x0 + b.vx * time; b.y = b.y0 + b.vy * time;
-      const a = b.angle0 + b.spin * time; b.c = cosDeg(a); b.s = sinDeg(a); place(b);
+      const a = b.angle0 + b.spin * time; b.c = cosDeg(a); b.s = sinDeg(a);
+      if (b.pivot) {
+        const dx = -(b.c * b.pivot[0] - b.s * b.pivot[1]), dy = -(b.s * b.pivot[0] + b.c * b.pivot[1]);
+        b.x = b.x0 + b.drift[0] * time + dx; b.y = b.y0 + b.drift[1] * time + dy; b.vx = b.drift[0] - b.w * dy; b.vy = b.drift[1] + b.w * dx;
+      } else { b.x = b.x0 + b.vx * time; b.y = b.y0 + b.vy * time; }
+      place(b);
     }
   };
   const substep = () => {
@@ -818,6 +890,8 @@ export function createBodyWorld(effect, context) {
     for (const contact of contacts) for (const point of contact.points) {
       next.set(`${contact.key}:${point.id}`, [point.normal, point.tangent]);
       if (point.approach < -impact && point.most > 0) { contact.a.hit = contact.a.struck = true; if (contact.b) contact.b.hit = contact.b.struck = true; }
+      // A strike's body strikes what it pushes, a hit or not: a blade that sweeps a ball along a wall keeps striking it.
+      if (turf && contact.b && point.most > 0) turf.strike(contact.a, contact.b);
     }
     // The cells hit change hands; a body with a held speed goes on at it, along its own heading.
     if (turf) { for (const contact of contacts) if (contact.cell) turf.hit(contact, contact.cell); turf.settle(bodies); }
@@ -847,13 +921,18 @@ export function createBodyWorld(effect, context) {
     // Moving fixed bodies are drawn (and met by a fluid) where they are at the frame's end, not where its last substep
     // started: a paddle drawn a substep behind showed a gap before the box it pushed.
     placeMoving();
-    // Powers run out and are taken, and the score is counted, between frames.
-    if (turf) { turf.frame(f, bodies); for (const b of bodies) if (!b.gone) place(b); }
-    // Hits change colour once a frame; slow bodies fall asleep; bodies far outside the canvas are gone. A named body's path
-    // has a place for every frame: null once it is gone.
+    // Powers run out and are taken, and the score is counted, between frames. What a body that vanished held up wakes.
+    if (turf) {
+      const was = bodies.map(b => b.gone);
+      turf.frame(f, bodies);
+      for (const b of bodies) if (!b.gone) place(b);
+      rouse(bodies.filter((b, k) => k < was.length && b.gone && !was[k]));
+    }
+    // Hits change colour once a frame (a fill list that steps with time doesn't); slow bodies fall
+    // asleep; bodies far outside the canvas are gone. A named body's path has a place for every frame: null once it is gone.
     for (const b of bodies) {
       if (b.gone) { if (b.name !== null && !b.fixed) stats.paths[b.name].push(null); continue; }
-      if (b.hit) { b.hits++; stats.hits++; if (b.fills && b.fills.length > 1) b.colour = (b.colour + 1) % b.fills.length; b.hit = false; }
+      if (b.hit) { b.hits++; stats.hits++; if (b.fills && b.fills.length > 1 && !b.fillEvery) b.colour = (b.colour + 1) % b.fills.length; b.hit = false; }
       if (dynamic(b) && !b.asleep) {
         const fast = Math.max(Math.sqrt(b.vx * b.vx + b.vy * b.vy), Math.abs(b.w) * b.extent);
         b.sleepy = fast < SLEEP_SPEED ? b.sleepy + 1 : 0;
@@ -864,6 +943,7 @@ export function createBodyWorld(effect, context) {
       b.history.push([b.x, b.y]);
       if (b.name !== null && !b.fixed) stats.paths[b.name].push(b.gone ? null : [round(b.x), round(b.y), round(atan2Deg(b.s, b.c))]);
       if (b.history.length > 18) b.history.shift();
+      if (b.smear) { b.poses.push([b.x, b.y, b.c, b.s]); if (b.poses.length > b.smear.frames + 1) b.poses.shift(); }
     }
     if (stats.rest === null && f > 0 && bodies.every(b => b.gone || b.fixed && !moving(b) || b.asleep)) stats.rest = f;
   };
@@ -891,7 +971,7 @@ export function createBodyWorld(effect, context) {
 function simulate(effect, context) {
   const world = createBodyWorld(effect, context), drawn = [];
   for (let f = 0; f < effect.frames; f++) { world.advance(f); drawn.push(drawFrame(world, context.width, context.height, context, f, effect.hud)); }
-  return { drawn, stats: world.stats, turf: world.turf, steps: (effect.frames - 1) * effect.substeps };
+  return { drawn, stats: world.stats, turf: world.turf, steps: (effect.frames - 1) * effect.substeps, copies: world.bodies.length - effect.bodies.length };
 }
 
 // ---- Drawing ----------------------------------------------------------------------------------------------------------
@@ -1158,6 +1238,48 @@ function heldFine(b, axis, offset, n, q) {
   return memory[key].at / n + offset;
 }
 
+// The pixels (n times finer: fine pixels) whose centres a placed body's shape covers.
+function insideCells(placed, n) {
+  const out = [];
+  for (const part of placed.world) {
+    const [x0, y0, x1, y1] = partBox(part);
+    for (let j = Math.floor(y0 * n); j <= Math.ceil(y1 * n); j++) for (let i = Math.floor(x0 * n); i <= Math.ceil(x1 * n); i++) {
+      const px = (i + 0.5) / n, py = (j + 0.5) / n;
+      let inside;
+      if (part.kind === 'circle') inside = (px - part.x) * (px - part.x) + (py - part.y) * (py - part.y) <= part.r * part.r;
+      else if (part.n === 2) {
+        const ex = part.vx[1] - part.vx[0], ey = part.vy[1] - part.vy[0], t = Math.max(0, Math.min(1, ((px - part.vx[0]) * ex + (py - part.vy[0]) * ey) / (ex * ex + ey * ey)));
+        const dx = px - part.vx[0] - t * ex, dy = py - part.vy[0] - t * ey;
+        inside = dx * dx + dy * dy <= part.r * part.r;
+      } else {
+        inside = true;
+        for (let k = 0; k < part.n && inside; k++) if (part.nx[k] * (px - part.vx[k]) + part.ny[k] * (py - part.vy[k]) > 0) inside = false;
+      }
+      if (inside) out.push([i, j]);
+    }
+  }
+  return out;
+}
+// Smears, under the bodies: each one's shape swept from where it was `smear.frames` frames ago to where it is, sampled
+// so its far end moves under half a (fine) pixel a sample, the oldest part first, so the colours run from the first,
+// just behind the body, to the last at the far end of the sweep, as a pixel artist draws a fast swing.
+function paintSmears(bodies, n, put) {
+  for (const b of bodies) {
+    if (b.gone || !b.smear || b.poses.length < 2) continue;
+    const { colors, frames } = b.smear, codes = colors.map(key => key.charCodeAt(0)), poses = b.poses, spans = poses.length - 1;
+    for (let k = 0; k < spans; k++) {
+      const [ax, ay, ac, as] = poses[k], [bx, by, bc, bs] = poses[k + 1], from = atan2Deg(as, ac), turn = turnBetween(from, atan2Deg(bs, bc));
+      const reach = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay)) + Math.abs(turn) * RADIANS * b.extent, steps = Math.max(1, Math.ceil(reach * n * 2));
+      for (let t = 0; t < steps; t++) {
+        const u = t / steps, age = spans - k - u, a = from + turn * u, code = codes[Math.min(codes.length - 1, Math.floor(age / frames * codes.length))];
+        const pose = { ...b, x: ax + (bx - ax) * u, y: ay + (by - ay) * u, c: cosDeg(a), s: sinDeg(a) };
+        place(pose);
+        for (const [i, j] of insideCells(pose, n)) put(i, j, code);
+      }
+    }
+  }
+}
+
 /**
  * Draws the bodies `n` times finer than the world's pixels (a source's `subpixels`) into `grid` (character codes,
  * width × n by height × n): each body is its own picture, every pixel of it a square n fine pixels across, turned with
@@ -1180,6 +1302,7 @@ export function paintBodiesFine(bodies, grid, width, height, symbols, n) {
       }
     }
   }
+  paintSmears(bodies, n, put);
   for (const b of bodies) {
     if (b.gone) continue;
     if (b.shape === 'hoop') {
@@ -1231,6 +1354,7 @@ export function paintBodies(bodies, grid, width, height, symbols) {
       }
     }
   }
+  paintSmears(bodies, 1, put);
   for (const b of bodies) {
     if (b.gone) continue;
     // A box or polygon is drawn as its upright picture, fill and outline, turned by turnRows (as a symbol is): its sides
@@ -1300,28 +1424,51 @@ export const scaleAnchor = (anchor, n) => (n > 1 && Array.isArray(anchor) && anc
 // hold up to two a cell (another team's cells, every other one). Drawn finer (subpixels), each body's picture is visited
 // a fine pixel at a time over its reach, its trail a disc a step, and the whole fine canvas once more. (Counting bodies
 // alone, eight boxes kept moving over a checkerboard counted 2.7 million updates and ran for 10 seconds, and a match of
-// 256 boxes drawn finer ran for an hour within the budget.) Weighed against time, a unit is about what the presets'
-// pair tests and contacts cost: these cases and the presets run at 18 to 85 ms a million.
+// 256 boxes drawn finer ran for an hour within the budget.) Pairs are found on a grid of 4-pixel cells, so a body is
+// tested against the bodies in the cells its bounds reach, as many as fit there at the smallest free body's size: about
+// 70 for balls of radius 1, where testing every pair counted 400 for 800 of them. Split powers may grow the crowd to
+// the effect's `most`, every copy charged as the costliest free body, and a smear is visited a sample at a time over
+// its sweep. Weighed against time, a unit is about what the presets' pair tests and contacts cost: these cases and the
+// presets run at 18 to 85 ms a million.
 const FACE_WORK = 1, PIXEL_WORK = 0.25;
 function work(effect, { width, height, n = 1, symbols = {} }) {
-  const count = effect.bodies.length, moving = effect.bodies.filter(b => !b.fixed);
-  let step = count * count / 2 + count * (effect.iterations + 2) * 16 + count * 32, frame = width * height * n * n;
-  const segments = moving.length ? traceObstacles(effect, width, height).segments : [], densest = new Map(), margin = MAX_SPEED / effect.substeps + 0.1;
+  const count = effect.bodies.length, moving = effect.bodies.filter(b => !b.fixed), margin = MAX_SPEED / effect.substeps + 0.1;
+  const splits = [effect.pickups, effect.events, effect.strikes].some(list => (list ?? []).some(p => p.power === 'split'));
+  const added = splits && moving.length ? Math.max(0, (effect.most ?? count) - count) : 0, crowd = count + added;
+  const smallest = moving.length ? Math.max(0.5, Math.min(...moving.map(shapeArea))) : 1;
+  const span = b => Math.max(b.size[0], b.size[1]) * Math.SQRT2;
+  const pairs = b => Math.min(crowd - 1, Math.ceil((span(b) + 4 * margin + 8) ** 2 / smallest)) / 2;
+  let step = crowd * (effect.iterations + 2) * 16 + crowd * 32, frame = width * height * n * n, costliest = 0, drawn = 0;
+  for (const b of effect.bodies) step += pairs(b);
+  const segments = moving.length ? traceObstacles(effect, width, height).segments : [], densest = new Map();
   for (const b of moving) {
     // The area a substep's search covers: the body's bounds turned to 45 degrees, and a step at the speed limit each way.
-    const side = Math.ceil(Math.max(b.size[0], b.size[1]) * Math.SQRT2 + 2 * margin) + 1;
+    const side = Math.ceil(span(b) + 2 * margin) + 1;
     if (!densest.has(side)) densest.set(side, facesIn(segments, width, height, side));
-    const t = effect.territory, cells = t ? Math.min(t.columns * t.rows, (Math.ceil(side / t.cell) + 2) ** 2) : 0;
-    step += (densest.get(side) + 2 * cells) * (effect.iterations + 3) * FACE_WORK;
+    const t = effect.territory, cells = t ? Math.min(t.columns * t.rows, (Math.ceil(side / t.cell) + 2) ** 2) : 0, faces = (densest.get(side) + 2 * cells) * (effect.iterations + 3) * FACE_WORK;
+    step += faces; costliest = Math.max(costliest, faces + pairs(b));
   }
   for (const b of effect.bodies) {
-    // A body's picture (its symbol, or its shape) within its reach, turned (a circle doesn't turn), then its trail.
+    // A body's picture (its symbol, or its shape) within its reach, turned (a circle doesn't turn), then its trail and its
+    // smear: a sample each half (fine) pixel its far end sweeps, each over the bounds it is turned in.
     const picture = b.symbol ? symbols[b.symbol] : null, w = Math.max(b.size[0], picture ? picture[0].length : 0), h = Math.max(b.size[1], picture ? picture.length : 0);
     const reach = b.shape === 'circle' ? Math.max(w, h) / 2 : Math.sqrt(w * w + h * h) / 2, across = 2 * reach * n + 2;
-    frame += Math.min(width * height * n * n, across * across);
-    if (b.trail) { const d = Math.max(1, Math.min(b.size[0], b.size[1]) - 1) * n; frame += b.trail.length * (MAX_SPEED * n + 1) * d * d; }
+    let cost = Math.min(width * height * n * n, across * across);
+    if (b.trail) { const d = Math.max(1, Math.min(b.size[0], b.size[1]) - 1) * n; cost += b.trail.length * (MAX_SPEED * n + 1) * d * d; }
+    if (b.smear) { const sweep = (b.fixed ? Math.sqrt(b.vx * b.vx + b.vy * b.vy) : MAX_SPEED) + Math.abs(b.spin) * RADIANS * 2 * reach; cost += b.smear.frames * Math.ceil(2 * n * sweep + 1) * across * across; }
+    frame += cost;
+    if (!b.fixed) drawn = Math.max(drawn, cost);
   }
+  step += added * costliest; frame += added * drawn;
   return effect.frames * (effect.substeps * step + frame * PIXEL_WORK);
+}
+// The area of a body's shape: a circle's, or a polygon's (a box's) by its corners.
+function shapeArea(b) {
+  const part = b.parts[0];
+  if (part.kind === 'circle') return PI * part.r * part.r;
+  let area = 0;
+  for (let i = 0; i < part.n; i++) { const j = (i + 1) % part.n; area += part.vx[i] * part.vy[j] - part.vx[j] * part.vy[i]; }
+  return Math.abs(area) / 2;
 }
 // The most segments whose bounds meet one square patch `side` pixels across, anywhere on (or overlapping) the canvas.
 function facesIn(segments, width, height, side) {
@@ -1461,7 +1608,8 @@ function frameOps(effect, drawn, width, height, n) {
 // team ahead at the end) and the powers taken.
 const territoryFigures = (turf, territory) => ({
   ...(turf && territory && { territory: { teams: turf.teams.map(team => team.name), counts: turf.stats.counts, flips: turf.stats.flips, leader: turf.teams[turf.stats.counts.at(-1).reduce((best, n, k, all) => (n > all[best] ? k : best), 0)].name } }),
-  ...(turf && turf.stats.taken.length && { powers: turf.stats.taken })
+  ...(turf && turf.stats.taken.length && { powers: turf.stats.taken }),
+  ...(turf && turf.stats.strikes && { strikes: turf.stats.strikes })
 });
 
 /** A version-1 pixelforge-bodies source → { recipe, metadata, warnings? }. One-shot: bodies don't loop. */
@@ -1486,7 +1634,7 @@ export function compileBodies(source) {
     warnings.push(...effectWarnings);
     const played = territoryFigures(run.turf, effect.territory);
     metadata.effects[name] = {
-      frames: effect.frames, substeps: effect.substeps, steps: run.steps, bodies: effect.bodies.length, hits: run.stats.hits,
+      frames: effect.frames, substeps: effect.substeps, steps: run.steps, bodies: effect.bodies.length, ...(run.copies && { copies: run.copies }), hits: run.stats.hits,
       escaped: run.stats.escaped, rest: run.stats.rest, pixels: run.drawn.map(frame => frame.pixels), ...(Object.keys(run.stats.paths).length && { paths: run.stats.paths }), ...played, ...(effectWarnings.length && { warnings: effectWarnings })
     };
   }
@@ -1515,6 +1663,6 @@ export function bodiesFrames(source, effectName) {
       while (at < f) { at++; world.advance(at); if (at === f) { const ops = frameOps(effect, drawFrame(world, width, height, context, at, effect.hud), width, height, n); image = renderProject({ ...shell, frames: [{ name: `${name}-${at}`, ...(ops.length && { ops }) }] }).frames[0].data; } }
       return image;
     },
-    figures: () => ({ frames: at + 1, hits: world.stats.hits, escaped: world.stats.escaped, ...territoryFigures(world.turf, effect.territory) })
+    figures: () => ({ frames: at + 1, ...(world.bodies.length > effect.bodies.length && { copies: world.bodies.length - effect.bodies.length }), hits: world.stats.hits, escaped: world.stats.escaped, ...territoryFigures(world.turf, effect.territory) })
   };
 }

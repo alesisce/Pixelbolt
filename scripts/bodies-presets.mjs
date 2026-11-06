@@ -112,4 +112,34 @@ const territory = bodiesSource('territory', 72, 128,
     vortex: ['ppppp', 'pqqqp', 'pqpqp', 'pqpqp', 'ppppp']
   });
 
-export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory };
+// Blade bloom: a sword turns about its hilt in a ring, its swing smeared behind it. One ball drops in; every ball the
+// blade touches splits in six (each at most once every 6 frames), the copies made in the colour of the moment, which
+// steps every 28 frames, so the ring fills in shifting bands of colour as the blade scoops the crowd round. At frame 200
+// the ring vanishes, the packed crowd bursts out and falls away, and the sword spins on alone. 900 balls at most.
+const bladeHandle = 8, bladeGuard = 2, bladeSteel = 26, bladeLength = bladeHandle + bladeGuard + bladeSteel;
+const bladeRow = f => Array.from({ length: bladeLength }, (_, x) => f(x) ?? '.').join('');
+const katana = [
+  bladeRow(x => (x >= bladeHandle && x < bladeHandle + bladeGuard ? 'y' : null)),
+  bladeRow(x => (x < bladeHandle ? 'R' : x < bladeHandle + bladeGuard ? 'y' : x < bladeLength - 3 ? 'G' : null)),
+  bladeRow(x => (x < bladeHandle ? (x % 2 ? 'y' : 'R') : x < bladeHandle + bladeGuard ? 'y' : 'W')),
+  bladeRow(x => (x < bladeHandle ? 'R' : x < bladeHandle + bladeGuard ? 'y' : x < bladeLength - 1 ? 'w' : null)),
+  bladeRow(x => (x >= bladeHandle && x < bladeHandle + bladeGuard ? 'y' : null))
+];
+const bladeBloom = bodiesSource('blade-bloom', 80, 80,
+  {
+    k: '#07070d', o: '#d8d8e4', R: '#a3122a', y: '#e3b341', G: '#8d93a8', W: '#ffffff', w: '#c9e4ff', s: '#5d6378', t: '#2c3040',
+    a: '#ff3b5c', b: '#ff7a2f', c: '#ffc93c', d: '#b8f040', e: '#41e07a', f: '#2fe0c0', g: '#35c6ff', h: '#3d7bff', i: '#7a5cff', j: '#c04dff', l: '#ff4fd8', m: '#ff4f93'
+  },
+  {
+    frames: 240, duration: 40, gravity: [0, 0.3], background: 'k', most: 900,
+    bodies: [
+      { name: 'ring', shape: 'hoop', fixed: true, radius: 36, thickness: 2, sides: 48, at: [40, 40], fill: 'o' },
+      { name: 'blade', shape: 'box', size: [bladeLength, 3], pivot: [-bladeLength / 2 + 2, 0], at: [40, 40], fixed: true, spin: 12, symbol: 'katana', bounce: 0.2, friction: 0.1, smear: { colors: ['W', 's', 't'], frames: 2 } },
+      { name: 'seed', shape: 'circle', radius: 1, at: [40, 10], velocity: [0.5, 0], bounce: 0.2, friction: 0.15, fill: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'l', 'm'], fillEvery: 28 }
+    ],
+    strikes: [{ by: 'blade', power: 'split', count: 6, spread: 70, rest: 6 }],
+    events: [{ frame: 200, body: 'ring', power: 'vanish' }]
+  },
+  { katana });
+
+export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory, 'blade-bloom': bladeBloom };

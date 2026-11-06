@@ -18,7 +18,7 @@ import { BODIES_SHOWCASE, buildBodiesGIFs } from '../showcase/bodies/build.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const GOLDEN = {
-  'ring-escape': '732208a10f7603dfd3e5cc447dc62a066f732f626c7b134fde5300af8b5cfe71', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': '066de7bb6a870cd3148848e00a9f790bd68db5906b63ef7cbdb400dc824a65cb', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025'
+  'ring-escape': '732208a10f7603dfd3e5cc447dc62a066f732f626c7b134fde5300af8b5cfe71', 'bouncing-pixel': '22d7b1e4fdeacec4f88ab370e864c20097dab67e2097d538072495f3dc1e2e2e', 'spinning-hoop': '066de7bb6a870cd3148848e00a9f790bd68db5906b63ef7cbdb400dc824a65cb', 'crate-topple': '5c9e52ca11859b586116e0bbed1cf38e5c5ea439ba72ebddafee52c0b4fa81eb', territory: '8745dc5981857cddd5ffb587c3ca0bd5a7e65d19bd8337495af6ca7963fc9025', 'blade-bloom': '7f6a2cf2165d9647884592185d340b3f8f1fc56347a25a6fd30e16a4e93288d2'
 };
 const example = async name => JSON.parse(await readFile(path.join(root, 'examples', `${name}.bodies.json`), 'utf8'));
 const palette = { k: '#111111', w: '#eeeeee', r: '#dd3344', s: '#555566' };
@@ -328,4 +328,73 @@ test('a plank lying onto a low step rests on it, a bouncy floor beside a dead on
   // With one substep, a substep's gravity is past REST_SPEED: a resting box counted a hit every frame and never slept.
   const resting = run(scene({ frames: 60, substeps: 1, gravity: [0, 0.5], walls: ['bottom'], bodies: [{ shape: 'box', size: [4, 4], at: [24, 20], bounce: 0.5, fill: ['k', 'w'] }] })).effect;
   assert.ok(resting.hits <= 3 && resting.rest !== null, `${resting.hits} hits, at rest from ${resting.rest}`);
+});
+
+// The cells of colour `key` a frame's grid draws, as [x, y].
+const keyCells = (frame, key) => {
+  const grid = frame.ops.find(op => op.op === 'grid'), out = [];
+  if (grid) grid.rows.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] === key) out.push([grid.x + i, grid.y + j]); });
+  return out;
+};
+
+test('pivots, strikes, fills that step with time, vanishing and smears are read strictly', () => {
+  const blade = { name: 'blade', shape: 'box', size: [20, 2], at: [24, 16], fixed: true, spin: 6, fill: 'w' }, ball = { name: 'ball', shape: 'circle', radius: 1, at: [24, 4], fill: ['k', 'w'] };
+  refused(scene({ bodies: [{ ...ball, pivot: [1, 0] }] }), 'bodies.effects.e.bodies[0].pivot', /fixed body/);
+  refused(scene({ bodies: [{ ...ball, fill: 'k', fillEvery: 4 }] }), 'bodies.effects.e.bodies[0].fillEvery', /list of fills/);
+  refused(scene({ bodies: [{ shape: 'hoop', fixed: true, radius: 8, at: [24, 16], fill: 'w', smear: { colors: ['r'] } }] }), 'bodies.effects.e.bodies[0].smear', /hoop/);
+  refused(scene({ bodies: [blade, ball], strikes: [{ by: 'nobody', power: 'split' }] }), 'bodies.effects.e.strikes[0].by', /no body is named "nobody"/);
+  refused(scene({ bodies: [blade, ball], events: [{ frame: 3, body: 'blade', power: 'split' }] }), 'bodies.effects.e.events[0].body', /can only vanish/);
+  refused(scene({ bodies: [blade, ball], most: 5000 }), 'bodies.effects.e.most', /from 2 to 4096/);
+  assert.equal(compileBodies(scene({ bodies: [blade, ball], events: [{ frame: 3, body: 'blade', power: 'vanish' }] })).recipe.frames.length, 40);
+});
+
+test('a fixed body turns about its pivot, and a smear sweeps behind it', () => {
+  // A 20-pixel blade turning 6 degrees a frame about its left end at [32, 24]: its far end is 20 pixels out at its angle.
+  const { recipe } = run(scene({ frames: 30, gravity: [0, 0], bodies: [{ name: 'blade', shape: 'box', size: [20, 2], pivot: [-10, 0], at: [32, 24], fixed: true, spin: 6, fill: 'w', smear: { colors: ['r', 's'], frames: 2 } }] }, { width: 64, height: 48 }));
+  recipe.frames.forEach((frame, f) => {
+    const cells = keyCells(frame, 'w'), far = cells.reduce((best, [x, y]) => (Math.hypot(x + 0.5 - 32, y + 0.5 - 24) > Math.hypot(best[0] + 0.5 - 32, best[1] + 0.5 - 24) ? [x, y] : best), cells[0]);
+    assert.ok(cells.some(([x, y]) => Math.abs(x + 0.5 - 32) <= 1.5 && Math.abs(y + 0.5 - 24) <= 1.5), `${frame.name}: the blade stays on its pivot`);
+    const a = 6 * f * Math.PI / 180, reach = Math.hypot(far[0] + 0.5 - 32, far[1] + 0.5 - 24);
+    assert.ok(Math.abs(reach - 20) < 1.6 && Math.hypot(far[0] + 0.5 - 32 - 20 * Math.cos(a), far[1] + 0.5 - 24 - 20 * Math.sin(a)) < 2.5, `${frame.name}: its far end ${far} at ${6 * f}°`);
+    // The smear needs a frame behind it, and then lies behind the blade: turned back from it, not ahead.
+    const smear = [...keyCells(frame, 'r'), ...keyCells(frame, 's')];
+    if (f === 0) assert.equal(smear.length, 0);
+    else {
+      assert.ok(smear.length > 10, `${frame.name}: ${smear.length} smear pixels`);
+      // (Within a few pixels of the pivot a pixel spans many degrees; past them, the angle tells.)
+      for (const [x, y] of smear.filter(([x, y]) => Math.hypot(x + 0.5 - 32, y + 0.5 - 24) > 6)) {
+        const behind = ((6 * f - Math.atan2(y + 0.5 - 24, x + 0.5 - 32) * 180 / Math.PI) % 360 + 540) % 360 - 180;
+        assert.ok(behind > -8 && behind < 6 * Math.min(f, 2) + 12, `${frame.name}: a smear pixel ${behind.toFixed(1)}° behind the blade`);
+      }
+    }
+  });
+});
+
+test('a strike splits what its body pushes, up to most, and copies take the fill of their frame', () => {
+  // A blade turning about the centre of a ring with one ball in it: each ball it touches splits in three, at most once
+  // every 6 frames, up to 120 bodies; the copies take the colour of the frame they are made in, a step every 20 frames.
+  const ring = { name: 'ring', shape: 'hoop', fixed: true, radius: 15, thickness: 2, at: [24, 16], fill: 'w' };
+  const blade = { name: 'blade', shape: 'box', size: [14, 2], pivot: [-6, 0], at: [24, 16], fixed: true, spin: 10, fill: 'w' };
+  const ball = { name: 'seed', shape: 'circle', radius: 0.5, at: [24, 6], fill: ['k', 'r', 's'], fillEvery: 20 };
+  const source = most => scene({ frames: 120, gravity: [0, 0.2], bodies: [ring, blade, ball], most, strikes: [{ by: 'blade', power: 'split', count: 3, spread: 60, rest: 6 }] });
+  const { recipe, effect } = run(source(120));
+  assert.ok(effect.copies === 117 && effect.strikes >= 39, `${effect.copies} copies from ${effect.strikes} strikes`);
+  assert.equal(effect.escaped.length, 0, 'the ring holds them');
+  assert.equal(effect.paths.seed.at(-1) !== null, true);
+  // Splits stop at most bodies (256 without it).
+  assert.equal(run(source(40)).effect.copies, 37);
+  assert.ok(run(source(undefined)).effect.copies <= 253);
+  const colours = new Set(recipe.frames.at(-1).ops.find(op => op.op === 'grid').rows.join('').replace(/[.w]/g, ''));
+  assert.ok(colours.size >= 2, `copies in more than one colour: ${[...colours].join('')}`);
+  // A ring that vanishes lets what it held fall out: everything has left the canvas a few seconds later.
+  const burst = run(scene({ frames: 120, gravity: [0, 0.2], bodies: [ring, { ...ball, fill: 'k', fillEvery: undefined }], events: [{ frame: 40, body: 'ring', power: 'vanish' }] })).effect;
+  assert.ok(burst.paths.seed.slice(0, 40).every(p => p !== null) && burst.escaped.length === 1 && burst.escaped[0].frame > 40, `escaped ${JSON.stringify(burst.escaped)}`);
+});
+
+test('the work estimate charges the crowd a strike can make and a smear\'s sweep', () => {
+  // 4,096 balls of radius 0.5 over 256 frames would run for minutes; the same source left at the default 256 runs.
+  const crowd = most => scene({ frames: 256, bodies: [{ name: 'blade', shape: 'box', size: [40, 2], at: [24, 16], fixed: true, spin: 6, fill: 'w' }, { shape: 'circle', radius: 0.5, at: [24, 4], fill: 'k' }],
+    walls: ['left', 'right', 'top', 'bottom'], ...(most && { most }), strikes: [{ by: 'blade', power: 'split', count: 8 }] }, { width: 48, height: 32 });
+  refused(crowd(4096), 'bodies.effects.e', /need about \d+ million updates, more than 400 million/);
+  assert.ok(run(crowd()).effect.frames === 256);
 });

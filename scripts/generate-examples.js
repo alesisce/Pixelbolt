@@ -209,6 +209,15 @@ const hero = { format: 'pixelforge-poses', version: 1, name: 'hero', width: 32, 
     run: { template: 'run', speed: 48, stride: 10, lift: 4, bob: 1, lean: 8 }, jump: { template: 'jump' }, attack: { template: 'attack' }, hurt: { template: 'hurt' } },
   sheet: { columns: 8 } };
 
+// The hero holding a sword: a grid prop on the near forearm's end with a relative `angle`, so the motion templates turn
+// it with the arm (back over the shoulder at the wind-up, level at the strike). An absolute `rotate`, or neither, keeps
+// the blade at one angle through the attack. The canvas is 8 pixels wider than the hero's so the blade stays on it.
+const heroSword = { ...hero, name: 'hero-sword', width: 40,
+  palette: { ...hero.palette, w: '#e8edf5' },
+  parts: { ...hero.parts, sword: { rows: ['...k.........', '..kgk........', '..kgkkkkkkkk.', 'kbbgwwwwwwwok', '..kgkkkkkkkk.', '..kgk........', '...k.........'], anchor: [1, 3] } },
+  poses: [{ ...hero.poses[0], origin: [19, 35], parts: [...hero.poses[0].parts, { name: 'sword', part: 'sword', attach: { part: 'nearFore', point: 'end' }, angle: -45 }] }],
+  motions: { idle: hero.motions.idle, walk: hero.motions.walk, attack: hero.motions.attack } };
+
 // The quick start's slime at 32 × 32, breathing in a gentle squash and stretch: a flat mass keeps its base on its
 // anchor row, and the idle template's squash keeps the outline's lowest row on rig.ground in every frame. The rest pose
 // is named idle-0, the loop's first generated pose, so it stands in for that pose and the sheet holds just the loop.
@@ -677,7 +686,7 @@ const fluids = { campfire, 'smoke-puff': smokePuff, explosion, 'steam-vent': ste
 
 await mkdir(new URL('../examples/', import.meta.url), { recursive: true });
 // Authored sources are pretty-printed; compiled recipes use the CLI's compact formatting.
-const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'slime-idle.poses': slimeIdle, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
+const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'slime-idle.poses': slimeIdle, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
 // Autotile sets drawn from terrain descriptions (scripts/terrain-presets.mjs).
 Object.assign(authored, terrainPresets);
 // Electric gases: arcs, lightning and plasma (scripts/plasma-presets.mjs).

@@ -6,7 +6,7 @@ import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { presetEntries, loadPreset, compilePreset } from '../src/presets.js';
+import { presetEntries, loadPreset, compilePreset, briefListing } from '../src/presets.js';
 import { renderProject } from '../src/core.js';
 import { EFFECT_PRESETS } from '../studio/effects-controls.js';
 import { FLUID_PRESETS } from '../studio/fluid-controls.js';
@@ -28,8 +28,8 @@ async function smallPresets(entries) {
 }
 
 // More small presets for the listing, whose descriptions take its other branches: an Effects lab title on a mix of
-// loops and one-shots, a rig's motion templates, and more than 12 animations.
-const DESCRIBED = ['effects', 'slime-idle', 'holy-spells'];
+// loops and one-shots, a rig's motion templates, one holding a prop, and more than 12 animations.
+const DESCRIBED = ['effects', 'slime-idle', 'hero-sword', 'holy-spells'];
 
 // A clock that reads an hour later at every reading, so a listing with any time budget stops measuring at once.
 const HOUR_PER_READING = `data:text/javascript,${encodeURIComponent('const now = Date.now; let readings = 0; Date.now = () => now() + 3600000 * readings++;')}`;
@@ -46,8 +46,15 @@ test('pixelbolt presets lists every preset and measures each however long that t
     await mkdir(path.dirname(path.join(copy, file)), { recursive: true });
     await cp(path.join(root, file), path.join(copy, file));
   }
-  const { guide, presets } = JSON.parse((await runScript(['--import', HOUR_PER_READING], path.join(copy, 'bin', 'pixelbolt.js'), 'presets')).stdout);
+  const listing = JSON.parse((await runScript(['--import', HOUR_PER_READING], path.join(copy, 'bin', 'pixelbolt.js'), 'presets', '--full')).stdout), { guide, presets } = listing;
   const copied = await (await import(pathToFileURL(path.join(copy, 'src', 'presets.js')).href)).presetEntries();
+  // By default a line each (help presets is the same listing): every fact is measured in a shell, so it is exactly
+  // the full listing told briefly.
+  assert.deepEqual(JSON.parse((await runScript(['--import', HOUR_PER_READING], path.join(copy, 'bin', 'pixelbolt.js'), 'help', 'presets')).stdout), briefListing(listing));
+  for (const [args, message] of [[['presets', 'smoke-puff', '--full'], /--full goes with the listing/], [['help', 'presets', 'smoke-puff'], /help presets lists every preset/]]) {
+    const refused = await runScript([], path.join(copy, 'bin', 'pixelbolt.js'), ...args).then(() => null, error => error);
+    assert.ok(refused, args.join(' ')); assert.match(refused.stdout + refused.stderr, message);
+  }
   assert.match(guide, /pixel_compile \{"preset": "<name>"\}/);
   assert.deepEqual(presets.map(entry => [entry.name, entry.file]), copied.map(entry => [entry.name, `examples/${entry.file}`]));
   for (const entry of picked) assert.ok(presets.some(listed => listed.file === `examples/${entry.file}`), entry.name);

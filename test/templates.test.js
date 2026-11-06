@@ -222,3 +222,58 @@ test('structural drawing has a deterministic work budget, and cached masses are 
   assert.deepEqual([third.rows, third.fill, third.pivot], [second.rows, second.fill, second.pivot]);
   assert.deepEqual(third.map([3, -2]), second.map([3, -2]));
 });
+
+test('an expanded source cut down to one motion compiles: the other motions\' notes are skipped with a warning', async () => {
+  // compile --expand, then delete every animation but attack and the poses only they use: the motionInfo entries of
+  // the deleted animations used to stop the compile with "poses.motionInfo.idle: unknown or null field".
+  const hero = JSON.parse(await readFile(new URL('../examples/hero.poses.json', import.meta.url), 'utf8'));
+  const expanded = expandPoses(hero), keep = new Set([hero.rig.rest, ...expanded.animations.attack.frames]);
+  const cut = { ...expanded, poses: expanded.poses.filter(pose => keep.has(pose.name)), animations: { attack: expanded.animations.attack } };
+  const others = Object.keys(expanded.motionInfo).filter(name => name !== 'attack'), compiled = compilePoses(cut);
+  assert.ok(others.length > 1);
+  assert.equal(compiled.warnings.length, 1);
+  assert.match(compiled.warnings[0], /^poses\.motionInfo: There are no animations "[^.]*, so their entries were skipped: delete them, or rename them to match renamed animations\.$/);
+  for (const name of others.slice(0, 6)) assert.ok(compiled.warnings[0].includes(`"${name}"`), name);
+  // It compiles exactly as the source with those entries deleted by hand, and attack keeps its notes.
+  const trimmed = compilePoses({ ...cut, motionInfo: { attack: expanded.motionInfo.attack } }), { warnings, ...metadata } = compiled.metadata;
+  assert.equal(trimmed.warnings, undefined);
+  assert.deepEqual(compiled.recipe, trimmed.recipe);
+  assert.deepEqual(metadata, trimmed.metadata);
+  assert.deepEqual(warnings, [{ path: 'poses.motionInfo', message: compiled.warnings[0].slice('poses.motionInfo: '.length) }]);
+  assert.equal(metadata.animations.attack.template, 'attack');
+  // One left over is named at its own path; a key pose no longer in its animation is an error that names it.
+  assert.deepEqual(compilePoses({ ...cut, motionInfo: { attack: expanded.motionInfo.attack, idle: expanded.motionInfo.idle } }).warnings,
+    ['poses.motionInfo.idle: There is no animation "idle", so this entry was skipped: delete it, or rename it to match a renamed animation.']);
+  const stray = { ...cut, motionInfo: { attack: { ...expanded.motionInfo.attack, keyPoses: [...expanded.motionInfo.attack.keyPoses, 'walk-gone'] } } };
+  assert.throws(() => compilePoses(stray), { name: 'PixelError', message: 'poses.motionInfo.attack.keyPoses: "walk-gone" is not in animation attack; remove it from keyPoses, or delete motionInfo.attack' });
+  assert.throws(() => compilePoses({ ...cut, motionInfo: [] }), { message: 'poses.motionInfo: expected an object' });
+  assert.throws(() => compilePoses({ ...cut, motionInfo: { attack: null } }), { message: 'poses.motionInfo.attack: expected an object' });
+});
+
+test('a sword held with a relative angle turns with the forearm through the attack, and the docs say so where agents look', async () => {
+  const source = JSON.parse(await readFile(new URL('../examples/hero-sword.poses.json', import.meta.url), 'utf8'));
+  const turn = degrees => ((degrees % 360) + 360) % 360, compiled = compilePoses(source);
+  assert.equal(compiled.warnings, undefined, 'the blade stays on the canvas');
+  const attack = metadata => metadata.animations.attack.entries.map(({ frame }) => metadata.poses[frame].parts);
+  const held = attack(compiled.metadata);
+  // In every attack pose the blade points 45 degrees anticlockwise of the forearm, so it swings with the arm: back
+  // over the shoulder at the wind-up, level at the strike.
+  for (const parts of held) assert.equal(turn((parts.sword.rotate ?? 0) - parts.nearFore.worldAngle), turn(-45));
+  const swords = held.map(parts => turn(parts.sword.rotate ?? 0));
+  assert.ok(new Set(swords).size >= 3 && Math.max(...swords) - Math.min(...swords) >= 90, `sword angles ${swords}`);
+  // An absolute rotate on the same instance keeps one angle through the whole attack: the mistake the docs warn about.
+  const fixed = structuredClone(source), sword = fixed.poses[0].parts.find(part => part.name === 'sword');
+  delete sword.angle; sword.rotate = -45;
+  assert.deepEqual([...new Set(attack(compilePoses(fixed).metadata).map(parts => turn(parts.sword.rotate ?? 0)))], [turn(-45)]);
+  // The pointer is where an agent adding a held item reads: the rotate paragraph, the skill's Characters section and
+  // the quick start's character line.
+  const text = async file => (await readFile(new URL(`../${file}`, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rotate = (await text('docs/art-workflow.md')).split('\n').find(line => line.startsWith('An instance with `"rotate": 30`'));
+  assert.match(rotate, /`rotate` is an absolute angle/);
+  assert.match(rotate, /relative `angle`/);
+  assert.match(rotate, /examples\/hero-sword\.poses\.json/);
+  assert.doesNotMatch(rotate, /so a held item stays in the hand/);
+  const characters = (await text('skills/pixel-art/SKILL.md')).split('\n## ').find(section => section.startsWith('Characters'));
+  assert.match(characters, /relative `angle`.*hero-sword\.poses\.json/s);
+  assert.match((await text('docs/agent-quick-start.md')).split('\n').find(line => line.includes('examples/hero.poses.json')), /hero-sword\.poses\.json`: the prop's relative `angle` turns it with the arm/);
+});

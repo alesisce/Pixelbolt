@@ -4,6 +4,12 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Smaller frictions for agents
+
+- The presets listing (`pixel_help` topic `presets`, `pixelbolt presets`, `pixelbolt help presets`) is a line per preset, keyed by its name: kind, size, frames (and in how many animations), loop or one-shot, colours and what it is for. 72 presets were 21 KB, read on every effect request; they are now 9 KB. `full: true` (`--full`) gives the listing as before, with each preset's file and every animation's frames. What a lab preset is for no longer repeats its loop or one-shot.
+- A prop held in a hand turns with it only with a relative `angle`; the art workflow said an absolute `rotate` kept "a held item in the hand", so a sword stayed upright through a whole attack. The `rotate` paragraph, the skill's Characters section and the quick start now say so, and `examples/hero-sword.poses.json` is the hero holding a sword at `angle: -45` on the near forearm's end, with idle, walk and attack. A rig holding a grid part lists it in the presets listing ("with sword in hand").
+- An expanded poses source cut down to fewer animations compiles: a `motionInfo` entry whose animation is gone is skipped with a warning that names it, instead of stopping the compile with `poses.motionInfo.idle: unknown or null field`. A key pose that is no longer in its animation is an error that names the pose.
+
 ### Rigid bodies: heavy loads and touching pictures
 
 - A heavy body resting on much lighter ones no longer sinks into them. A body resting on top of one more than ten times lighter is solved as if it weighed ten times the lighter, so a plank 50 times as dense as the balls under it settles at once (it sank in, bounced out and hopped 6 pixels for ever), a box 100 times as dense as the box under it stays on top (it slid off), and a table holds a load 2,000 times as dense as its legs. Hits and shoves keep the true weights: a heavy ball thrown into a pile of light ones ploughs exactly as far as before.

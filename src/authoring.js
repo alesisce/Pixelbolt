@@ -442,19 +442,28 @@ export function compilePoses(source, mode) {
     recipe.symbols = unique;
   }
   const project = describeStampRecipe(recipe);
+  // An expanded source cut down to fewer animations still carries the other motions' notes: those are skipped with a
+  // warning that names them, so cutting an expanded source needs no second edit.
+  const motionInfo = Object.create(null), dropped = [];
   if (source.motionInfo !== undefined) {
-    fields(source.motionInfo, Object.keys(project.animations), 'poses.motionInfo');
+    if (!source.motionInfo || typeof source.motionInfo !== 'object' || Array.isArray(source.motionInfo)) fail('poses.motionInfo', 'expected an object');
     for (const [name, info] of Object.entries(source.motionInfo)) {
+      if (!Object.hasOwn(project.animations, name)) { dropped.push(name); continue; }
       const path = `poses.motionInfo.${name}`; fields(info, ['template', 'speed', 'keyPoses'], path);
       if (!MOTION_TEMPLATES.includes(info.template)) fail(`${path}.template`, 'expected a motion template name');
       if (typeof info.speed !== 'number' || !Number.isFinite(info.speed) || Math.abs(info.speed) > 1024) fail(`${path}.speed`, 'expected pixels per second within ±1024');
       const names = new Set(project.animations[name].frames.map(index => project.frames[index].name));
-      if (!Array.isArray(info.keyPoses) || !info.keyPoses.length || info.keyPoses.length > 256 || new Set(info.keyPoses).size !== info.keyPoses.length || info.keyPoses.some(pose => !names.has(pose))) fail(`${path}.keyPoses`, 'expected unique key-pose names from this animation');
+      if (!Array.isArray(info.keyPoses) || !info.keyPoses.length || info.keyPoses.length > 256 || new Set(info.keyPoses).size !== info.keyPoses.length || info.keyPoses.some(pose => typeof pose !== 'string')) fail(`${path}.keyPoses`, 'expected unique key-pose names from this animation');
+      const missing = info.keyPoses.filter(pose => !names.has(pose));
+      if (missing.length) fail(`${path}.keyPoses`, `${nameList(missing.map(pose => `"${pose}"`))} ${missing.length === 1 ? 'is' : 'are'} not in animation ${name}; remove ${missing.length === 1 ? 'it' : 'them'} from keyPoses, or delete motionInfo.${name}`);
+      motionInfo[name] = info;
     }
   }
+  if (dropped.length === 1) warnings.push({ path: `poses.motionInfo.${dropped[0]}`, message: `There is no animation "${dropped[0]}", so this entry was skipped: delete it, or rename it to match a renamed animation.` });
+  else if (dropped.length) warnings.push({ path: 'poses.motionInfo', message: `There are no animations ${nameList(dropped.map(name => `"${name}"`), 6)}, so their entries were skipped: delete them, or rename them to match renamed animations.` });
   for (const [name, animation] of Object.entries(project.animations)) {
     let start = 0;
-    metadata.animations[name] = { duration: animation.duration, loop: animation.loop, ...(source.motionInfo?.[name] && source.motionInfo[name]), entries: animation.frames.map((index, position) => {
+    metadata.animations[name] = { duration: animation.duration, loop: animation.loop, ...(motionInfo[name] && motionInfo[name]), entries: animation.frames.map((index, position) => {
       const frame = project.frames[index], pose = metadata.poses[frame.name], entry = { position, frame: frame.name, start, duration: frame.duration, markers: pose.markers, ...(pose.contacts !== undefined && { contacts: pose.contacts }) };
       start += frame.duration; return entry;
     }) };

@@ -16,7 +16,7 @@ import { compileWaves } from '../src/wave.js';
 import { compileBodies } from '../src/bodies.js';
 import { decodePNG } from '../src/import.js';
 import { skillFiles } from '../src/skill.js';
-import { presetEntries, listPresets } from '../src/presets.js';
+import { presetEntries, listPresets, briefListing, BRIEF_NOTE } from '../src/presets.js';
 import { decodeGIF } from './fixtures/decode-gif.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), examples = path.join(root, 'examples');
@@ -68,9 +68,33 @@ before(async () => {
 test('the presets listing covers every source and looping recipe in examples/, measured from the files themselves', async t => {
   const directory = await temp(t, 'presets-list'), mcp = session({ directory, root: examples });
   await mcp.init();
-  const { guide, presets } = reply(await mcp.call('pixel_help', { topic: 'presets' }));
+  const { guide, presets } = reply(await mcp.call('pixel_help', { topic: 'presets', full: true }));
+  // What an agent reads by default, on every effect request: a line per preset, from the measurements just kept.
+  const brief = reply(await mcp.call('pixel_help', { topic: 'presets' }));
   const help = (await mcp.tools()).find(tool => tool.name === 'pixel_help');
+  for (const [args, message] of [[{ topic: 'guide', full: true }, /full goes with topic "presets"/], [{ topic: 'presets', full: 'true' }, /expected a boolean/]]) {
+    const refused = await mcp.call('pixel_help', args);
+    assert.equal(refused.isError, true, JSON.stringify(args)); assert.equal(reply(refused).path, 'full'); assert.match(reply(refused).error, message);
+  }
   await mcp.close();
+  // 72 presets were 21 KB in full; a line each, they are under half that. A cap on the whole reply and on each line
+  // keeps a new preset from undoing it.
+  assert.ok(Buffer.byteLength(JSON.stringify(brief)) < 16384, `${Buffer.byteLength(JSON.stringify(brief))} bytes of preset listing`);
+  assert.equal(brief.guide, `${guide} ${BRIEF_NOTE}`);
+  assert.deepEqual(Object.keys(brief.presets), presets.map(entry => entry.name));
+  for (const entry of presets) {
+    const line = brief.presets[entry.name];
+    assert.ok(line.length <= 200, `${entry.name}: ${line.length} characters`);
+    // A preset measured in both listings reads the same facts; one past the budget in either starts with its kind.
+    if (entry.unmeasured || /; not measured/.test(line)) { assert.ok(line.startsWith(`${entry.kind}`), entry.name); continue; }
+    const count = Object.keys(entry.animations).length + (entry.moreAnimations ?? 0);
+    assert.equal(line, `${entry.kind}, ${entry.size}, ${entry.frames} frames${count > 1 ? ` in ${count} animations` : ''}, ${entry.plays}, ${entry.colors} colours. ${entry.for}`);
+    // The line already says loop or one-shot, so what a preset is for doesn't repeat it from a lab's note.
+    assert.doesNotMatch(entry.for, /·\s*(loop|one-shot)\b|\b(loop|one-shot)\s*·/, entry.name);
+  }
+  // A figure holding a prop is listed as one, so an agent asked for a character with a sword finds it.
+  const sword = presets.find(entry => entry.name === 'hero-sword');
+  if (sword && !sword.unmeasured) assert.match(sword.for, /idle, walk, attack, with sword in hand\.$/);
   // The measurements are kept in the export directory for the next listing (presets-cache.test.js), so pixel_help
   // writes files and must not tell clients it is read-only (P-074): some run read-only tools without asking.
   assert.equal((await readdir(path.join(directory, '.presets'))).filter(name => /^[0-9a-f]{64}\.json$/.test(name)).length, 1);
@@ -194,9 +218,14 @@ test('pixel_help returns one preset\'s source with its files inlined, says what 
 });
 
 test('past its time budget the listing names the remaining presets without measuring them', async () => {
-  const { presets, note } = await listPresets({ budget: -1 }), entries = await presetEntries();
+  const listing = await listPresets({ budget: -1 }), { presets, note } = listing, entries = await presetEntries();
   assert.deepEqual(presets, entries.map(entry => ({ name: entry.name, kind: entry.kind, file: `examples/${entry.file}`, unmeasured: true })));
   assert.match(note, new RegExp(`^${entries.length} presets were listed without measuring them`));
+  // A line each, they say so, and the note stays; a preset that fails to compile says why.
+  const brief = briefListing(listing);
+  assert.deepEqual(brief.presets, Object.fromEntries(entries.map(entry => [entry.name, `${entry.kind}; not measured, to keep this call short`])));
+  assert.equal(brief.note, note);
+  assert.deepEqual(briefListing({ guide: 'g', presets: [{ name: 'broken', kind: 'fx', file: 'examples/broken.fx.json', error: 'fx.width: expected 1 to 256' }] }).presets, { broken: 'fx; fails to compile: fx.width: expected 1 to 256' });
 });
 
 test('the standalone skill reaches the presets through the command line and its copied examples', async () => {

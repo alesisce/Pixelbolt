@@ -8,7 +8,7 @@ import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery } from '../src/check.js';
 import { embedBundleRecipe, sameFiles, outputSummary, withRates } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
-import { PRESET_FOLDER, listPresets, findPreset, loadPreset, compilePreset, presetNext } from '../src/presets.js';
+import { PRESET_FOLDER, listPresets, briefListing, findPreset, loadPreset, compilePreset, presetNext } from '../src/presets.js';
 import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, compareProjects, patchRecipe, encodePNG, compilePoses, compileAutotile, compileEffects, compileFluid, compileNormals, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 const HELP = `Pixelbolt — text to pixels, without dependencies
@@ -46,8 +46,8 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
   pixelbolt compile --preset <name> --out recipe.json [--metadata meta.json]
                                            Compile a shipped preset (smoke-puff, campfire, fire-spells, hero...) as
                                            its examples/ file compiles; --expand for a poses preset
-  pixelbolt presets [name]                 List the presets (size, frames, loop, colours, what each is for), or print
-                                           one preset's source to edit
+  pixelbolt presets [name] [--full]        List the presets, a line each (size, frames, loop, colours, what each is
+                                           for; --full adds every animation and file), or print one preset's source
   pixelbolt autotile <template.json> --out recipe.json [--metadata masks.json] [--preview map.png]
                                            Build a 47-tile blob or 16-tile cardinal set from template rows or a
                                            terrain description; --preview draws every tile over a test map
@@ -103,7 +103,7 @@ Checkout: node bin/pixelbolt.js <command>. Portable build folder: .\\pixelbolt (
 function parseArgs(args) {
   const positional = [], options = {};
   for (let i = 0; i < args.length; i++) {
-    if (['--force', '--grid', '--native', '--diagnostics', '--open', '--expand', '--embed-recipe', '--embedded', '--project', '--list-files'].includes(args[i])) options[args[i].slice(2)] = true;
+    if (['--force', '--grid', '--native', '--diagnostics', '--open', '--expand', '--embed-recipe', '--embedded', '--project', '--list-files', '--full'].includes(args[i])) options[args[i].slice(2)] = true;
     else if (['--preset', '--out', '--dir', '--port', '--frames', '--animation', '--region', '--scale', '--background', '--changes', '--image', '--view', '--max-cells', '--metadata', '--selections', '--atlas', '--name', '--layers', '--reference', '--root', '--time-limit', '--fps', '--size', '--align', '--offset', '--loops', '--seconds', '--step', '--fit', '--prefix', '--motion', '--speed', '--ground', '--expect', '--guides', '--time', '--preview'].includes(args[i])) {
       const key = args[i].slice(2);
       if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`--${key} requires a value`);
@@ -197,10 +197,11 @@ const COMPILERS = { 'pixelforge-poses': compilePoses, 'pixelforge-autotile': com
 const summary = (project, recipe) => ({ name: project.name, width: project.width, height: project.height, frames: project.frames.length, animations: Object.keys(project.animations), ...withRates(project, recipe), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }) });
 const referenced = input => input.resolution.files.length ? { resolved: input.resolution.files } : {};
 const engineVersion = async () => JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
-// `presets [name]`, and `help presets` or `help preset <name>`: every preset, or one preset's source. A shell has no
-// time limit, so every preset is measured.
-async function presetsText(name) {
-  if (name === undefined) return JSON.stringify(await listPresets({ budget: Infinity }), null, 2);
+// `presets [name] [--full]`, and `help presets [--full]` or `help preset <name>`: every preset, a line each or in full,
+// or one preset's source. A shell has no time limit, so every preset is measured.
+async function presetsText(name, full = false) {
+  if (name === undefined) { const listing = await listPresets({ budget: Infinity }); return JSON.stringify(full ? listing : briefListing(listing), null, 2); }
+  if (full) throw new Error('--full goes with the listing (pixelbolt presets --full); pixelbolt presets <name> prints one preset\'s source');
   const entry = await findPreset(name, 'name'), { source, inlined } = await loadPreset(entry);
   return JSON.stringify({ name: entry.name, file: `examples/${entry.file}`, ...(inlined.length && { inlined }), next: presetNext(entry, true), source }, null, 2);
 }
@@ -216,8 +217,9 @@ async function helpTopic([topic, ...words]) {
   if (!TOPICS.includes(topic)) throw new Error(`Unknown help topic "${topic}"; topics: quickstart, ${TOPICS.join(', ')}`);
   if (topic === 'presets' || topic === 'preset') {
     if (topic === 'preset' && name === undefined) throw new Error('help preset needs a preset name: pixelbolt help preset smoke-puff (pixelbolt help presets lists them)');
-    if (topic === 'presets' && name !== undefined) throw new Error('help presets lists every preset; for one preset\'s source run pixelbolt help preset <name>');
-    return `${await presetsText(name)}\n`;
+    const full = topic === 'presets' && name === '--full';
+    if (topic === 'presets' && name !== undefined && !full) throw new Error('help presets lists every preset (--full adds every animation and file); for one preset\'s source run pixelbolt help preset <name>');
+    return `${await presetsText(full ? undefined : name, full)}\n`;
   }
   if (name !== undefined && !SECTIONED.has(topic)) throw new Error(`help ${topic} has no sections; only guide and workflow do`);
   return helpText(topic, name, 'cli');
@@ -233,7 +235,7 @@ try {
     const allowed = { init: ['force'], validate: ['fps'], inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'guides'], patch: ['changes', 'out', 'image', 'force'], render: ['out', 'force', 'expect', 'animation', 'list-files'], gif: ['out', 'animation', 'scale', 'background', 'force'], 'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'], sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'], preview: ['port', 'open'], mcp: ['out', 'root', 'time-limit'], schema: [], compile: ['out', 'metadata', 'preview', 'force'], autotile: ['out', 'metadata', 'preview', 'force'], scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files'], overlay: ['changes', 'selections', 'out', 'force'], import: ['out', 'name', 'atlas', 'metadata', 'force'] };
     allowed.inspect.push('motion', 'speed', 'ground', 'metadata');
     allowed.compile.push('expand', 'preset');
-    allowed.presets = [];
+    allowed.presets = ['full'];
     allowed.share = [];
     allowed.skill = ['project', 'dir', 'force'];
     allowed.render.push('embed-recipe'); allowed.scene.push('embed-recipe'); allowed.import.push('embedded');
@@ -257,7 +259,7 @@ try {
       console.log(JSON.stringify({ ok: true, file }));
     } else if (command === 'schema') process.stdout.write(await readFile(new URL('../schema.json', import.meta.url), 'utf8'));
     else if (command === 'presets') {
-      console.log(await presetsText(positional[0]));
+      console.log(await presetsText(positional[0], options.full === true));
     } else if (command === 'skill') {
       if (positional[0] !== 'install') throw new Error('Usage: pixelbolt skill install [--project | --dir <skills folder>] [--force]');
       const { installSkill } = await import('../src/skill.js');

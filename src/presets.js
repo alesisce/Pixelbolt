@@ -94,17 +94,26 @@ const plays = animations => {
   return loops === animations.length ? 'loop' : loops ? 'loops and one-shots' : 'one-shot';
 };
 const listNames = names => names.length <= 6 ? names.join(', ') : `${names.slice(0, 6).join(', ')} and ${names.length - 6} more`;
+// A lab's title and note ("Campfire", "gas · loop"), without the loop or one-shot the listing already gives.
+const titleLine = ({ title, note }) => {
+  const kept = note.split('·').map(part => part.trim()).filter(part => part && !/^(loop|one-shot)$/i.test(part)).join(' · ');
+  return kept ? `${title}: ${kept.toLowerCase()}.` : `${title}.`;
+};
 function about(entry, source, animations) {
   const titled = TITLES.get(`${entry.kind}:${entry.base}`), names = animations.map(([name]) => name);
   if (entry.kind === 'fluid') {
     const liquid = Object.values(source.effects ?? {}).some(effect => effect?.kind === 'liquid');
     const kind = liquid ? 'A simulated liquid, not a character.' : 'A simulated gas.';
-    return titled ? `${titled.title}: ${titled.note.toLowerCase()}.${liquid ? ` ${kind}` : ''}` : kind;
+    return titled ? `${titleLine(titled)}${liquid ? ' A liquid, not a character.' : ''}` : kind;
   }
-  if (titled) return `${titled.title}: ${titled.note.toLowerCase()}.`;
+  if (titled) return titleLine(titled);
   if (entry.kind === 'poses') {
     const templates = [...new Set(Object.values(source.motions ?? {}).map(motion => motion?.template).filter(Boolean))];
-    return templates.length ? `A rig whose motion templates make ${listNames(templates)}.` : `Posed parts: ${listNames(names)}.`;
+    // A grid part attached to the last bone of a rig arm in the rest pose is held: a figure with a sword lists as one.
+    const hands = new Set((Array.isArray(source.rig?.arms) ? source.rig.arms : []).filter(Array.isArray).map(chain => chain.at(-1)).filter(name => typeof name === 'string'));
+    const rest = Array.isArray(source.poses) ? source.poses.find(pose => pose?.name === source.rig?.rest) : undefined;
+    const held = (Array.isArray(rest?.parts) ? rest.parts : []).filter(part => hands.has(part?.attach?.part) && source.parts?.[part.part]?.rows).map(part => part.name);
+    return templates.length ? `A rig whose motion templates make ${listNames(templates)}${held.length ? `, with ${listNames(held)} in hand` : ''}.` : `Posed parts: ${listNames(names)}.`;
   }
   if (entry.kind === 'fx') return `Particles and effect shapes: ${listNames(names)}.`;
   if (entry.kind === 'wave') return `A looping wave pattern: ${listNames(names)}.`;
@@ -237,6 +246,20 @@ export async function listPresets({ budget = 20000, cache, concurrency = Math.ma
   // Only presets in this listing are kept, so the file never grows past the folder.
   if (store && (added || Object.keys(kept).length !== Object.keys(store.cached).length)) await store.save(kept).catch(() => {});
   return { guide: PRESET_GUIDE, presets, ...(unmeasured && { note: `${unmeasured} presets were listed without measuring them, to keep this call short; pixel_compile one by name to see it.` }) };
+}
+
+// What pixel_help topic presets and `pixelbolt presets` return unless asked for the full listing: one line per preset,
+// keyed by its name, with the facts an agent compares with a request and what the preset is for. The full listing
+// (the file and every animation's frames) was 21 KB for 72 presets, read on every effect request.
+export const BRIEF_NOTE = 'Each preset reads: kind, size, frames (in how many animations, when more than one), loop or one-shot, colours, then what it is for. pixel_help {"topic": "presets", "full": true} (pixelbolt presets --full) adds each preset\'s file and every animation\'s frames.';
+export function briefListing({ guide, presets, note }) {
+  const line = entry => {
+    if (entry.error !== undefined) return `${entry.kind}; fails to compile: ${entry.error}`;
+    if (entry.unmeasured) return `${entry.kind}; not measured, to keep this call short`;
+    const count = Object.keys(entry.animations).length + (entry.moreAnimations ?? 0);
+    return `${entry.kind}, ${entry.size}, ${entry.frames} frames${count > 1 ? ` in ${count} animations` : ''}, ${entry.plays}, ${entry.colors} colours. ${entry.for}`;
+  };
+  return { guide: `${guide} ${BRIEF_NOTE}`, presets: Object.fromEntries(presets.map(entry => [entry.name, line(entry)])), ...(note && { note }) };
 }
 
 async function parallelSummaries(entries, store, deadline, concurrency) {

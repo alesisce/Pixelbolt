@@ -277,3 +277,40 @@ test('a sword held with a relative angle turns with the forearm through the atta
   assert.match(characters, /relative `angle`.*hero-sword\.poses\.json/s);
   assert.match((await text('docs/agent-quick-start.md')).split('\n').find(line => line.includes('examples/hero.poses.json')), /hero-sword\.poses\.json`: the prop's relative `angle` turns it with the arm/);
 });
+
+test('a tail follows through: it trails in a run, further than in a walk, lifts as a jump falls, whips past rest after a strike and settles round a loop', () => {
+  // The plain humanoid's scarf hangs down and back from the nape (facing right): a larger relative angle trails it
+  // further back, or lifts it.
+  const swings = source => {
+    const expanded = expandPoses(source), rest = Object.fromEntries(source.poses[0].parts.map(part => [part.name, part.angle]));
+    return name => expanded.poses.find(pose => pose.name === name).parts.filter(part => source.rig.tail.includes(part.name)).map(part => part.angle - rest[part.name]);
+  };
+  const swing = swings(plainRig()), root = name => swing(name)[0], mean = names => names.reduce((sum, name) => sum + root(name), 0) / names.length;
+  const motion = (prefix, count) => expandPoses(plainRig()).poses.filter(pose => pose.name.startsWith(`${prefix}-`)).map(pose => pose.name).slice(0, count);
+  const walk = mean(motion('walk')), run = mean(motion('run'));
+  assert.ok(walk > 8 && run > walk + 3, `the scarf trails ${walk}° in the walk and ${run}° in the run`);
+  assert.ok(root('jump-fall') >= root('jump-apex') + 30 && root('jump-fall') >= 30, `it lifts as the body falls: apex ${root('jump-apex')}°, fall ${root('jump-fall')}°`);
+  assert.ok(root('jump-rise') < 0 && root('jump-land') < root('jump-fall'), 'it is pulled down as the body rises and drops on landing');
+  assert.ok(root('attack-strike') > 0 && root('attack-follow-through') <= root('attack-strike') - 15 && root('attack-recover') < 0,
+    `a strike flings it back and it whips through past rest: ${['strike', 'follow-through', 'recover'].map(name => root(`attack-${name}`))}`);
+  assert.ok(motion('idle').every(name => Math.abs(root(name)) <= 15), 'an idle sways it gently');
+  // A loop is run round until it repeats, so its first frame follows its last as any frame follows the one before.
+  for (const prefix of ['idle', 'walk', 'run']) {
+    const angles = motion(prefix).map(root), steps = angles.map((angle, i) => Math.abs(angles[(i + 1) % angles.length] - angle));
+    assert.ok(steps.at(-1) <= Math.max(...steps.slice(0, -1)), `${prefix} seam ${steps.at(-1)}° against ${steps.slice(0, -1)}`);
+  }
+  // A link lags the one it hangs from: at the strike the root has swung back and the tip still bends forward.
+  assert.ok(swing('attack-strike')[1] < swing('attack-strike')[0], `tip ${swing('attack-strike')[1]}° against root ${swing('attack-strike')[0]}°`);
+  // follow scales the swing: 0 holds the tail as drawn, 2 trails it further.
+  const held = plainRig(), loose = plainRig();
+  for (const motion of Object.values(held.motions)) motion.follow = 0;
+  for (const motion of Object.values(loose.motions)) motion.follow = 2;
+  const still = swings(held), wide = swings(loose);
+  assert.ok(expandPoses(held).poses.slice(1).every(pose => still(pose.name).every(degrees => degrees === 0)));
+  assert.ok(motion('run').reduce((sum, name) => sum + wide(name)[0], 0) / motion('run').length > run * 1.5);
+  const bare = plainRig(); delete bare.rig.tail;
+  bare.motions.run.follow = 1;
+  assert.throws(() => expandPoses(bare), /^PixelError: poses\.motions\.run\.follow: follow swings the tail; name its instances in rig\.tail$/);
+  loose.motions.run.follow = 3;
+  assert.throws(() => expandPoses(loose), /poses\.motions\.run\.follow: expected a number from 0 to 2/);
+});

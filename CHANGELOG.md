@@ -4,6 +4,15 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Tails that follow through
+
+- Motion templates move `rig.tail` with the body instead of one fixed sway. Each tail instance hangs from its attach point on a damped spring that holds its rest angle against gravity, and the attach point's own motion swings it: the starts and stops of the body, gravity as the body leans or turns, and the air the figure moves through. A link on another tail link hangs from that link's moving end, so it lags the one before it.
+- In a walk or run the tail trails behind the body, further at a higher `speed`, and flutters with the bob. In a jump it is pulled down as the body rises, lifts as it falls, drops on landing and settles. An attack flings it back and it whips through past rest; a hurt flicks it with the recoil. An idle sways it in a light breeze. The hero's scarf does all of this.
+- Loops are run round until they repeat, so the first frame follows the last; one-shots start from the rest pose. Each drawing shows the tail halfway through the time it is shown, so a held strike shows its swing. The units are the figure's own, so a rig drawn twice as large moves the same and a long cape swings slower than a short scarf. A tail never swings into the figure: where it would lie on the body more than at rest, it eases back toward its rest angles, judged by the pose's own pixels.
+- An idle's breeze starts with the loop unless the tail's step across the loop's seam would then be its largest; then the breeze is timed so the seam passes the motion review's loop check while the tail still moves at every step.
+- Every template takes `follow` (0–2, default 1): how far the tail swings. 0 holds it as drawn; 2 swings it twice as far. It needs `rig.tail`.
+- Every hero, sword hero and figure-fixture motion still passes the motion review. Expanding the hero rig takes about 4 ms longer.
+
 ### Four-legged creatures
 
 - The motion templates animate four-legged side-view animals. A rig names its front legs in `rig.fore` and its back legs in `rig.hind` (each the near chain, then the far one) instead of `legs`, with an optional `rig.chest`, a bone on the body mass that the fore legs hang from, and `rig.neck`, a bone the head hangs from. A fore leg's solved joint folds forward as its foot lifts (the wrist) and back under weight (the elbow); a hind leg's folds back (the hock).

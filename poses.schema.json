@@ -202,6 +202,12 @@
                 "minimum": 1,
                 "maximum": 60000
               },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
+              },
               "speed": {
                 "type": "number",
                 "minimum": -1024,
@@ -255,6 +261,12 @@
                 "minimum": 1,
                 "maximum": 60000
               },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
+              },
               "speed": {
                 "type": "number",
                 "minimum": -1024,
@@ -306,6 +318,12 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 60000
+              },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
               },
               "speed": {
                 "type": "number",
@@ -364,6 +382,12 @@
                 "minimum": 1,
                 "maximum": 60000
               },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
+              },
               "breath": {
                 "type": "number",
                 "minimum": 0,
@@ -394,6 +418,12 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 60000
+              },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
               },
               "crouch": {
                 "type": "number",
@@ -429,6 +459,12 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 60000
+              },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
               },
               "arm": {
                 "type": "integer",
@@ -469,6 +505,12 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 60000
+              },
+              "follow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail."
               },
               "recoil": {
                 "type": "integer",

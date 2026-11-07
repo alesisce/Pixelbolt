@@ -161,14 +161,15 @@ export function expandMotions(input, compileRest, probeJoints) {
     const hand = subtree(rest.parts.filter(p => p.attach?.part === chain.at(-1)).map(p => p.name));
     return { chain, hand, arm: new Set([...subtree([chain[0]])].filter(name => !hand.has(name))) };
   });
-  // Which instance draws each pixel of a pose, as the compiler draws it.
-  const owners = pose => {
-    const { recipe } = compileRest({ ...checkSource, poses: [pose], animations: { check: { frames: [pose.name], loop: false } } }), owner = new Map();
+  // Every pixel each instance of a pose draws, in drawing order, as the compiler draws it.
+  const drawing = (pose, visit) => {
+    const { recipe } = compileRest({ ...checkSource, poses: [pose], animations: { check: { frames: [pose.name], loop: false } } });
     for (const layer of recipe.frames[0].layers) for (const op of layer.ops) recipe.symbols[op.symbol].forEach((row, y) => {
-      for (let x = 0; x < row.length; x++) if (row[x] !== '.' && row[x] !== ' ') owner.set(`${op.flipX ? op.x + row.length - 1 - x : op.x + x},${op.y + y}`, layer.name);
+      for (let x = 0; x < row.length; x++) if (row[x] !== '.' && row[x] !== ' ') visit(`${op.flipX ? op.x + row.length - 1 - x : op.x + x},${op.y + y}`, layer.name);
     });
-    return owner;
   };
+  // Which instance draws each pixel of a pose: the last to draw it.
+  const owners = pose => { const owner = new Map(); drawing(pose, (at, name) => owner.set(at, name)); return owner; };
   // A hand that shows while all of its arm is hidden behind the body floats beside it, as a far hand does when its arm
   // swings forward behind the chest. There the elbow bends further, 15° at a time up to 60°, which brings the hand up
   // with its forearm out in front, or tucks it away; failing that it straightens a little (a runner's bent arm near
@@ -190,6 +191,24 @@ export function expandMotions(input, compileRest, probeJoints) {
       [shoulder.angle, elbow.angle] = fix;
     }
   };
+  // A probe of the named instances of a pose and every part they hang from: where each is placed and turned.
+  const probeParts = (pose, wanted) => {
+    const byName = new Map(pose.parts.map(p => [p.name, p])), needed = new Set();
+    for (const start of wanted) for (let name = start; name && !needed.has(name); name = byName.get(name)?.attach?.part) needed.add(name);
+    const probe = { name: pose.name, origin: pose.origin, parts: pose.parts.filter(p => needed.has(p.name)) };
+    const probeDefinitions = Object.fromEntries([...new Set(probe.parts.map(p => p.part))].map(name => [name, source.parts[name]]));
+    return probeJoints({ ...checkSource, parts: probeDefinitions, poses: [probe], animations: { check: { frames: [pose.name], loop: false } } }).metadata.poses[pose.name].parts;
+  };
+  // How much of the tail's drawing lies on the rest of the figure, over or under it: a share of the tail's pixels.
+  const tailSet = new Set(rig.tail ?? []);
+  const tailCover = pose => {
+    const tail = new Set(), figure = new Set();
+    drawing(pose, (at, name) => (tailSet.has(name) ? tail : figure).add(at));
+    let shared = 0;
+    for (const at of tail) if (figure.has(at)) shared++;
+    return tail.size ? shared / tail.size : 0;
+  };
+  const tails = tailRig(rig, { instances, restData, restAngle, source, owners, rest, tailCover });
   const generated = [], animations = { ...(source.animations ?? {}) }, motionInfo = {}, groundedPoses = new Map();
   for (const [name, motion] of Object.entries(source.motions)) {
     const path = `poses.motions.${name}`; id(name, path);
@@ -198,8 +217,11 @@ export function expandMotions(input, compileRest, probeJoints) {
     const gait = ['speed', 'stride', 'lift', 'bob', 'lean', 'swapDepth'];
     const fields = { walk: gait, trot: gait, run: [...gait, ...(quad ? ['flex'] : [])], idle: ['breath', 'squash'], jump: ['crouch', 'stretch', 'apex'], attack: ['arm', 'windup', 'strike', 'hold'], hurt: ['recoil', 'squash'] };
     if (template === 'run' && !quad && motion.flex !== undefined) fail(`${path}.flex`, 'flex bends a four-legged spine in its gallop; this rig has no rig.fore and rig.hind');
-    object(motion, ['template', 'frames', 'duration', ...fields[template]], path);
+    object(motion, ['template', 'frames', 'duration', 'follow', ...fields[template]], path);
     const p = (key, fallback, lo, hi, integer = false) => number(motion[key], fallback, lo, hi, `${path}.${key}`, integer);
+    // How far the tail swings from its rest angles as it follows through: 0 holds it as drawn, 2 swings it twice as far.
+    const follow = p('follow', 1, 0, 2);
+    if (motion.follow !== undefined && !tails) fail(`${path}.follow`, 'follow swings the tail; name its instances in rig.tail');
     const duration = p('duration', template === 'idle' ? 200 : 80, 1, 60000, true);
     const locomotion = template === 'walk' || template === 'run' || template === 'trot';
     if (template === 'trot' && !quad) fail(`${path}.template`, 'trot is a four-legged gait: name the legs in rig.fore and rig.hind');
@@ -221,9 +243,9 @@ export function expandMotions(input, compileRest, probeJoints) {
     const grounded = template === 'idle' && motion.squash !== undefined, squashBy = grounded ? p('squash', 0, .05, .5) : 0;
     if (grounded && motion.breath !== undefined) fail(`${path}.squash`, 'choose breath or squash, not both: breath squashes the body about its centre, squash keeps its base on rig.ground');
     if (grounded && legs.length) fail(`${path}.squash`, 'squash sits the body on rig.ground, but this rig stands on its legs; use breath');
-    // The head bob and tail sway move their instance after grounding, so the body can't also play either role.
+    // The head bob and the tail's swing move their instances after grounding, so the body can't also play either role.
     if (grounded && rig.head === rig.body) fail('poses.rig.head', `the grounded idle "${name}" keeps the body on rig.ground, so the body can't also be the head, whose bob would lift it; name another instance or leave head out`);
-    if (grounded) (rig.tail ?? []).forEach((tail, i) => { if (tail === rig.body) fail(`poses.rig.tail[${i}]`, `the grounded idle "${name}" keeps the body on rig.ground, so the body can't also be part of the tail, whose sway would turn it off the ground`); });
+    if (grounded) (rig.tail ?? []).forEach((tail, i) => { if (tail === rig.body) fail(`poses.rig.tail[${i}]`, `the grounded idle "${name}" keeps the body on rig.ground, so the body can't also be part of the tail, whose swing would turn it off the ground`); });
     const crouch = template === 'jump' ? p('crouch', .8, .5, 1) : 1, stretch = template === 'jump' ? p('stretch', 1.15, 1, 2) : 1, apex = template === 'jump' ? p('apex', 4, 1, 32, true) : 0;
     const arm = template === 'attack' ? p('arm', 0, 0, (rig.arms?.length ?? 0) - 1, true) : 0;
     const windup = template === 'attack' ? p('windup', -130, -360, 360, true) : 0, strike = template === 'attack' ? p('strike', 50, -360, 360, true) : 0;
@@ -360,7 +382,6 @@ export function expandMotions(input, compileRest, probeJoints) {
         torso.at[1] += rig.ground - (pose.origin[1] + torso.at[1] + raster.rows.findLastIndex(row => /[^.]/.test(row)) - raster.pivot[1]);
       }
       if (rig.head && template === 'idle') { const head = parts.get(rig.head); head.at = [...(head.at ?? [0, 0])]; head.at[1] -= Math.round(sinDeg(angle)); }
-      for (const [j, tail] of (rig.tail ?? []).entries()) setAngle(parts.get(tail), restAngle(tail) + 10 * sinDeg(angle - j * 25));
       // Arms swing against the legs: the arm on the leading leg's side is furthest back when the legs are furthest
       // apart, and the arms pass the body when the legs do. An elbow bends as its arm comes forward; a runner's stays
       // bent.
@@ -420,13 +441,7 @@ export function expandMotions(input, compileRest, probeJoints) {
     // A bob or lean must never lift a hip beyond its leg: a planted foot that misses its target floats and slides.
     // sink finds how far a pose must sink: at most four pixels, while that reduces its planted feet's miss.
     // Only the chosen leg chains and what they hang from decide where their feet land; place compiles just those.
-    const place = (pose, chosen) => {
-      const byName = new Map(pose.parts.map(p => [p.name, p])), needed = new Set();
-      for (const leg of chosen) for (let name = leg.last; name && !needed.has(name); name = byName.get(name)?.attach?.part) needed.add(name);
-      const probe = { name: pose.name, origin: pose.origin, parts: pose.parts.filter(p => needed.has(p.name)) };
-      const probeParts = Object.fromEntries([...new Set(probe.parts.map(p => p.part))].map(name => [name, source.parts[name]]));
-      return probeJoints({ ...checkSource, parts: probeParts, poses: [probe], animations: { check: { frames: [pose.name], loop: false } } }).metadata.poses[pose.name].parts;
-    };
+    const place = (pose, chosen) => probeParts(pose, chosen.map(leg => leg.last));
     const sink = pose => {
       const plantedLegs = legs.filter(leg => pose.contacts.includes(leg.marker));
       if (!plantedLegs.length) return 0;
@@ -456,6 +471,7 @@ export function expandMotions(input, compileRest, probeJoints) {
       for (const leg of lifted) if (placed[leg.last].reach?.unreachable && placed[leg.last].reach.error <= 2) pose.parts.find(p => p.name === leg.last).reach = [...placed[leg.last].joints.end];
     };
     const motionPoses = generated.slice(-count);
+    let lowered = 0;
     if (locomotion) {
       // A walking or running body rides its legs: each pose sinks only as far as its planted feet need, so a planted
       // leg is long under the body and at a contact both legs are nearly straight. The bob is then the dip just after
@@ -468,14 +484,15 @@ export function expandMotions(input, compileRest, probeJoints) {
       // The other templates lower every pose by the deepest sink, so the motion keeps its shape and no frame dips alone.
       // A foot in the air keeps its target, which never lies below rig.ground. A four-legged body pitches as it jumps,
       // carrying its hips and shoulders away from where its feet were aimed, so its lifted feet are aimed as in a run.
-      const depth = Math.max(...motionPoses.map(sink));
-      if (depth) for (const pose of motionPoses) pose.origin[1] += depth;
+      lowered = Math.max(...motionPoses.map(sink));
+      if (lowered) for (const pose of motionPoses) pose.origin[1] += lowered;
       if (quad && template === 'jump') motionPoses.forEach(aimLifted);
     }
+    const playback = template === 'attack' ? [names[0], ...Array(hold).fill(names[1]), ...names.slice(2)] : names, loop = locomotion || template === 'idle';
+    if (tails) followTails(tails, motionPoses, { playback, loop, duration, speed, template, follow, lowered, probeParts });
     if (locomotion || template === 'jump') for (const pose of motionPoses) attachHands(pose, direction);
     if (Object.hasOwn(animations, name)) fail(`${path}`, 'the generated animation name is already authored; choose another motion name');
-    const playback = template === 'attack' ? [names[0], ...Array(hold).fill(names[1]), ...names.slice(2)] : names;
-    animations[name] = { frames: playback, loop: locomotion || template === 'idle' };
+    animations[name] = { frames: playback, loop };
     motionInfo[name] = { template, speed, keyPoses: keyIndices.map(i => names[i]) };
   }
   const authored = new Map();
@@ -502,4 +519,211 @@ export function expandMotions(input, compileRest, probeJoints) {
   source.animations = animations; source.motionInfo = motionInfo; delete source.motions;
   if (source.poses.length > 256) fail('poses.motions', 'expanded source exceeds 256 poses');
   return source;
+}
+
+// Tails follow through. Each rig.tail instance is a rod hung from its attach point on a damped spring that holds its
+// rest angle, relative to what it hangs from, so a still figure's tail hangs exactly as drawn. The attach point's
+// motion turns it: when the body sets off, stops or falls, the rod's inertia and the air acting on it turn it about the
+// attach point, and the spring brings it back. A link on another tail link hangs from that link's moving end, so each
+// link lags the one before it. A walk or run carries the figure through still air at its speed, so the tail trails,
+// further the faster it goes, and flutters with the bob; a body falling through the air lifts it and a landing drops
+// it; a strike flings it back and it whips through past rest. When the body leans or turns, gravity keeps the tail
+// hanging a little nearer to where it hung.
+//
+// Units are the figure's own: gravity is in body heights a second² (rig.ground to the top of the rest drawing) and a
+// link's spring is set against gravity over its own length, so a rig drawn twice as large moves the same and a long
+// cape swings slower than a short scarf. The poses are keys on one smooth path that never overshoots them (it holds
+// still where the body holds or turns back), so the body's whole-pixel steps don't jolt the tail. Each drawing shows
+// the tail as it is halfway through the time the drawing is shown. Angles are degrees, clockwise; the spring is stepped
+// in fixed substeps with only + − × ÷, sqrt and craft trigonometry, and rounded to whole degrees once, at the end. A
+// loop's cycle runs again until it repeats, so its first frame follows its last; a one-shot starts a frame before its
+// first, from the rest pose, still.
+const TAIL = Object.freeze({
+  gravity: 12, // body heights a second²
+  drag: 18, // per second: how quickly still air would bring a link to rest
+  inertia: .4, // the share of its attach point's starts and stops a link feels (a rigid rod feels them all)
+  stiffness: 2.5, // the spring's pull, against the most turn gravity gives the link held level
+  damping: .3, // of critical damping, against turning relative to what the link hangs from
+  spin: .3, // the air's drag on a link's own turning, as a share of drag
+  bend: 25, // degrees a link bends from the link it hangs from before its spring stiffens
+  breeze: .3, // an idle's breeze, body heights a second
+  cover: .2, // the share of its pixels more than at rest that a tail may lay on the figure
+  inward: 5, // degrees a link may turn toward the figure before its pixels are checked
+  step: 4, // milliseconds per substep at most
+  passes: 64 // a loop's cycles at most, while it settles
+});
+const RADIAN = 180 / Math.PI;
+const wrapDegrees = v => ((v + 180) % 360 + 360) % 360 - 180;
+
+// The tail links of a rig with their rest geometry, parents first, or null when the rig has none. tailCover measures
+// how much of a pose's tail lies on the rest of its figure.
+function tailRig(rig, { instances, restData, restAngle, source, owners, rest, tailCover }) {
+  const names = [...new Set(rig.tail ?? [])];
+  if (!names.length) return null;
+  const set = new Set(names), order = [];
+  while (order.length < names.length) for (const name of names) {
+    const parent = instances.get(name).attach?.part;
+    if (!order.includes(name) && (!set.has(parent) || order.includes(parent))) order.push(name);
+  }
+  let top = rig.ground;
+  for (const at of owners(rest).keys()) top = Math.min(top, Number(at.split(',')[1]));
+  const height = Math.max(8, rig.ground - top + 1);
+  // How far a part reaches from its anchor: a bone's length, a grid's farthest drawn pixel, half a mass's size.
+  const reach = definition => {
+    if (definition.bone) return definition.bone.length;
+    if (definition.mass) return Math.max(...definition.mass.size) / 2;
+    const [ax, ay] = definition.anchor ?? [0, 0];
+    let far = 0;
+    definition.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] !== '.' && row[x] !== ' ') far = Math.max(far, (x - ax) * (x - ax) + (y - ay) * (y - ay)); });
+    return Math.sqrt(far);
+  };
+  const links = order.map(name => {
+    const instance = instances.get(name), placed = restData.parts[name], host = instance.attach?.part ?? null, parent = set.has(host) ? host : null;
+    return { name, host, parent: parent ? order.indexOf(parent) : -1, rel: restAngle(name), world: placed.rotate ?? 0, length: Math.max(1, reach(source.parts[instance.part])),
+      offset: parent && [placed.anchor[0] - restData.parts[parent].anchor[0], placed.anchor[1] - restData.parts[parent].anchor[1]],
+      restAnchor: placed.anchor, restHost: restData.parts[host]?.rotate ?? 0 };
+  });
+  // Which way each link hung from the figure turns toward it: the way that lays more of the tail on it.
+  for (const link of links.filter(l => l.parent < 0)) {
+    const turned = by => {
+      const pose = structuredClone(rest), part = pose.parts.find(p => p.name === link.name);
+      delete part.rotate; part.angle = wrapDegrees(Math.round(link.rel + by));
+      return tailCover(pose);
+    };
+    const out = turned(20), back = turned(-20);
+    link.inward = out > back ? 1 : back > out ? -1 : 0;
+  }
+  return { links, gravity: TAIL.gravity * height, height, cover: tailCover, restCover: tailCover(rest) };
+}
+
+// Tangents of a smooth path through evenly spaced keys that never overshoots them (Steffen's monotone cubic): flat
+// where the motion holds or turns back. `steps[k]` is the change from key k to the next; a loop's last step returns to
+// the first key. A one-shot's path starts and ends still.
+function tangents(steps, loop) {
+  const count = loop ? steps.length : steps.length + 1, sign = v => v > 0 ? 1 : v < 0 ? -1 : 0;
+  return Array.from({ length: count }, (_, k) => {
+    if (!loop && (k === 0 || k === count - 1)) return 0;
+    const a = steps[(k - 1 + steps.length) % steps.length], b = steps[k % steps.length];
+    return (sign(a) + sign(b)) * Math.min(Math.abs(a), Math.abs(b), Math.abs(a + b) / 4);
+  });
+}
+
+// Turns each tail link of a motion's poses, once they have sunk onto their legs, to where its spring has carried it.
+// `playback` is the motion's displayed frames (a held strike repeats), each `duration` ms; `follow` scales every link's
+// swing from its rest angle (0 holds the tail as drawn); `lowered` is how far a one-shot's poses sank.
+function followTails({ links, gravity, height, cover, restCover }, poses, { playback, loop, duration, speed, template, follow, lowered, probeParts }) {
+  const roots = links.filter(l => l.parent < 0), byPose = new Map(poses.map(pose => [pose.name, pose]));
+  const setAngles = (pose, angles) => links.forEach((link, i) => setAngleOf(pose.parts.find(p => p.name === link.name), angles[i]));
+  if (!follow) { for (const pose of poses) setAngles(pose, links.map(l => wrapDegrees(Math.round(l.rel)))); return; }
+  const keyOf = new Map(poses.map(pose => {
+    const placed = probeParts(pose, roots.map(l => l.name));
+    return [pose.name, roots.map(l => ({ at: placed[l.name].anchor, host: placed[l.host]?.rotate ?? 0 }))];
+  }));
+  const restKey = roots.map(l => ({ at: [l.restAnchor[0], l.restAnchor[1] + lowered], host: l.restHost }));
+  // What a root link hangs from turns from key to key the short way, never round past 0°.
+  const keys = (loop ? playback.map(name => keyOf.get(name)) : [restKey, ...playback.map(name => keyOf.get(name)), keyOf.get(playback.at(-1))]).map(key => key.map(at => ({ ...at })));
+  for (let j = 1; j < keys.length; j++) keys[j].forEach((at, r) => { at.host = keys[j - 1][r].host + wrapDegrees(at.host - keys[j - 1][r].host); });
+  const shown = loop ? playback : [null, ...playback, null], seconds = duration / 1000, steps = Math.max(1, Math.ceil(duration / TAIL.step)), h = seconds / steps;
+  const travel = speed * seconds, period = playback.length * seconds;
+  // Each root link's attach point, carried on by the walk's travel, and the angle of what it hangs from, along the path.
+  const paths = roots.map((_, r) => {
+    const d = [[], [], []];
+    for (let j = 0; j < (loop ? keys.length : keys.length - 1); j++) {
+      const a = keys[j][r], b = keys[(j + 1) % keys.length][r];
+      d[0].push(b.at[0] - a.at[0] + (loop ? travel : 0)); d[1].push(b.at[1] - a.at[1]); d[2].push(wrapDegrees(b.host - a.host));
+    }
+    return { d, m: d.map(change => tangents(change, loop)) };
+  });
+  const along = (r, j, u) => {
+    const { d, m } = paths[r], next = (j + 1) % m[0].length;
+    const rate = c => ((3 * u * u - 4 * u + 1) * m[c][j] + (6 * u - 6 * u * u) * d[c][j] + (3 * u * u - 2 * u) * m[c][next]) / seconds;
+    return { v: [rate(0), rate(1)], spin: rate(2), host: keys[j][r].host + (u * u * u - 2 * u * u + u) * m[2][j] + (3 * u * u - 2 * u * u * u) * d[2][j] + (u * u * u - u * u) * m[2][next] };
+  };
+  const omega = links.map(l => Math.sqrt(TAIL.stiffness * 1.5 * gravity / l.length)), turnOf = links.map(l => RADIAN * 1.5 / l.length);
+  const breeze = template === 'idle' ? TAIL.breeze * height : 0;
+  // The substep halfway through each drawing's time on screen (a held strike's whole hold).
+  const takeAt = new Map();
+  for (let j = 0; j < keys.length; j++) if (shown[j] !== null && shown[j] !== shown[j - 1] && ![...takeAt.values()].includes(shown[j])) {
+    let run = 1;
+    while (shown[j + run] === shown[j]) run++;
+    takeAt.set(j * steps + Math.round(run * steps / 2), shown[j]);
+  }
+  // The drawn angles of every link in each pose, the breeze timed `phase` degrees into its cycle.
+  const simulate = phase => {
+    const state = links.map(l => ({ angle: l.world, spin: 0, v: [0, 0] })), samples = new Map();
+    if (loop) links.forEach((l, i) => {
+      const r = roots.indexOf(l);
+      state[i].angle = (r >= 0 ? keys[0][r].host : state[l.parent].angle) + l.rel;
+      if (r >= 0) state[i].v = along(r, keys.length - 1, 1).v;
+    });
+    // One pass over the keys: segment j runs from key j to the next (in a loop, the last returns to the first).
+    const pass = record => {
+      for (let j = 0, substep = 0; j < keys.length - (loop ? 0 : 1); j++) for (let n = 0; n < steps; n++) {
+        const u = (n + 1) / steps, wind = breeze * sinDeg(phase + 360 * (j * steps + n + 1) * h / period);
+        for (const [i, link] of links.entries()) {
+          const s = state[i];
+          let v, base, baseSpin;
+          if (link.parent < 0) ({ v, host: base, spin: baseSpin } = along(roots.indexOf(link), j, u));
+          else {
+            // The parent link's end turns with it: its speed is the parent's attach point's plus that turn.
+            const p = state[link.parent], turn = p.angle - links[link.parent].world, c = cosDeg(turn), sn = sinDeg(turn), w = p.spin / RADIAN;
+            const ox = c * link.offset[0] - sn * link.offset[1], oy = sn * link.offset[0] + c * link.offset[1];
+            v = [p.v[0] - w * oy, p.v[1] + w * ox]; base = p.angle; baseSpin = p.spin;
+          }
+          // What turns the rod over the substep, at its middle: the change in gravity's pull as what it hangs from turns,
+          // the attach point's change of speed and the air's drag toward still air (or the breeze), all across the rod.
+          // The spring and both dampings are taken at the substep's end, so any stiffness is stable.
+          const target = base + link.rel, w = omega[i], z = 2 * TAIL.damping * w, off = s.angle - target;
+          const stiff = w * w * (link.parent < 0 ? 1 : 1 + off * off / (TAIL.bend * TAIL.bend));
+          const fx = -TAIL.inertia * (v[0] - s.v[0]) - TAIL.drag * h * (v[0] - wind), fy = -TAIL.inertia * (v[1] - s.v[1]) - TAIL.drag * h * v[1];
+          const kick = turnOf[i] * (h * gravity * (cosDeg(target) - cosDeg(link.world)) + cosDeg(s.angle) * fy - sinDeg(s.angle) * fx);
+          s.spin = (s.spin + kick - h * stiff * off + h * z * baseSpin) / (1 + h * (z + TAIL.spin * TAIL.drag) + h * h * stiff);
+          s.angle += h * s.spin; s.v = v;
+        }
+        const name = takeAt.get(++substep);
+        if (record && name !== undefined && !samples.has(name)) samples.set(name, state.map(s => s.angle));
+      }
+    };
+    if (loop) for (let n = 0; n < TAIL.passes; n++) {
+      const before = state.map(s => [s.angle, s.spin]);
+      pass(false);
+      if (state.every((s, i) => Math.abs(wrapDegrees(s.angle - before[i][0])) < .01 && Math.abs(s.spin - before[i][1]) < .5)) break;
+    }
+    pass(true);
+    // Each link's swing from its rest angle on what it hangs from, scaled by follow.
+    return new Map([...samples].map(([name, angles]) => [name, links.map((link, i) => {
+      const from = link.parent < 0 ? keyOf.get(name)[roots.indexOf(link)].host : angles[link.parent];
+      return wrapDegrees(Math.round(link.rel + follow * wrapDegrees(angles[i] - from - link.rel)));
+    })]));
+  };
+  let drawn = simulate(0);
+  if (breeze) {
+    // A breeze has no time of its own. An idle's starts with the loop, unless a link's step across the seam would then
+    // outdo its steps inside the loop (the motion review's loop check); then, of 24 timings, it takes the one that
+    // moves the tail most at its stillest step with the seam passing, or failing that the smallest seam step.
+    const judge = angles => {
+      const world = links.map((_, i) => playback.map(name => { let angle = 0; for (let k = i; k >= 0; k = links[k].parent) { angle += angles.get(name)[k]; if (links[k].parent < 0) angle += keyOf.get(name)[roots.indexOf(links[k])].host; } return angle; }));
+      const step = (i, k) => Math.abs(wrapDegrees(world[i][(k + 1) % playback.length] - world[i][k]));
+      const room = Math.min(...links.map((_, i) => Math.max(...playback.slice(1).map((_, k) => step(i, k))) - step(i, playback.length - 1)));
+      return { room, stillest: Math.min(...playback.map((_, k) => links.reduce((sum, link, i) => sum + step(i, k) * link.length, 0))) };
+    };
+    let best = judge(drawn);
+    for (let phase = 15, search = best.room < 0; search && phase < 360; phase += 15) {
+      const angles = simulate(phase), score = judge(angles);
+      if (best.room < 0 ? score.room > best.room : score.room >= 0 && score.stillest > best.stillest) [best, drawn] = [score, angles];
+    }
+  }
+  for (const [name, angles] of drawn) setAngles(byPose.get(name), angles);
+  // A tail never swings into the figure: where a link hung from the figure turns toward it and more of the tail then
+  // lies on the figure than at rest, every link is eased back toward its rest angle a quarter at a time. The pose's
+  // own pixels decide.
+  for (const name of drawn.keys()) {
+    const pose = byPose.get(name), swung = links.map(l => pose.parts.find(p => p.name === l.name).angle);
+    const inward = links.some((l, i) => { const by = wrapDegrees(swung[i] - l.rel); return l.parent < 0 && (l.inward ? by * l.inward > TAIL.inward : Math.abs(by) > TAIL.inward); });
+    if (!inward || cover(pose) <= restCover + TAIL.cover) continue;
+    for (const share of [.75, .5, .25, 0]) {
+      setAngles(pose, links.map((l, i) => wrapDegrees(Math.round(l.rel + wrapDegrees(swung[i] - l.rel) * share))));
+      if (cover(pose) <= restCover + TAIL.cover) break;
+    }
+  }
 }

@@ -173,8 +173,8 @@ const swing = { format: 'pixelforge-poses', version: 1, name: 'swing', width: 40
 
 // A side-view figure rigged for the motion templates: a young courier in a teal jacket with a red scarf (brief:
 // examples/hero.brief.md). A small mass at the hips is the rig body; the jacket is a bone standing on it, wider at the
-// shoulders than the hem; two-bone arms and legs, grid hands, boots and head, and a two-bone scarf that the templates
-// sway as rig.tail. The pose origin is the anchor under the feet, exported as each frame's anchor; the hips, the only
+// shoulders than the hem; two-bone arms and legs, grid hands, boots and head, and a two-bone scarf as rig.tail that
+// follows through. The pose origin is the anchor under the feet, exported as each frame's anchor; the hips, the only
 // part without attach, stand 13 rows above it (their `at` is an offset from the origin, not a canvas position), and
 // every other part hangs from them. rig.ground is the ankle row, so each boot's sole covers the end of its shin. Near
 // limbs are one ramp step lighter than far ones, never on the darkest step, and every motion passes its own checks.

@@ -148,6 +148,8 @@ const bonePart = object({
 }, ['length', 'width', 'ramp', 'base']);
 const massPart = object({ ...structuralColor, size: { ...pairOf(int(2, 64)), description: 'Unsquashed ellipse diameters [width, height]; with flat, the dome\'s width and its rows from the base up.' },
   flat: { type: 'boolean', description: 'Draw the top half of the ellipse: a dome with a flat base, anchored at the middle of its base row, which squash and rotation keep in place (slimes, mounds). Default false.' } }, ['size', 'ramp', 'base']);
+// How far a motion template swings rig.tail as it follows through.
+const follow = num(0, 2, 'How far rig.tail swings as it follows through the motion: 0 holds it as drawn, 1 by default, 2 twice as far. Needs rig.tail.');
 const poses = {
   $schema: schema.$schema, title: 'Pixelbolt authored poses',
   ...object({ format: { const: 'pixelforge-poses' }, version: { const: 1 }, name: id, width: int(1, 256), height: int(1, 256), palette: schema.properties.palette,
@@ -160,13 +162,13 @@ const poses = {
       chest: { ...id, description: 'Four-legged rigs: a bone attached to body that the fore legs hang from; gaits bend the spine by turning it against the body.' },
       neck: { ...id, description: 'Four-legged rigs: a bone the head hangs from, turned back by half of the chest\'s turn so the head stays steadier.' } }, ['ground']),
     motions: { type: 'object', maxProperties: 16, propertyNames: id, additionalProperties: { oneOf: [
-      ...['walk', 'trot', 'run'].map(template => object({ template: { const: template, ...(template === 'trot' && { description: 'A four-legged trot: diagonal pairs of feet.' }) }, frames: { ...int(template === 'run' ? 6 : 4, 64), multipleOf: 2 }, duration: int(1, 60000), speed: num(-1024, 1024), stride: num(1, 64), lift: num(0, 32), bob: num(0, 8), lean: int(-45, 45), swapDepth: { type: 'boolean', description: 'Exchange the draw order of paired limbs in the second half-cycle, for front or back views where the stepping limb comes nearer the camera. Default false: side views keep near limbs in front.' },
+      ...['walk', 'trot', 'run'].map(template => object({ template: { const: template, ...(template === 'trot' && { description: 'A four-legged trot: diagonal pairs of feet.' }) }, frames: { ...int(template === 'run' ? 6 : 4, 64), multipleOf: 2 }, duration: int(1, 60000), follow, speed: num(-1024, 1024), stride: num(1, 64), lift: num(0, 32), bob: num(0, 8), lean: int(-45, 45), swapDepth: { type: 'boolean', description: 'Exchange the draw order of paired limbs in the second half-cycle, for front or back views where the stepping limb comes nearer the camera. Default false: side views keep near limbs in front.' },
         ...(template === 'run' && { flex: int(0, 30, 'Four-legged gallop: degrees the spine curls and stretches each way (the body rocks half as far); default 10.') }) }, ['template'])),
-      object({ template: { const: 'idle' }, frames: int(2, 16), duration: int(1, 60000), breath: num(0, .5),
+      object({ template: { const: 'idle' }, frames: int(2, 16), duration: int(1, 60000), follow, breath: num(0, .5),
         squash: num(.05, .5, 'Instead of breath: the body stretches, then squashes, by this share over the loop while its lowest drawn pixel stays on rig.ground. Not with breath or legs.') }, ['template']),
-      object({ template: { const: 'jump' }, frames: { const: 7 }, duration: int(1, 60000), crouch: num(.5, 1), stretch: num(1, 2), apex: int(1, 32) }, ['template']),
-      object({ template: { const: 'attack' }, frames: { const: 4 }, duration: int(1, 60000), arm: int(0, 7), windup: int(-360, 360), strike: int(-360, 360), hold: int(1, 16) }, ['template']),
-      object({ template: { const: 'hurt' }, frames: { const: 2 }, duration: int(1, 60000), recoil: int(-90, 90), squash: num(.5, 2) }, ['template'])
+      object({ template: { const: 'jump' }, frames: { const: 7 }, duration: int(1, 60000), follow, crouch: num(.5, 1), stretch: num(1, 2), apex: int(1, 32) }, ['template']),
+      object({ template: { const: 'attack' }, frames: { const: 4 }, duration: int(1, 60000), follow, arm: int(0, 7), windup: int(-360, 360), strike: int(-360, 360), hold: int(1, 16) }, ['template']),
+      object({ template: { const: 'hurt' }, frames: { const: 2 }, duration: int(1, 60000), follow, recoil: int(-90, 90), squash: num(.5, 2) }, ['template'])
     ] } },
     motionInfo: { type: 'object', propertyNames: id, additionalProperties: object({ template: { enum: ['walk', 'trot', 'run', 'idle', 'jump', 'attack', 'hurt'] }, speed: num(-1024, 1024), keyPoses: { ...array(id, 256), minItems: 1, uniqueItems: true } }, ['template', 'speed', 'keyPoses']),
       description: 'Expansion annotations: generated animation speed and key poses. Retain these when editing --expand output; do not combine with motions.' },

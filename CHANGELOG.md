@@ -4,6 +4,12 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Seeing motion and parts
+
+- The motion review (`view: "motion"`, `pixelbolt inspect --motion`) draws the arcs under its playback cells: one cycle's path of each foot and hand and the top of the head over the first pose, magnified, near limbs solid and far ones dashed, ringed where each foot lands (that foot, its hand and the head), with a key in the image and `arcs` in the reply. Arms a quarter cycle late, a crouch into each contact and a marched knee, which the gait checks report as numbers, show in this one picture: a hand ringed mid-arc, a head ringed at the bottom of a long path, one foot's loop rising above its partner's. Without a rig each marker is traced; the panel is dropped, with the reason, before the image passes 4,194,304 pixels.
+- A parts view (`view: "parts"`, `--view parts`) paints every pixel one flat colour for the layer that drew it last, with a legend of names beside the cells and `parts` (name, colour, pixels) in the reply; `grid` reads part keys back. A compiled pose names its layers after its parts, so a stray pixel or a tangle where limbs cross names its part without bisecting layers by hand. The renderer records owners only when asked (`renderProject(recipe, { owners: true })`); a pose's inner lines stay their part's, and the recipe format is unchanged.
+- `pixelbolt` stops quietly with exit code 0 when the reader of its output goes away (`compile --preset hero --expand | head -1` crashed with an unhandled EPIPE).
+
 ### Crystal growth
 
 - A new source format, `pixelforge-crystal` (`src/crystal.js`, `crystal.schema.json`, `pixel_help` topic `crystal`), compiled by `pixel_compile` and `pixelbolt compile` into ordinary palette grids. Crystal growth used to be only the fluid's frost fingers; now crystals grow from seeds into clusters and come to rest.

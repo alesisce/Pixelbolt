@@ -1,9 +1,9 @@
 // Optional authoring compilers. All output is ordinary, editable version-1 recipe data.
-import { PixelError, CANVAS_SIDE, parseColor, renderProject, describeStampRecipe, readRows } from './core.js';
+import { PixelError, CANVAS_SIDE, parseColor, renderProject, describeStampRecipe, readRows, pictureSheet } from './core.js';
 import { AUTOTILE_MODES, MODE_MASKS, MODE_BITS, tilePieces, templatePiece } from './autotile.js';
 import { terrainTemplate, mergeTerrain, normalTerrain, readTerrain, templateSeams, seamWarnings, testMapRecipe, layeredTestMapRecipe } from './terrain.js';
 import { slopeTiles, slopeCollision, slopeLegend, SLOPE_MAP } from './slopes.js';
-import { EASINGS, ease, rotateRows, rasterizeBone, rasterizeMass } from './craft.js';
+import { EASINGS, ease, rotateRows, draftTurn, rasterizeBone, rasterizeMass } from './craft.js';
 import { turn, angleDelta, solveReach } from './pose-geometry.js';
 import { expandMotions, validateRig, MOTION_TEMPLATES } from './motions.js';
 
@@ -596,6 +596,57 @@ function drawOverTemplate(rows, ops, { tile, palette, ramps, symbols, path, rows
     out.push(row);
   }
   return out;
+}
+
+// Draft drawings of grid parts turned to the angles asked for (craft.js draftTurn), as the source an author pastes into
+// parts.<name>.views once each is corrected. Only the parts asked about are checked, so a draft can be had while the
+// rest of a source is unfinished. Nothing is compiled: the poses compiler draws authored views and never a draft.
+// `request` maps part names to whole degrees, { boot: [30, 330] }. Returns { drafts: { <part>: { views, notes } },
+// sheet }: each view's rows, anchor and points, a note on how it was drafted, and a picture sheet with one row per
+// draft beside the flat drawing, the part as the compiler turns it without a view, and the authored view it draws at
+// that angle, if any.
+export const DRAFT_LIMITS = Object.freeze({ drafts: 32, side: 64 });
+export function draftViews(source, request) {
+  if (source?.format !== 'pixelforge-poses') fail('poses', 'draft views come from a pixelforge-poses source');
+  if (!source.parts || typeof source.parts !== 'object' || Array.isArray(source.parts)) fail('poses.parts', 'expected part definitions');
+  if (!request || typeof request !== 'object' || Array.isArray(request) || !Object.keys(request).length) fail('draftViews', 'name grid parts and the angles to draft, such as {"boot": [30, 330]}');
+  const total = Object.values(request).reduce((sum, angles) => sum + (Array.isArray(angles) ? angles.length : 0), 0);
+  if (total > DRAFT_LIMITS.drafts) fail('draftViews', `at most ${DRAFT_LIMITS.drafts} drafts in one call; this asks for ${total}`);
+  const palette = source.palette ?? {}, drafts = {}, lines = [];
+  let drawn = false;
+  for (const [name, angles] of Object.entries(request)) {
+    const path = `draftViews.${name}`, part = Object.hasOwn(source.parts, name) ? source.parts[name] : undefined;
+    if (!part) fail(path, `no part named ${name}; the source defines ${nameList(Object.keys(source.parts), 8) || 'none'}`);
+    if (part.rows === undefined) fail(path, `${name} is a ${part.bone ? 'bone' : 'mass'} part, which the compiler draws afresh at every angle; drafts are for grid parts (rows)`);
+    readRows(part.rows, `poses.parts.${name}.rows`, palette);
+    if (part.rows.length > DRAFT_LIMITS.side || part.rows[0].length > DRAFT_LIMITS.side) fail(`poses.parts.${name}.rows`, `drafts are for small parts, at most ${DRAFT_LIMITS.side}×${DRAFT_LIMITS.side} pixels; this one is ${part.rows[0].length}×${part.rows.length}`);
+    const anchor = point(part.anchor ?? [0, 0], `poses.parts.${name}.anchor`);
+    if (part.points !== undefined && (!part.points || typeof part.points !== 'object' || Array.isArray(part.points))) fail(`poses.parts.${name}.points`, 'expected named attachment points');
+    const points = Object.fromEntries(Object.entries(part.points ?? {}).map(([key, value]) => [key, point(value, `poses.parts.${name}.points.${key}`)]));
+    if (!Array.isArray(angles) || !angles.length || angles.length > 16) fail(path, 'expected 1–16 angles: a part holds at most 16 views');
+    angles.forEach((angle, i) => { if (!Number.isInteger(angle) || angle < 0 || angle > 359) fail(`${path}[${i}]`, 'expected whole degrees from 0 to 359, clockwise'); });
+    if (new Set(angles).size !== angles.length) fail(path, 'each angle once');
+    const views = {}, notes = {}, authored = part.views && typeof part.views === 'object' ? part.views : {};
+    for (const angle of angles) {
+      const draft = draftTurn(part.rows, angle, { anchor, points });
+      views[angle] = { rows: draft.rows, anchor: draft.anchor, ...(Object.keys(points).length && { points: draft.points }) };
+      // The view the compiler draws at this angle today: the nearest authored one within 22.5°, as shapeOf picks it.
+      const nearest = Object.keys(authored).map(Number).sort((a, b) => Math.abs(angleDelta(angle, a)) - Math.abs(angleDelta(angle, b)) || a - b)[0];
+      const used = nearest !== undefined && Math.abs(angleDelta(angle, nearest)) <= 22.5 ? nearest : undefined;
+      notes[angle] = [draft.how === 'shear' ? `columns slid along a ${draft.slope} slope` : draft.how === 'cover' ? 'turned silhouette, colours by ring' : draft.how === 'quarter' ? 'exact quarter turn' : 'unturned: under 5° from flat or a quarter turn',
+        draft.shortened && `${draft.shortened} repeated column${draft.shortened > 1 ? 's' : ''} dropped`, draft.closed && `${draft.closed} outline pixel${draft.closed > 1 ? 's' : ''} added`, draft.nubs && `${draft.nubs} lone outline pixel${draft.nubs > 1 ? 's' : ''} removed`,
+        used !== undefined && `the compiler draws authored view ${used} here`].filter(Boolean).join('; ');
+      const turned = angle ? rotateRows(part.rows, angle, anchor, { cleanup: angle % 90 !== 0 }) : null;
+      const today = turned ? { rows: turned.rows, anchor: turned.pivot, points: Object.fromEntries(Object.keys(points).map(key => [key, turned.map(points[key])])) } : { rows: part.rows, anchor, points };
+      const view = used === undefined ? null : authored[used];
+      if (view) drawn = true;
+      lines.push({ label: `${name} ${angle}°`, cells: [{ rows: part.rows, anchor, points }, today, views[angle], view?.rows ? { rows: view.rows, anchor: view.anchor, points: view.points } : null] });
+    }
+    drafts[name] = { views, notes };
+  }
+  const sheet = pictureSheet({ palette, headings: ['flat', 'turned today', 'draft', ...(drawn ? ['drawn'] : [])], rows: drawn ? lines : lines.map(line => ({ ...line, cells: line.cells.slice(0, 3) })),
+    scale: Math.max(6, Math.min(10, Math.floor(96 / Math.max(...lines.flatMap(line => line.cells.filter(Boolean).map(cell => Math.max(cell.rows.length, cell.rows[0].length))))))) });
+  return { drafts, sheet };
 }
 
 // Compiles an autotile set from a template two tiles wide and three tall:

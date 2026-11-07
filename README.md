@@ -67,11 +67,12 @@ Zero runtime dependencies. No build step, API key, image model, network service 
 
 ## Figures in motion
 
-Author limbs as bones, bodies as masses, and faces or props as grids. Relative joints and two-bone reach keep attachments together; idle, walk, run, jump, attack and hurt templates expand into editable poses. Review planted feet, ground contact and loop joins in the CLI, MCP or studio. The output uses the existing sprite player.
+Author limbs as bones, bodies as masses, and faces or props as grids. Relative joints and two-bone reach keep attachments together; idle, walk, run, jump, attack and hurt templates expand into editable poses. Review planted feet, ground contact and loop joins in the CLI, MCP or studio. Small grid parts (boots, hands, blades) turn best as hand-drawn `views`; `--draft-views` drafts them by pixel-art rules for you to correct and paste. The output uses the existing sprite player.
 
 ```sh
 node bin/pixelbolt.js preview character.poses.json
 node bin/pixelbolt.js compile character.poses.json --expand --out character-edit.poses.json
+node bin/pixelbolt.js compile character.poses.json --draft-views boot:15,345,hand:45 --preview drafts.png
 node bin/pixelbolt.js inspect character.poses.json --motion run --speed 48
 ```
 

@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 test('every golden set lives in test/goldens with exactly one test file, and the frozen baseline is none of them', () => {
   const sets = goldenSets(root);
-  assert.deepEqual([...sets.keys()], ['bodies', 'crystal', 'figures', 'fluid', 'fx', 'idle-squash', 'shapes', 'spell-library', 'terrain', 'wave']);
+  assert.deepEqual([...sets.keys()], ['bodies', 'crystal', 'drafts', 'figures', 'fluid', 'fx', 'idle-squash', 'shapes', 'spell-library', 'terrain', 'wave']);
   for (const { set, fixture, tests } of sets.values()) {
     assert.equal(fixture, `test/goldens/${set}.json`);
     assert.equal(tests.length, 1, `${fixture} is used by ${tests.join(', ') || 'no test'}`);
@@ -28,7 +28,7 @@ test('golden.equal names what changed and belongs inside golden.test', async () 
   assert.equal(describeChange({ compiled: 'x', frames: [{ rgba: 'a' }, { rgba: 'b' }] }, { compiled: 'y', frames: [{ rgba: 'a' }, { rgba: 'c' }] }), 'compiled, frames[1].rgba differ');
   const where = new URL('./goldens/no-such-set.json', import.meta.url), golden = goldens(where);
   assert.throws(() => golden.equal('x', 1), /golden\.equal\("x"\) belongs inside golden\.test/);
-  await assert.rejects(runGoldens(['no-such-set']), /no golden set is named no-such-set; the sets are bodies, crystal, figures/);
+  await assert.rejects(runGoldens(['no-such-set']), /no golden set is named no-such-set; the sets are bodies, crystal, drafts, figures/);
 });
 
 // A project of its own with the real helper and renderer: a test with two cases, drawn as frames and as a recipe.

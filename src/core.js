@@ -1349,6 +1349,58 @@ function drawPartLegend(sheet, legend) {
   return { ...sheet, width, height, data };
 }
 
+// Small palette pictures side by side for review, such as a part drawn flat, turned today and drafted: a heading over
+// each column and a label left of each row, in the built-in font. Every picture is enlarged `scale` times (at most 16;
+// lowered so a cell stays within 256 pixels) and placed so its anchor pixel sits at one spot in its column and on one
+// row across its row, so pictures compare pixel for pixel. The anchor pixel is outlined in magenta and named points in
+// cyan, around the pixel, never over it. `rows` are [{ label, cells: [{ rows, anchor, points } | null] }].
+const ANCHOR_MARK = [255, 64, 224, 255], POINT_MARK = [64, 224, 255, 255], LABEL_INK = [230, 234, 238, 255];
+export function pictureSheet({ palette = {}, headings = [], rows: lines, scale = 6 }) {
+  const cells = lines.flatMap(line => line.cells.filter(Boolean));
+  const left = Math.max(0, ...cells.map(c => c.anchor[0])), right = Math.max(1, ...cells.map(c => c.rows[0].length - c.anchor[0]));
+  const across = left + right + 2, heights = lines.map(line => {
+    const shown = line.cells.filter(Boolean);
+    return { up: Math.max(0, ...shown.map(c => c.anchor[1])) + 1, down: Math.max(1, ...shown.map(c => c.rows.length - c.anchor[1])) + 1 };
+  });
+  const s = Math.max(1, Math.min(integer(scale, 'scale', 1, 16), Math.floor(256 / Math.max(across, ...heights.map(h => h.up + h.down))))), t = Math.max(1, Math.min(2, Math.floor(s / 3)));
+  const pad = 3 * t, gap = Math.max(2, s), labels = lines.map(line => layoutText(line.label)), heads = headings.map(text => layoutText(text));
+  const labelWidth = Math.max(0, ...labels.map(text => text.width)) * t + 2 * pad, headHeight = heads.length ? (FONT_HEIGHT + 2) * t + 2 * pad : gap;
+  const columns = Math.max(heads.length, ...lines.map(line => line.cells.length)), cellWidth = Math.max(across * s, Math.max(0, ...heads.map(text => text.width)) * t + 2 * pad);
+  const width = labelWidth + columns * (cellWidth + gap) + gap, rowHeights = heights.map(h => Math.max((h.up + h.down) * s, (FONT_HEIGHT + 2) * t + 2 * pad));
+  const height = headHeight + rowHeights.reduce((sum, h) => sum + h + gap, 0);
+  if (width > SHEET_SIDE || height > SHEET_SIDE) fail('sheet', `the picture sheet would be ${width}×${height} pixels, above the 4096-pixel limit; show fewer or smaller pictures`);
+  const data = new Uint8ClampedArray(width * height * 4);
+  data.set(gutterColor, 0);
+  for (let filled = 4; filled < data.length; filled *= 2) data.copyWithin(filled, 0, Math.min(filled, data.length - filled));
+  const fill = (x0, y0, w, h, color) => { for (let y = Math.max(0, y0); y < Math.min(height, y0 + h); y++) for (let x = Math.max(0, x0); x < Math.min(width, x0 + w); x++) data.set(color, (y * width + x) * 4); };
+  const write = (text, x0, y0) => text.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '#') fill(x0 + x * t, y0 + (y + text.top) * t, t, t, LABEL_INK); });
+  const ring = (x0, y0, color) => { fill(x0 - 1, y0 - 1, s + 2, 1, color); fill(x0 - 1, y0 + s, s + 2, 1, color); fill(x0 - 1, y0, 1, s, color); fill(x0 + s, y0, 1, s, color); };
+  const colours = new Map(), colourOf = key => { if (!colours.has(key)) colours.set(key, parseColor(key, palette, `palette.${key}`)); return colours.get(key); };
+  heads.forEach((text, c) => write(text, labelWidth + gap + c * (cellWidth + gap) + Math.floor((cellWidth - text.width * t) / 2), pad + 2 * t));
+  let top = headHeight;
+  lines.forEach((line, r) => {
+    const rowHeight = rowHeights[r], { up } = heights[r], text = labels[r];
+    write(text, pad, top + Math.floor((rowHeight - FONT_HEIGHT * t) / 2));
+    line.cells.forEach((cell, c) => {
+      const x0 = labelWidth + gap + c * (cellWidth + gap), square = Math.max(2, Math.ceil(8 / s)) * s;
+      if (!cell) return;
+      for (let y = 0; y < rowHeight; y++) for (let x = 0; x < cellWidth; x++) data.set(checkerColors[(Math.floor(x / square) + Math.floor(y / square)) % 2], ((top + y) * width + x0 + x) * 4);
+      // The anchor's top-left corner in the cell, in sheet pixels.
+      const ax = x0 + Math.floor((cellWidth - across * s) / 2) + (left + 1) * s, ay = top + Math.floor((rowHeight - (heights[r].up + heights[r].down) * s) / 2) + up * s;
+      cell.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) {
+        const key = row[x];
+        if (key === '.' || key === ' ') continue;
+        const color = colourOf(key), px = ax + (x - cell.anchor[0]) * s, py = ay + (y - cell.anchor[1]) * s;
+        if (color[3]) for (let yy = py; yy < py + s; yy++) for (let xx = px; xx < px + s; xx++) if (xx >= 0 && yy >= 0 && xx < width && yy < height) blend(data, (yy * width + xx) * 4, color);
+      } });
+      for (const p of Object.values(cell.points ?? {})) ring(ax + (p[0] - cell.anchor[0]) * s, ay + (p[1] - cell.anchor[1]) * s, POINT_MARK);
+      ring(ax, ay, ANCHOR_MARK);
+    });
+    top += rowHeight + gap;
+  });
+  return { width, height, scale: s, data };
+}
+
 export function inspectProject(project, options = {}) {
   object(options, 'inspect', ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'view', 'native', 'diagnostics', 'maxCells', 'step', 'offset', 'guides']);
   const { width, height, frames } = project;

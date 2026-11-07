@@ -4,6 +4,13 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Poke the pixels: a live fluid toy
+
+- The playground gains **Poke the pixels** (`playground/fluids/`): a campfire, honey, slime, a waterfall, a potion, a magic swirl and steam run live in the browser with the released engine's `createLiveFluid`. Drag to push the fluid with the pointer's speed; hold to pour a liquid or add heat and smoke to a gas; arrow keys and Space do the same from the keyboard. **Save GIF** saves the last four seconds at about 320 pixels on the long side, blended onto the stage colour. **Copy link** makes a link (#v, p and i, all in the fragment) that replays what was done on the same frames, so the person who opens it sees the same pixels; a two-minute busy session fits in about 7,000 characters, and a longer one is cut at a poke to fit. Touching the effect during a replay takes over, and a new link carries both. **Edit the recipe** opens the preset in the playground. The page has a 1200 × 630 link card, drawn by `scripts/fluid-toy-preview.mjs`, and the deploy script lists it in the sitemap and links it from the home page.
+- The playground and the toy load 0.12.1 by default, and the playground lists 0.9.2's slash hit, fire explosion, lightning strike, healing circle and cel-shaded water effects. Links that name an earlier version still open on it.
+
+## 0.13.0 (2026-11-07)
+
 ### Fixes from a review before release
 
 - **Breaking bodies:**
@@ -130,11 +137,6 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - A loop reports its bodies over its cycle: `hits` are the cycle's (counted from the start, they grew with the warm-up), `escaped` lists the bodies that leave in it at their frame of the loop, and a named body's path has a place for every frame, null once it has left (it stopped growing, so a body gone in the warm-up had an empty path). A body that leaves the canvas in the warm-up, which the loop never shows, or in the cycle, which brings it back at frame 0, is warned about. In `compileBodies` too, a body that leaves keeps a null in its path for every later frame.
 - The bodies work estimate counts the obstacle faces each moving body is tested against (as many as the densest patch its size holds: a checkerboard has a face on every pixel edge, and a territory's cells up to two a cell) and, every frame, the pixels its drawing visits (each body's reach drawn finer with `subpixels`, its trail and the fine canvas). Eight boxes kept moving over a checkerboard counted 2.7 million updates and ran for 10 seconds, and are now refused before simulating at 464 million; an 18,000-frame match of 256 boxes drawn 8 times finer counted 958 million of the 4,000 million allowed and ran for about an hour, and is refused at 76,751 million. Measured against time, the presets and these cases run at 18 to 85 ms a million (bodies that fall asleep, less), so a compile within the budget takes about half a minute at most and a match a few minutes. The message names the faces and `subpixels` among what to lower.
 - `pixelbolt sequence` writes a bodies match a frame at a time, simulating, drawing and writing each frame before the next and holding only the one a repeated video frame shows, so a long match is no longer capped by memory: 2,200 frames at 1080×1920, refused before, write in 85 seconds at a peak of 255 MB, and 6,000 frames at about 300 MB (2,000 frames made whole first took 306 MB). Its files are byte for byte what MCP writes. MCP still makes a sequence whole, within its size and time limits, and its refusal names the command. An export that fails part-way removes the files it had written, unless `--force` replaced earlier ones.
-
-### Poke the pixels: a live fluid toy
-
-- The playground gains **Poke the pixels** (`playground/fluids/`): a campfire, honey, slime, a waterfall, a potion, a magic swirl and steam run live in the browser with the released engine's `createLiveFluid`. Drag to push the fluid with the pointer's speed; hold to pour a liquid or add heat and smoke to a gas; arrow keys and Space do the same from the keyboard. **Save GIF** saves the last four seconds at about 320 pixels on the long side, blended onto the stage colour. **Copy link** makes a link (#v, p and i, all in the fragment) that replays what was done on the same frames, so the person who opens it sees the same pixels; a two-minute busy session fits in about 7,000 characters, and a longer one is cut at a poke to fit. Touching the effect during a replay takes over, and a new link carries both. **Edit the recipe** opens the preset in the playground. The page has a 1200 × 630 link card, drawn by `scripts/fluid-toy-preview.mjs`, and the deploy script lists it in the sitemap and links it from the home page.
-- The playground and the toy load 0.12.1 by default, and the playground lists 0.9.2's slash hit, fire explosion, lightning strike, healing circle and cel-shaded water effects. Links that name an earlier version still open on it.
 
 ### Studio labels
 

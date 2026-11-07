@@ -103,6 +103,80 @@ test('the gait checks fail arms a quarter cycle late, a crouch at contact and a 
   assert.deepEqual([late.checks.contactLegs, late.checks.kneeLift, crouch.checks.armSwing, march.checks.armSwing], [true, true, true, true]);
 });
 
+test('jump: the legs push off long, tuck up under the body at the apex and reach down to land, and the arms swing back, then forward', () => {
+  const reach = name => {
+    const { nearThigh, nearShin } = pose(name);
+    return Math.hypot(nearShin.joints.end[0] - nearThigh.joints.start[0], nearShin.joints.end[1] - nearThigh.joints.start[1]);
+  };
+  assert.ok(reach('jump-take-off') >= legLength - 1.5, `long at take-off (${reach('jump-take-off')} of ${legLength})`);
+  assert.ok(reach('jump-apex') <= legLength * .75, `tucked at the apex (${reach('jump-apex')} of ${legLength})`);
+  assert.ok(reach('jump-rise') > reach('jump-apex') && reach('jump-fall') > reach('jump-apex'), 'the tuck is deepest at the apex');
+  // The knees come forward, ahead of the hips, and bend again on landing.
+  for (const leg of ['near', 'far']) assert.ok(pose('jump-apex')[`${leg}Thigh`].joints.end[0] > pose('jump-apex')[`${leg}Thigh`].joints.start[0] + 1, `${leg} knee forward`);
+  assert.ok(pose('jump-land').nearShin.worldAngle !== pose('jump-land').nearThigh.worldAngle, 'the knee bends on landing');
+  // A larger arm angle is further back: back in the crouch, forward through the take-off, home on recovery.
+  assert.ok(pose('jump-crouch').nearUpper.worldAngle > restArm + 20 && pose('jump-take-off').nearUpper.worldAngle < restArm - 40);
+  assert.equal(pose('jump-recover').nearUpper.worldAngle, restArm);
+});
+
+// The lowest row each frame draws, and which instance draws each pixel.
+const rendered = new Map(renderProject(recipe).frames.map(frame => [frame.name, frame]));
+const lowestRow = name => {
+  const { data } = rendered.get(name);
+  for (let y = recipe.height - 1; y >= 0; y--) for (let x = 0; x < recipe.width; x++) if (data[(y * recipe.width + x) * 4 + 3]) return y;
+  return -1;
+};
+const owners = name => {
+  const owner = new Map();
+  for (const layer of recipe.frames.find(f => f.name === name).layers) for (const op of layer.ops) recipe.symbols[op.symbol].forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] !== '.') owner.set(`${op.flipX ? op.x + row.length - 1 - x : op.x + x},${op.y + y}`, layer.name);
+  });
+  return owner;
+};
+const moving = ['walk', 'run', 'jump'].flatMap(name => [...new Set(recipe.animations[name].frames)]);
+
+test('feet drawn with views roll: the heel lands with the toe up and the toe trails down as the foot leaves, never below the sole', () => {
+  // The boots have a toe-up view (330) and a toe-down one (30), so the compiled poses use the boot-v330 and boot-v30 symbols.
+  const view = (name, leg) => { const part = pose(name)[`${leg}Boot`]; return /-v(\d+)$/.exec(part.symbol ?? '')?.[1] ?? 'flat'; };
+  const planted = (name, leg) => metadata.poses[name].contacts.includes(`${leg}ShinFoot`);
+  for (const gait of ['walk', 'run']) {
+    const frames = recipe.animations[gait].frames;
+    frames.forEach((name, i) => {
+      const before = frames.at(i - 1);
+      for (const leg of ['near', 'far']) {
+        // A planted foot never stands on its toe: lifting its heel would bare the end of the shin.
+        if (planted(name, leg)) assert.notEqual(view(name, leg), '30', `${name}: planted ${leg} foot`);
+        if (planted(name, leg) && !planted(before, leg)) assert.equal(view(name, leg), '330', `${name}: the ${leg} heel strikes`);
+        if (!planted(name, leg) && planted(before, leg)) assert.equal(view(name, leg), '30', `${name}: the ${leg} toe trails`);
+      }
+    });
+  }
+  assert.deepEqual(['take-off', 'rise', 'apex'].map(key => view(`jump-${key}`, 'near')), ['30', '30', 'flat']);
+  // The toe-down boot hangs a row lower than the flat one, so a foot showing it is held up: nothing draws below the sole.
+  const sole = lowestRow('stand');
+  for (const name of moving) assert.ok(lowestRow(name) <= sole, `${name} draws below the sole row`);
+  // Without views the feet stay flat.
+  const flat = plainRig();
+  for (const boot of ['boot', 'farBoot']) delete flat.parts[boot].views;
+  assert.ok(expandPoses(flat).poses.every(p => p.parts.every(part => !/Boot$/.test(part.name) || part.rotate === undefined)));
+});
+
+test('no hand shows while all of its arm is hidden: where a swing would leave one floating, the elbow bends further', () => {
+  for (const name of moving) {
+    const owner = owners(name);
+    for (const side of ['near', 'far']) {
+      const hand = [], arm = new Set();
+      for (const [at, part] of owner) { if (part === `${side}Hand`) hand.push(at); else if (part === `${side}Upper` || part === `${side}Fore`) arm.add(at); }
+      const touches = hand.some(at => { const [x, y] = at.split(',').map(Number); return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => arm.has(`${x + dx},${y + dy}`)); });
+      assert.ok(!hand.length || touches, `${name}: the ${side} hand floats`);
+    }
+  }
+  // The far arm swings forward behind the chest at the first contact; its elbow bends further than the near one does
+  // in the matching pose, bringing the hand up with its forearm out in front.
+  const elbow = (name, side) => ((pose(name)[`${side}Fore`].worldAngle - pose(name)[`${side}Upper`].worldAngle) % 360 + 540) % 360 - 180;
+  assert.ok(elbow('walk-contact-a', 'far') <= elbow('walk-contact-b', 'near') - 15, `${elbow('walk-contact-a', 'far')}° against ${elbow('walk-contact-b', 'near')}°`);
+});
+
 test('the attack swings in the body\'s frame, though the arms hang from a chest that stands up from the hips', () => {
   // windup -130 and strike 50 are the template's defaults; follow-through carries the strike 45° further.
   const turn = degrees => ((degrees % 360) + 360) % 360, rest = plainRig().poses[0].parts;

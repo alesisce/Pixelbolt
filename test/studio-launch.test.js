@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
-import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { browserCommand, STUDIO_PORT } from '../src/server.js';
 import { root, hostTarget, assembleStudio } from '../scripts/build-studio.mjs';
-import { verifyStudio } from '../scripts/verify-studio.mjs';
+import { verifyStudio, launchOnUsualPort, hold, stillOpen, USUAL_PORT } from '../scripts/verify-studio.mjs';
 
 // The launchers and the release checks start studios that want the usual port, so they stay in one file, one after
 // another. What a build holds is tested in studio-build.test.js, which runs alongside this file.
@@ -23,12 +22,14 @@ test('the launcher is preview with a browser: the usual port, a free one beside 
     child.stdout.on('data', chunk => { text += chunk; const address = /Pixelbolt studio: (http:\/\/127\.0\.0\.1:(\d+))/.exec(text); if (address && /Press Ctrl\+C to stop\./.test(text)) resolve({ child, url: address[1], port: Number(address[2]), text }); });
     child.once('error', reject); child.once('exit', code => reject(new Error(`exited with ${code}: ${text}`)));
   });
-  // Drafts are stored per address, so the same port every time is what lets a draft be found again.
-  const usualFree = await new Promise(resolve => { const probe = http.createServer(); probe.once('error', () => resolve(false)); probe.listen(STUDIO_PORT, '127.0.0.1', () => probe.close(() => resolve(true))); });
-  const first = await start(), second = await start(path.join(root, 'examples', 'coin.json'));
+  // Drafts are stored per address, so the same port every time is what lets a draft be found again. Other test runs'
+  // studios want that port too, so the first launch is judged by what it reports (see launchOnUsualPort).
+  assert.equal(USUAL_PORT, STUDIO_PORT, 'the release checks expect the studio\'s own usual port');
+  const { studio: first, usual } = await launchOnUsualPort(start), second = await start(path.join(root, 'examples', 'coin.json'));
   assert.match(first.text, /^Pixelbolt Studio \d+\.\d+\.\d+\r?\n\r?\nClose this window or press Ctrl\+C to stop it\./);
-  if (usualFree) { assert.equal(first.port, STUDIO_PORT); assert.doesNotMatch(first.text, /is in use/); }
-  assert.notEqual(second.port, STUDIO_PORT); assert.match(second.text, /Port 4747 is in use, so this studio has another address/);
+  if (usual) assert.doesNotMatch(first.text, /is in use/);
+  // The second takes the usual port only when the first fell back and something else has freed it since.
+  if (second.port !== STUDIO_PORT) assert.match(second.text, /Port 4747 is in use, so this studio has another address/);
   assert.notEqual(first.url, second.url);
   for (const { url } of [first, second]) assert.match(await (await fetch(url)).text(), /<title>Pixelbolt · Sprite studio<\/title>/);
   // A file handed to the launcher, as Explorer does for one dragged onto it, is the studio's project.
@@ -37,9 +38,11 @@ test('the launcher is preview with a browser: the usual port, a free one beside 
   // A port named on the command line is used or refused, never swapped for another.
   const busy = spawnSync(process.execPath, ['bin/pixelbolt.js', 'preview', '--port', String(first.port)], { cwd: root, encoding: 'utf8' });
   assert.equal(busy.status, 1); assert.match(JSON.parse(busy.stderr).error, /EADDRINUSE/);
+  // Another run's studio may take a port the moment it is free, so a connection held to each shows they stopped.
+  const held = await Promise.all([first, second].map(({ port }) => hold(port)));
   const exits = [first, second].map(({ child }) => new Promise(resolve => child.once('exit', resolve)));
   first.child.kill(); second.child.kill(); await Promise.all(exits);
-  await assert.rejects(fetch(first.url));
+  assert.deepEqual(await stillOpen(held), [], 'a studio still holds a connection after it was stopped');
   const missing = spawnSync(...launcher('studio.mjs', '--no-browser', 'missing.pixel.json'), { encoding: 'utf8' });
   assert.equal(missing.status, 1); assert.match(JSON.parse(missing.stderr).error, /ENOENT/);
 });

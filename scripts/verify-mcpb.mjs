@@ -10,6 +10,9 @@ import { readZip } from './build-studio.mjs';
 
 export const TOOL_NAMES = ['pixel_help', 'pixel_validate', 'pixel_inspect', 'pixel_patch', 'pixel_render', 'pixel_compile', 'pixel_scene', 'pixel_import'];
 const tiny = { version: 1, name: 'mcpb-smoke', width: 2, height: 2, frames: [{ name: 'idle', ops: [{ op: 'pixel', x: 0, y: 0, color: '#ff0066' }] }] };
+// A working server answers every request, if only to say a tool call passed its own time limit (50 s) and was stopped.
+// This guard is for a server that never answers, so it waits far longer than any request takes on a busy machine.
+export const STUCK_AFTER = 120_000;
 const inside = (base, file) => { const relative = path.relative(base, file); return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); };
 
 export function checkManifest(manifest, pkg) {
@@ -35,13 +38,13 @@ export function checkManifest(manifest, pkg) {
   assert.ok(manifest.tools.every(tool => typeof tool.description === 'string' && tool.description), 'every tool needs a description');
 }
 
-export async function verifyMcpb(bundle) {
+export async function verifyMcpb(bundle, { stuckAfter = STUCK_AFTER } = {}) {
   const entries = readZip(await readFile(bundle));
   for (const file of ['manifest.json', 'package.json', 'bin/pixelbolt.js', 'bin/pixelforge.js']) assert.ok(entries.has(file), `Bundle is missing ${file}`);
   const manifest = JSON.parse(entries.get('manifest.json').read()), pkg = JSON.parse(entries.get('package.json').read());
   checkManifest(manifest, pkg);
   const tempRoot = path.resolve(os.tmpdir()), temp = await mkdtemp(path.join(tempRoot, 'pixelbolt-mcpb-'));
-  let child, closed, timer;
+  let child, closed;
   try {
     const extension = path.join(temp, 'extension'), workspace = path.join(temp, 'new-workspace'), cwd = path.join(temp, 'cwd');
     await mkdir(cwd);
@@ -87,11 +90,13 @@ export async function verifyMcpb(bundle) {
         }
       } catch (error) { fail(error); }
     });
-    timer = setTimeout(() => { fail(new Error(`MCP smoke test timed out after 8 seconds. ${stderr}`)); child.kill(); }, 8000);
     const send = message => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
     const request = (method, params) => new Promise((resolve, reject) => {
       if (failure) { reject(failure); return; }
-      const current = ++id; pending.set(current, { resolve, reject, method }); send({ id: current, method, params });
+      const current = ++id, what = params?.name ? `${method} ${params.name}` : method;
+      const timer = setTimeout(() => { fail(new Error(`${what} had no reply in ${stuckAfter / 1000} s, so the MCP server looks stuck. ${stderr}`)); child.kill(); }, stuckAfter);
+      const settle = done => value => { clearTimeout(timer); done(value); };
+      pending.set(current, { resolve: settle(resolve), reject: settle(reject), method }); send({ id: current, method, params });
     });
     const call = async (name, args = {}) => {
       const result = await request('tools/call', { name, arguments: args });
@@ -132,7 +137,7 @@ export async function verifyMcpb(bundle) {
     assert.deepEqual(await readdir(cwd), [], 'The server wrote into its working directory');
     return { version: pkg.version, tools: listed.tools.length, files: entries.size };
   } finally {
-    clearTimeout(timer);
+    // The server's exit rejects any request still waiting, which clears its guard.
     if (child) { child.kill(); await closed; }
     assert.ok(inside(tempRoot, temp), 'Refusing to remove a folder outside the temporary root');
     await rm(temp, { recursive: true, force: true });

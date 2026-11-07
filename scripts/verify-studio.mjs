@@ -25,8 +25,49 @@ const SYSTEMS = {
 };
 const FORBIDDEN = ['demo', 'showcase', 'test', 'scripts', 'packaging', 'output', 'node_modules', '.git', '.github'];
 const COMMANDS = ['init', 'validate', 'inspect', 'patch', 'render', 'gif'];
-const USUAL_PORT = 4747;
+export const USUAL_PORT = 4747;
+// How many launches may fall back while the usual port reads free before and after, before that counts as a fault.
+const USUAL_TRIES = 3;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Every studio wants the usual port, and other programs (another copy, another test run's studios and probes) can take
+// or free it at any moment. So a port's state is only ever a reading, and a studio's own end is shown by a connection
+// held to it, never by its port no longer answering.
+export const portFree = port => new Promise(resolve => { const probe = http.createServer(); probe.once('error', () => resolve(false)); probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true))); });
+// A connection to a studio that sends nothing. The studio never closes an idle connection itself, so the connection
+// closes only when the studio's process ends.
+export const hold = port => new Promise((resolve, reject) => {
+  const socket = net.connect({ host: '127.0.0.1', port });
+  socket.once('error', reject).once('connect', () => {
+    socket.off('error', reject).on('error', () => {});
+    const held = { port, open: true, release: () => socket.destroy() };
+    held.closed = new Promise(done => socket.once('close', () => { held.open = false; done(); }));
+    resolve(held);
+  });
+});
+// The ports of `held` connections still open after waiting for them to close. Once a studio's process has gone its
+// connection is already closed, so the guard only ends the wait for a studio that is still running.
+export async function stillOpen(held, guard = 60_000) {
+  let timer;
+  await Promise.race([Promise.all(held.map(each => each.closed)), new Promise(resolve => { timer = setTimeout(resolve, guard); })]);
+  clearTimeout(timer);
+  const open = held.filter(each => each.open).map(each => each.port);
+  for (const each of held) each.release();
+  return open;
+}
+// Starts a studio with `launch` and checks the port it reports: the usual one, or another with the reason. A fallback
+// while the usual port read free both before and after is a fault, unless something held the port just then (another
+// run's probe holds it for a moment), so that is tried again: a launcher that never takes a free port fails every try.
+// Studios from earlier tries are left running for the caller to stop.
+export async function launchOnUsualPort(launch) {
+  for (let attempt = 1; ; attempt++) {
+    const before = await portFree(USUAL_PORT), studio = await launch();
+    if (studio.port === USUAL_PORT) return { studio, attempt, usual: true };
+    assert.match(studio.text, new RegExp(`Port ${USUAL_PORT} is in use`), 'a studio away from the usual port must say why');
+    if (!before || !await portFree(USUAL_PORT)) return { studio, attempt, usual: false };
+    assert.ok(attempt < USUAL_TRIES, `the usual port was free before and after each of ${attempt} launches, but each took another`);
+  }
+}
 async function tree(base, relative = '') {
   const found = [];
   for (const entry of await readdir(path.join(base, relative), { withFileTypes: true })) {
@@ -175,7 +216,7 @@ async function verify({ archive, dir, pinned = true, allowDev = false, keep = fa
     const settled = async () => { for (let i = 0; ; i++) { const left = running(); if (!left.length || i === 20) return left; await sleep(500); } };
     // Ends a process outright (TerminateProcess on Windows); one that has already gone is fine.
     const end = pid => { try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } };
-    const launchers = [];
+    const launchers = [], studios = [];
     // Stops every launcher started so far. Elsewhere that is the SIGTERM a launcher gets, and one that ignores it is found
     // by the listing that follows. On Windows a launcher is cmd.exe running the bundled runtime, which ending cmd.exe
     // would leave running, so whatever runs from the folder is ended first; a process cannot refuse that, so each
@@ -195,17 +236,26 @@ async function verify({ archive, dir, pinned = true, allowDev = false, keep = fa
       const child = windows
         ? spawn(comspec, ['/d', '/s', '/c', `""${path.join(dir, file)}" --no-browser${dropped ? ` "${dropped}"` : ''}"`], { cwd: os.tmpdir(), env: runEnv, windowsVerbatimArguments: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
         : spawn(path.join(dir, file), ['--no-browser', ...(dropped ? [dropped] : [])], { cwd: os.tmpdir(), env: runEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-      let text = '';
+      let text = '', studio = null;
       const timer = setTimeout(() => reject(new Error(`no address within 30 seconds; output so far:\n${text}`)), 30000);
       launchers.push(child);
       for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
         text += chunk;
         const address = /Pixelbolt studio: (http:\/\/127\.0\.0\.1:(\d+))/.exec(text);
-        if (address && /Press Ctrl\+C to stop\./.test(text)) { clearTimeout(timer); resolve({ child, url: address[1], port: Number(address[2]), text }); }
+        if (!studio && address && /Press Ctrl\+C to stop\./.test(text)) { clearTimeout(timer); studio = { child, url: address[1], port: Number(address[2]), text }; studios.push(studio); resolve(studio); }
       });
       child.once('error', reject); child.once('exit', code => { clearTimeout(timer); reject(new Error(`the launcher exited with code ${code}:\n${text}`)); });
     });
-    const status = (url, options = {}) => new Promise((resolve, reject) => { const request = http.request(url, options, response => { response.resume(); resolve(response.statusCode); }); request.on('error', reject); request.end(options.body); });
+    // One connection per request: a kept-alive connection can be reused just as the studio closes it for idling, which
+    // a busy machine makes likely and which reads as "read ECONNRESET".
+    const ask = (url, options = {}) => new Promise((resolve, reject) => {
+      const request = http.request(url, { ...options, agent: false }, response => {
+        const chunks = [];
+        response.on('data', chunk => chunks.push(chunk)).on('error', reject).on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
+      });
+      request.on('error', reject); request.end(options.body);
+    });
+    const status = async (url, options) => (await ask(url, options)).status;
     const reachable = (address, port) => new Promise(resolve => {
       const socket = net.connect({ host: address, port, timeout: 2000 });
       socket.once('connect', () => { socket.destroy(); resolve(true); }); socket.once('error', () => resolve(false)); socket.once('timeout', () => { socket.destroy(); resolve(false); });
@@ -233,22 +283,22 @@ async function verify({ archive, dir, pinned = true, allowDev = false, keep = fa
     log('Studio');
     let first, second, paths = [];
     // Drafts live in browser storage, which is per address, so the launcher takes its usual port whenever it is free.
-    const usualFree = await new Promise(resolve => { const probe = http.createServer(); probe.once('error', () => resolve(false)); probe.listen(USUAL_PORT, '127.0.0.1', () => probe.close(() => resolve(true))); });
     await check('the launcher in no-browser mode prints a loopback address and how to stop', async () => {
-      first = await launch(); assert.match(first.text, /close this window/i);
-      if (usualFree) assert.equal(first.port, USUAL_PORT, 'the usual port was free but the launcher took another');
-      else assert.match(first.text, new RegExp(`Port ${USUAL_PORT} is in use`));
-      return `${first.url}${usualFree ? ', its usual port' : `; port ${USUAL_PORT} was busy, so it fell back`}`;
+      const { studio, attempt, usual } = await launchOnUsualPort(launch);
+      first = studio; assert.match(first.text, /close this window/i);
+      return `${first.url}${usual ? ', its usual port' : `; port ${USUAL_PORT} was busy, so it fell back`}${attempt > 1 ? ` (launch ${attempt}: something held the usual port for a moment)` : ''}`;
     });
     // On macOS the second copy is started through the .command file, which is what a double-click in Finder runs.
     await check(`a second copy${names.scripts.length ? `, started through "${names.scripts[0]}",` : ''} runs beside the first on another port and says why`, async () => {
-      second = await launch(null, names.scripts[0] ?? names.studio); assert.notEqual(second.port, first.port); assert.match(second.text, new RegExp(`Port ${USUAL_PORT} is in use`));
+      second = await launch(null, names.scripts[0] ?? names.studio); assert.notEqual(second.port, first.port);
+      // Only a first copy that fell back leaves the usual port to a second, when another program has freed it since.
+      if (second.port !== USUAL_PORT) assert.match(second.text, new RegExp(`Port ${USUAL_PORT} is in use`));
       assert.equal(await status(first.url), 200); assert.equal(await status(second.url), 200); return second.url;
     });
     await check('a recipe handed to the launcher opens in the studio', async () => {
       const dropped = await launch(path.join(dir, 'app', 'examples', 'coin.json'));
-      assert.equal((await (await fetch(`${dropped.url}/project.json`)).json()).name, 'coin');
-      assert.equal(await (await fetch(`${first.url}/project.json`)).json(), null, 'a studio started without a file has no project');
+      assert.equal(JSON.parse((await ask(`${dropped.url}/project.json`)).body).name, 'coin');
+      assert.equal(JSON.parse((await ask(`${first.url}/project.json`)).body), null, 'a studio started without a file has no project');
       return path.join('app', 'examples', 'coin.json');
     });
     await check('it listens on 127.0.0.1 only', async () => {
@@ -274,23 +324,32 @@ async function verify({ archive, dir, pinned = true, allowDev = false, keep = fa
       assert.equal(await status(first.url + '/api/export', { method: 'POST', headers: { Origin: 'https://evil.example', 'Content-Type': 'application/json' }, body: '{}' }), 403);
     });
     await check('an export returns a ZIP that contains preview.html', async () => {
-      const response = await fetch(first.url + '/api/export', { method: 'POST', headers: { Origin: first.url, 'Content-Type': 'application/json' }, body: await read('app/examples/forest-spirit.json') });
-      assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'application/zip');
-      const bundle = readZip(Buffer.from(await response.arrayBuffer()));
+      const response = await ask(first.url + '/api/export', { method: 'POST', headers: { Origin: first.url, 'Content-Type': 'application/json' }, body: await read('app/examples/forest-spirit.json') });
+      assert.equal(response.status, 200); assert.equal(response.headers['content-type'], 'application/zip');
+      const bundle = readZip(response.body);
       assert.match(bundle.get('preview.html').read().toString(), /^<!doctype html>/); return `${bundle.size} files`;
     });
+    // The listing shows nothing from the folder still runs; the held connections show each studio's server itself went
+    // with it, whoever takes its port next.
     await check('stopping the launchers leaves no process behind', async () => {
-      await stopLaunchers();
-      const left = await settled();
-      assert.ok(!left.length, `still running from the folder: ${left.join(', ')}`);
-      await assert.rejects(fetch(first.url), 'the studio still answers after its launcher was stopped');
+      const held = await Promise.allSettled(studios.map(studio => hold(studio.port)));
+      try {
+        await stopLaunchers();
+        const left = await settled();
+        assert.ok(!left.length, `still running from the folder: ${left.join(', ')}`);
+        for (const each of held) if (each.status === 'rejected') throw each.reason;
+        const open = await stillOpen(held.map(each => each.value));
+        assert.deepEqual(open, [], `the studio on port ${open.join(', ')} still holds a connection after its launcher was stopped`);
+      } finally { for (const each of held) each.value?.release(); }
+      return `${studios.length} studios`;
     });
     // What closing the window does. Windows: the launcher in a console window of its own, closed the way its X button
     // closes it; that opens a minimised window, so it only runs for an archive (or on request) and only where there
     // is a desktop. Elsewhere a closed terminal sends its programs the hang-up signal.
     if (!windows) await check('a hang-up, which is what closing the terminal sends, stops the studio', async () => {
-      const { child, url } = await launch();
-      child.kill('SIGHUP'); assert.deepEqual(await settled(), []); await assert.rejects(fetch(url));
+      const { child, port } = await launch(), held = await hold(port);
+      try { child.kill('SIGHUP'); assert.deepEqual(await settled(), []); assert.deepEqual(await stillOpen([held]), [], 'the studio still holds a connection after the hang-up'); }
+      finally { held.release(); }
     });
     else if (window) {
       const run = ps([

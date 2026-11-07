@@ -1,10 +1,11 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { assembleMcpb, buildMcpb, registryEntry, root } from '../scripts/build-mcpb.mjs';
 import { readZip, writeZip, sha256 } from '../scripts/build-studio.mjs';
 import { verifyMcpb } from '../scripts/verify-mcpb.mjs';
@@ -143,9 +144,19 @@ test('the bundle carries every preset, so its presets topics and pixel_compile p
   }
 });
 
-test('the standalone verifier runs bundled MCP help, render, import and scene export', () => {
-  const output = execFileSync(process.execPath, [path.join(root, 'scripts/verify-mcpb.mjs'), build.bundle], { encoding: 'utf8', timeout: 10000, windowsHide: true });
-  assert.match(output, /MCPB verified:.*8 tools/);
+// The verifier has its own guard for a server that never answers, so the run is not cut short here: on a busy machine
+// it takes as long as it takes.
+test('the standalone verifier runs bundled MCP help, render, import and scene export', async () => {
+  const { stdout } = await promisify(execFile)(process.execPath, [path.join(root, 'scripts/verify-mcpb.mjs'), build.bundle], { encoding: 'utf8', windowsHide: true });
+  assert.match(stdout, /MCPB verified:.*8 tools/);
+});
+
+test('the verifier stops a bundled server that never answers', async () => {
+  const files = new Map([...readZip(build.bytes)].map(([name, entry]) => [name, entry.read()]));
+  files.set('bin/pixelbolt.js', Buffer.from('process.stdin.resume();\n'));
+  const silent = path.join(temp, 'silent.mcpb');
+  await writeFile(silent, writeZip(files));
+  await assert.rejects(verifyMcpb(silent, { stuckAfter: 50 }), /^Error: initialize had no reply in 0\.05 s, so the MCP server looks stuck/);
 });
 
 test('the verifier reports missing help and scene export assets and cleans up', async () => {

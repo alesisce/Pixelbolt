@@ -203,7 +203,7 @@ golden.test('idles and ellipse masses without the new fields stay byte-identical
   // test/goldens/idle-squash.json. Change them (node scripts/goldens.mjs idle-squash, then --write) only for a deliberate
   // change to the idle template, mass drawing or the rigs above. The strider's legs cross its body, so it keeps its
   // outline-coloured inner lines, as everything was drawn then. Its tail's pixels moved once since, deliberately, when
-  // tails began to follow through (a breeze in place of the fixed sway).
+  // tails began to follow through (a sway from the root that its links follow, in place of the fixed sway).
   const compiled = source => { const result = compilePoses(source); return hash(JSON.stringify(result) + renderProject(result.recipe).frames.map(frame => hash(frame.data)).join()); };
   const idles = [...[2, 3, 4].map(frames => [`strider-idle-${frames}`, { ...strider({ frames, breath: .1 }), innerLines: 'outline' }]),
     ...[2, 3, 4].map(frames => [`blob-idle-${frames}`, blob({ idle: { frames, breath: .15 } })]), ['blob-selective-turned-20', blob({ mass: { outline: 'selective' }, body: { angle: 20 } })]];

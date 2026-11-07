@@ -525,28 +525,32 @@ export function expandMotions(input, compileRest, probeJoints) {
 // rest angle, relative to what it hangs from, so a still figure's tail hangs exactly as drawn. The attach point's
 // motion turns it: when the body sets off, stops or falls, the rod's inertia and the air acting on it turn it about the
 // attach point, and the spring brings it back. A link on another tail link hangs from that link's moving end, so each
-// link lags the one before it. A walk or run carries the figure through still air at its speed, so the tail trails,
-// further the faster it goes, and flutters with the bob; a body falling through the air lifts it and a landing drops
-// it; a strike flings it back and it whips through past rest. When the body leans or turns, gravity keeps the tail
-// hanging a little nearer to where it hung.
+// link lags the one before it; its bend is stiffer and more damped than the hinge on the figure, so a tail curves as
+// one piece rather than cracking like a whip. A walk or run carries the figure through still air at its speed, so the
+// tail trails, further the faster it goes, and flutters with the bob; a body falling through the air lifts it and a
+// landing drops it; a strike flings it back and it whips through past rest; an idle sways it from the root. When the
+// body leans or turns, gravity keeps the tail hanging a little nearer to where it hung.
 //
-// Units are the figure's own: gravity is in body heights a second² (rig.ground to the top of the rest drawing) and a
-// link's spring is set against gravity over its own length, so a rig drawn twice as large moves the same and a long
-// cape swings slower than a short scarf. The poses are keys on one smooth path that never overshoots them (it holds
-// still where the body holds or turns back), so the body's whole-pixel steps don't jolt the tail. Each drawing shows
-// the tail as it is halfway through the time the drawing is shown. Angles are degrees, clockwise; the spring is stepped
-// in fixed substeps with only + − × ÷, sqrt and craft trigonometry, and rounded to whole degrees once, at the end. A
-// loop's cycle runs again until it repeats, so its first frame follows its last; a one-shot starts a frame before its
-// first, from the rest pose, still.
+// Units are the figure's own: gravity is in body sizes a second² (a size is the longer side of the rest drawing, the
+// tail left out) and a link's spring is set against gravity over its own length, so a rig drawn twice as large moves
+// the same and a long cape swings slower than a short scarf. The poses are keys on one smooth path that never
+// overshoots them (it holds still where the body holds or turns back), so the body's whole-pixel steps don't jolt the
+// tail. Each drawing shows the tail as it is halfway through the time the drawing is shown. Angles are degrees,
+// clockwise; the spring is stepped in fixed substeps with only + − × ÷, sqrt and craft trigonometry, and rounded to
+// whole degrees once, at the end. A loop's cycle runs again until it repeats, so its first frame follows its last; a
+// one-shot starts a frame before its first, from the rest pose, still.
 const TAIL = Object.freeze({
-  gravity: 12, // body heights a second²
+  gravity: 12, // body sizes a second²
   drag: 18, // per second: how quickly still air would bring a link to rest
   inertia: .4, // the share of its attach point's starts and stops a link feels (a rigid rod feels them all)
   stiffness: 2.5, // the spring's pull, against the most turn gravity gives the link held level
   damping: .3, // of critical damping, against turning relative to what the link hangs from
+  swing: 50, // degrees a link hung from the figure swings from rest before its spring stiffens
   spin: .3, // the air's drag on a link's own turning, as a share of drag
   bend: 25, // degrees a link bends from the link it hangs from before its spring stiffens
-  breeze: .3, // an idle's breeze, body heights a second
+  bendStiffness: 6, // a bend's spring against a hinge's on the figure: a tail curves as one piece rather than whips
+  bendDamping: .6, // of critical damping, against bending
+  sway: 10, // degrees an idle swings a tail's rest angle at the figure, each way
   cover: .2, // the share of its pixels more than at rest that a tail may lay on the figure
   inward: 5, // degrees a link may turn toward the figure before its pixels are checked
   step: 4, // milliseconds per substep at most
@@ -565,9 +569,14 @@ function tailRig(rig, { instances, restData, restAngle, source, owners, rest, ta
     const parent = instances.get(name).attach?.part;
     if (!order.includes(name) && (!set.has(parent) || order.includes(parent))) order.push(name);
   }
-  let top = rig.ground;
-  for (const at of owners(rest).keys()) top = Math.min(top, Number(at.split(',')[1]));
-  const height = Math.max(8, rig.ground - top + 1);
+  // The figure's size: the longer side of the box round its rest drawing, the tail left out, so a long low animal is
+  // as large as a tall one.
+  const box = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [at, name] of owners(rest)) if (!set.has(name)) {
+    const [x, y] = at.split(',').map(Number);
+    box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+  }
+  const size = Math.max(8, box[2] - box[0] + 1, box[3] - box[1] + 1);
   // How far a part reaches from its anchor: a bone's length, a grid's farthest drawn pixel, half a mass's size.
   const reach = definition => {
     if (definition.bone) return definition.bone.length;
@@ -593,7 +602,7 @@ function tailRig(rig, { instances, restData, restAngle, source, owners, rest, ta
     const out = turned(20), back = turned(-20);
     link.inward = out > back ? 1 : back > out ? -1 : 0;
   }
-  return { links, gravity: TAIL.gravity * height, height, cover: tailCover, restCover: tailCover(rest) };
+  return { links, gravity: TAIL.gravity * size, cover: tailCover, restCover: tailCover(rest) };
 }
 
 // Tangents of a smooth path through evenly spaced keys that never overshoots them (Steffen's monotone cubic): flat
@@ -611,7 +620,7 @@ function tangents(steps, loop) {
 // Turns each tail link of a motion's poses, once they have sunk onto their legs, to where its spring has carried it.
 // `playback` is the motion's displayed frames (a held strike repeats), each `duration` ms; `follow` scales every link's
 // swing from its rest angle (0 holds the tail as drawn); `lowered` is how far a one-shot's poses sank.
-function followTails({ links, gravity, height, cover, restCover }, poses, { playback, loop, duration, speed, template, follow, lowered, probeParts }) {
+function followTails({ links, gravity, cover, restCover }, poses, { playback, loop, duration, speed, template, follow, lowered, probeParts }) {
   const roots = links.filter(l => l.parent < 0), byPose = new Map(poses.map(pose => [pose.name, pose]));
   const setAngles = (pose, angles) => links.forEach((link, i) => setAngleOf(pose.parts.find(p => p.name === link.name), angles[i]));
   if (!follow) { for (const pose of poses) setAngles(pose, links.map(l => wrapDegrees(Math.round(l.rel)))); return; }
@@ -639,8 +648,8 @@ function followTails({ links, gravity, height, cover, restCover }, poses, { play
     const rate = c => ((3 * u * u - 4 * u + 1) * m[c][j] + (6 * u - 6 * u * u) * d[c][j] + (3 * u * u - 2 * u) * m[c][next]) / seconds;
     return { v: [rate(0), rate(1)], spin: rate(2), host: keys[j][r].host + (u * u * u - 2 * u * u + u) * m[2][j] + (3 * u * u - 2 * u * u * u) * d[2][j] + (u * u * u - u * u) * m[2][next] };
   };
-  const omega = links.map(l => Math.sqrt(TAIL.stiffness * 1.5 * gravity / l.length)), turnOf = links.map(l => RADIAN * 1.5 / l.length);
-  const breeze = template === 'idle' ? TAIL.breeze * height : 0;
+  const omega = links.map(l => Math.sqrt((l.parent < 0 ? 1 : TAIL.bendStiffness) * TAIL.stiffness * 1.5 * gravity / l.length)), turnOf = links.map(l => RADIAN * 1.5 / l.length);
+  const sway = template === 'idle' ? TAIL.sway : 0;
   // The substep halfway through each drawing's time on screen (a held strike's whole hold).
   const takeAt = new Map();
   for (let j = 0; j < keys.length; j++) if (shown[j] !== null && shown[j] !== shown[j - 1] && ![...takeAt.values()].includes(shown[j])) {
@@ -648,7 +657,7 @@ function followTails({ links, gravity, height, cover, restCover }, poses, { play
     while (shown[j + run] === shown[j]) run++;
     takeAt.set(j * steps + Math.round(run * steps / 2), shown[j]);
   }
-  // The drawn angles of every link in each pose, the breeze timed `phase` degrees into its cycle.
+  // The drawn angles of every link in each pose, an idle's sway timed `phase` degrees into its cycle.
   const simulate = phase => {
     const state = links.map(l => ({ angle: l.world, spin: 0, v: [0, 0] })), samples = new Map();
     if (loop) links.forEach((l, i) => {
@@ -659,7 +668,7 @@ function followTails({ links, gravity, height, cover, restCover }, poses, { play
     // One pass over the keys: segment j runs from key j to the next (in a loop, the last returns to the first).
     const pass = record => {
       for (let j = 0, substep = 0; j < keys.length - (loop ? 0 : 1); j++) for (let n = 0; n < steps; n++) {
-        const u = (n + 1) / steps, wind = breeze * sinDeg(phase + 360 * (j * steps + n + 1) * h / period);
+        const u = (n + 1) / steps, swing = sway * sinDeg(phase + 360 * (j * steps + n + 1) * h / period);
         for (const [i, link] of links.entries()) {
           const s = state[i];
           let v, base, baseSpin;
@@ -671,11 +680,12 @@ function followTails({ links, gravity, height, cover, restCover }, poses, { play
             v = [p.v[0] - w * oy, p.v[1] + w * ox]; base = p.angle; baseSpin = p.spin;
           }
           // What turns the rod over the substep, at its middle: the change in gravity's pull as what it hangs from turns,
-          // the attach point's change of speed and the air's drag toward still air (or the breeze), all across the rod.
-          // The spring and both dampings are taken at the substep's end, so any stiffness is stable.
-          const target = base + link.rel, w = omega[i], z = 2 * TAIL.damping * w, off = s.angle - target;
-          const stiff = w * w * (link.parent < 0 ? 1 : 1 + off * off / (TAIL.bend * TAIL.bend));
-          const fx = -TAIL.inertia * (v[0] - s.v[0]) - TAIL.drag * h * (v[0] - wind), fy = -TAIL.inertia * (v[1] - s.v[1]) - TAIL.drag * h * v[1];
+          // the attach point's change of speed and the air's drag toward still air, all across the rod. The spring and
+          // both dampings are taken at the substep's end, so any stiffness is stable. An idle swings the rest angle a
+          // link holds on the figure, as an animal sways its tail, and the links beyond it follow.
+          const target = base + link.rel + (link.parent < 0 ? swing : 0), w = omega[i], z = 2 * (link.parent < 0 ? TAIL.damping : TAIL.bendDamping) * w, off = s.angle - target;
+          const stiff = w * w * (1 + off * off / (link.parent < 0 ? TAIL.swing * TAIL.swing : TAIL.bend * TAIL.bend));
+          const fx = -TAIL.inertia * (v[0] - s.v[0]) - TAIL.drag * h * v[0], fy = -TAIL.inertia * (v[1] - s.v[1]) - TAIL.drag * h * v[1];
           const kick = turnOf[i] * (h * gravity * (cosDeg(target) - cosDeg(link.world)) + cosDeg(s.angle) * fy - sinDeg(s.angle) * fx);
           s.spin = (s.spin + kick - h * stiff * off + h * z * baseSpin) / (1 + h * (z + TAIL.spin * TAIL.drag) + h * h * stiff);
           s.angle += h * s.spin; s.v = v;
@@ -697,8 +707,8 @@ function followTails({ links, gravity, height, cover, restCover }, poses, { play
     })]));
   };
   let drawn = simulate(0);
-  if (breeze) {
-    // A breeze has no time of its own. An idle's starts with the loop, unless a link's step across the seam would then
+  if (sway) {
+    // A sway has no time of its own. An idle's starts with the loop, unless a link's step across the seam would then
     // outdo its steps inside the loop (the motion review's loop check); then, of 24 timings, it takes the one that
     // moves the tail most at its stillest step with the seam passing, or failing that the smallest seam step.
     const judge = angles => {

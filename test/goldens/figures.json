@@ -53,7 +53,7 @@
     ]
   },
   "R2": {
-    "compiled": "00dd4eaecff5318bb1d973dbfa8eb5a753152ad43d07e2a42f6f26ed9975b8b9",
+    "compiled": "d292ac164223ff8850e93419503876ef7af6d805cae113bac5a852135e1b250d",
     "frames": [
       {
         "name": "stand",
@@ -65,7 +65,7 @@
       },
       {
         "name": "idle-inhale",
-        "rgba": "aec9d4b05cbc8160897d1db4d39961e62bfe6bd493c28b2ef06782fb2844684d"
+        "rgba": "48e26893b4489b273db6da306e6725f461c571d63baa112570688ea858663b21"
       },
       {
         "name": "idle-settle",
@@ -73,7 +73,7 @@
       },
       {
         "name": "idle-exhale",
-        "rgba": "746a4a338b6a59cd8d8eaf642d0eaf9fde708476e2cbf47e7bb6729fceeda910"
+        "rgba": "ac6bcc7ccf47e560058cde3275f6c0a594436a6c01621e962cb85e2eabf32b1a"
       },
       {
         "name": "walk-contact-a",
@@ -81,27 +81,27 @@
       },
       {
         "name": "walk-between-1",
-        "rgba": "d9376e0d4f72d35443d278404f67e338ef8c8af165b08c56ead71954e7ff881d"
+        "rgba": "b2adce06487ccaf52690318c3ba03d5ed6c6dbd1f318c5b3298544f1c86d0209"
       },
       {
         "name": "walk-down-a",
-        "rgba": "a1161a72e552bed234a50199ca6842b233d8135651b1f991c7a8aa7af9dedd57"
+        "rgba": "b2cf1ab597bf9c28227dbf7c6ed5a7ab1cc995038aa1d65795a42a6c896b9e9e"
       },
       {
         "name": "walk-between-3",
-        "rgba": "7c4b385c7d337e7ebef768f3669efa18091c8de791100633f510785ac3d8c1e7"
+        "rgba": "0ac3bd93c5ac3c5c3bca5fb5bc062beb784d76aa64f392b65eea519eb8cb514e"
       },
       {
         "name": "walk-passing-a",
-        "rgba": "b130c314bce7791772491e421e59897f470d7a83da051cba9a4407728dff202a"
+        "rgba": "f0a7128e6e7b12bdc77af1063ab41310b773991981e3b61d7525cf2d054df51f"
       },
       {
         "name": "walk-between-5",
-        "rgba": "6648ae852d09da00ab43925b3baf9d8b40f7812b584905653200d3adafa3c413"
+        "rgba": "0dc8e21ff04b2437005783a25fd65b4946badeed98979c901193fd963029a120"
       },
       {
         "name": "walk-up-a",
-        "rgba": "eda3909301af14510cfa042f2922b0ef783d3dbca6bf5a597c5a0febcf1946e4"
+        "rgba": "5566723a4190f490f31724ae99e79965e3b6246cfb72dadc79664059e90d6051"
       },
       {
         "name": "walk-between-7",
@@ -113,27 +113,27 @@
       },
       {
         "name": "walk-between-9",
-        "rgba": "21df7c58971526dc21efbd59831eb57c8b5c0137d8ab5821440de19e63a8532e"
+        "rgba": "447f1c61103ba62cc78b8139bbf883fe879449ca28f8c0864e16a1d8a11048b4"
       },
       {
         "name": "walk-down-b",
-        "rgba": "a93b700509673dcb88c1322392fd27d486171014d4dde3bd3e399bd8dd7be3e0"
+        "rgba": "44fd4149ab382833fc1afe56c74642163c7ce3b45029e407ba9831dcbe5c9f95"
       },
       {
         "name": "walk-between-11",
-        "rgba": "440257137c66f4c1a5259093522b093367b909da7b4e8e067fb80d464520f0e9"
+        "rgba": "13ff8ca3d5ae02228c64298b6db6c4f4c9722442abd724e8c6dd175b0be657a8"
       },
       {
         "name": "walk-passing-b",
-        "rgba": "8afce874cfc7102801d1d9edf74e8a2138131f8479fc1d058382b04dc23cde06"
+        "rgba": "de5a2768f46421b49fae86b36d855f7942494c616e5103d4cecc617e6326385c"
       },
       {
         "name": "walk-between-13",
-        "rgba": "fbc8c964507c47af9b4e9f27f93ae580478e4422100c46c3c79ee9958013f59c"
+        "rgba": "89958158fb892bec162eb00014a8cb1ebc4d41a291d9e6a6bf99ea11dc83800b"
       },
       {
         "name": "walk-up-b",
-        "rgba": "d1e8c1c6b6495921e4c44af40da7bd085d5e0dfeab5d0152f366b978681e8fa3"
+        "rgba": "eba0ce9e637d2132d6606e7b97660f34cb60725c2b89522d9e49fb1dfe036c3f"
       },
       {
         "name": "walk-between-15",
@@ -141,35 +141,35 @@
       },
       {
         "name": "run-contact-a",
-        "rgba": "1adbb52e5208ff40dfa42c1d779c272d474ecf82a9db380d157273d7ca04b0ff"
+        "rgba": "24fdc5456ce1f271bd20d2216170bf24c2ab75ef8ceb4b4852c3599ec1f1ec1b"
       },
       {
         "name": "run-down-a",
-        "rgba": "605a04106909a93e145118611d55147d0dc35b57f6f090fae25c3a3c8d8926f2"
+        "rgba": "549c89b74048208478ce29a4a5a58dbd7c54de052dc3575b54e009c6ffbd2ead"
       },
       {
         "name": "run-passing-a",
-        "rgba": "ec91df2b2594fdadcbd56f6cbb255b51f8725c706018446c3b20b6a81d36f279"
+        "rgba": "085db2b2a1a4ea9e300aef1ea662c7612b72e02bca178ecaff5221d52eb8a3f6"
       },
       {
         "name": "run-flight-a",
-        "rgba": "e2139b7003da917a7d25587298d961213ec55b311e419c9084c5401ca13c9be8"
+        "rgba": "15cbe764792df7db3e38929d64b4a85917d0a69b8927eb0b0b00b09b653999a0"
       },
       {
         "name": "run-contact-b",
-        "rgba": "f9b273712848d73b7dfebee396f62e2e6640fc975a833d35a5384d9ec249796a"
+        "rgba": "99873f0953546c2cdec3ed332f63f81c2d23c01c5fbf71fc8750b9326b0109cd"
       },
       {
         "name": "run-down-b",
-        "rgba": "95092a080c5fadf8a4db56c4f8d7cc06a892ff2e38eb4a95c6976b07271ba8a6"
+        "rgba": "d7c3a97805cb1519f6a403a54f009e6b611ded2089a176fcbe2a35156bba912f"
       },
       {
         "name": "run-passing-b",
-        "rgba": "69578e93fd4f93b8f2b64d3c82d84931c5df3f0cb41ac99e72a387b51a288d50"
+        "rgba": "bc3147093ef6709eebca61e4ee0fb616e76bd77297e87f6f0593d789553a0b8a"
       },
       {
         "name": "run-flight-b",
-        "rgba": "f23d96a68fb88da82418278d3e6b5c5e4b7087fa1e066e36dc0678feca901299"
+        "rgba": "60d7a4270ed9d8abba30a20115c8f3cca375c8b9856683cf0ebc531537e9de96"
       },
       {
         "name": "jump-crouch",
@@ -218,7 +218,7 @@
     ]
   },
   "R3": {
-    "compiled": "209c01b9b62d2fe46ffd8e6bc57dfff665286ea19d9383375ba3f97c73c26d8b",
+    "compiled": "c33a568f8865e0f2b832d56efc247b78af6214dd91e50e939a33aa43fe6a0ada",
     "frames": [
       {
         "name": "stand",
@@ -226,335 +226,335 @@
       },
       {
         "name": "idle-rest",
-        "rgba": "5045ea68e21511c544a0f1db60e1d843951df11d7f52c4e635387b9f1a138a6a"
+        "rgba": "97ced7ae6e1d3d1f551ff0fd0b3f730e28050cd40398c1673640341b37abb50e"
       },
       {
         "name": "idle-inhale",
-        "rgba": "03df02c342d292cc11de1f644eace2b4dee250c0fdb9268a3b1a9698519b2f5b"
+        "rgba": "c41763432ffcfa51fe8382a06ab282b6494d8fd20d8910c1270daf7540791394"
       },
       {
         "name": "idle-settle",
-        "rgba": "ab54bbce55a5988579019f2b4841baeccf48310ff560da34ac67060e3041f2bb"
+        "rgba": "2eceea76492eb8905e3530c72915f24d54b3bb82b35384786a226ddaf19f5b69"
       },
       {
         "name": "idle-exhale",
-        "rgba": "08d08332f26ff8fef2b18ec5f11630e0f60b3d93ec2c6b9f6dd90a11664ae3b8"
+        "rgba": "809a770e8edfc4243cc2261d922623a02a5c2d32d205f81ce56e17037e0f0117"
       },
       {
         "name": "walk-contact-a",
-        "rgba": "0862648ff605fa7fbb904ef4ed3d7f04cd5ecc3971ff1478aa800200a039dfb7"
+        "rgba": "4c3cced26db67954523bbce6e6f3437d6adf36d34413cef801e1fbc80d40042c"
       },
       {
         "name": "walk-between-1",
-        "rgba": "142b1b6b3f1876a165ef1ef0be7731a55f2ca44de5454c00a696382ef29b80a0"
+        "rgba": "20d965ec7a96f6db5e48545f2e1bf1075a08dbc29bb14a2b6703b116d234d3a0"
       },
       {
         "name": "walk-down-a",
-        "rgba": "5af1766fb44b4653501245f934b382e27358599739b5fe3e297b03377cdbebc0"
+        "rgba": "c16e3ff1c3f14b5d09263a7c3fb08b456cfc56a96bc4a4272fb62427a7a2659e"
       },
       {
         "name": "walk-between-3",
-        "rgba": "de0b284d96cfc9e15d2edc8f2ba149bac9a4fda0217241300822d960f570dd37"
+        "rgba": "ab8d98f37b1b181ed1bc96ba2bfa96d9fa0d06ca4540fbc89b09574a2fa63a72"
       },
       {
         "name": "walk-passing-a",
-        "rgba": "f3787a3713f896a77af2f4e7b85b7c6fff0b347bf22396911da503d9886c6904"
+        "rgba": "d38fdfa86dbf28314f48b58c28647fe4c6c6ebaac944f90e69c0fe3c63e78cfb"
       },
       {
         "name": "walk-between-5",
-        "rgba": "449e5fa19126e99b5e995ba17df946020df7fb4c001f75a852d5eb490f97cce3"
+        "rgba": "00c292897c245c62973f0d43ca920da0f4bd586a53628e190afb11ae68dd4f41"
       },
       {
         "name": "walk-up-a",
-        "rgba": "4145c54d13f9012ebc54aaf3ee0c6d5b5a167075c5ca6a5b9673aac3817bf948"
+        "rgba": "c71781156630f9e61d9681fbccfd38759ad8a979838b39cd145957e7e864e5a9"
       },
       {
         "name": "walk-between-7",
-        "rgba": "5af8fec09dc8c3d622ca58d500c3ffd3fe31270941a291959a5c2b37697960e5"
+        "rgba": "fd95fa8f821d86e0e54722840c1ad1575055bc8dbc6f43a526028cb0ff8c14f4"
       },
       {
         "name": "walk-contact-b",
-        "rgba": "3d0eb9cc488705012827b24d9391821214b66572475cd9865c0da84a3e65a8e5"
+        "rgba": "5e26bbd09f5a343c991605c8c327ccba558f43eddee4931646eafc0e6cef311d"
       },
       {
         "name": "walk-between-9",
-        "rgba": "fc0542424f7203e2e778353f83363ac46a3932f3acdbe7a4695866a8cb961d5f"
+        "rgba": "3c790b05b7e18b4676787a99ea2c78d76b9b91563b5a7f523c799207f92a1285"
       },
       {
         "name": "walk-down-b",
-        "rgba": "0299e402bd0e38d836f6031435c2e4355f4d54c570d5cc62eec769b53a80c3ee"
+        "rgba": "e01fbd0db2af20ec6df7f31793f4a391c45c2879d121d98ee7526d4e06c50bdd"
       },
       {
         "name": "walk-between-11",
-        "rgba": "f4fb4dca93eef1993667d428e7889c15ec1ae514207ccea6f29303ea538e7d49"
+        "rgba": "49014564005a9d62ae30db35a17bd59af55cad4ae8bcf900907402ad6b44813b"
       },
       {
         "name": "walk-passing-b",
-        "rgba": "41aef20d462d7938585579cf631b4cb236b7af0715a6133ecec5152604bf123f"
+        "rgba": "d88596179d7ff83dd566d5c99faa4e939e29931de22d044138bb673c851f7a08"
       },
       {
         "name": "walk-between-13",
-        "rgba": "9fa17310388b5cc6ce5cbec65b3d212e3ef21d99a3808741483143baeb92d499"
+        "rgba": "6cd5edefe4fd4f0c8f0c6da9b11e56746b8a74658946a75417304dc84909662e"
       },
       {
         "name": "walk-up-b",
-        "rgba": "fa46f6a3d83fcef31fd8af1297ac5289fbf7c30efa67934a6b0e039d56f0d176"
+        "rgba": "09d417259386e0177827a02997cc27b6ab4cfd4c2194c0ef30804ef959713a1c"
       },
       {
         "name": "walk-between-15",
-        "rgba": "3b41f78ba91873831d1f17772c1bc24ee34bcbdd7cfc5335bd7140d340198b6b"
+        "rgba": "735d96d0a715fe2919b3055753ff977664ffb48b5f3938bc9b3baa2bddc23a5a"
       },
       {
         "name": "run-contact-a",
-        "rgba": "510da3b0560ccdf152d2326b337d2915edd62e2e384b10eef41bee5109ab6dfc"
+        "rgba": "86b1b85fb2b4ffc74ca2727cadff8ca608f6a73f99a767bc77808f31684c276a"
       },
       {
         "name": "run-between-1",
-        "rgba": "462f22601b31eefbb1de9f783b67f0eefdb8a7c1b16897837ac2d5cf03c6e315"
+        "rgba": "bf1658165c0e903e3e1ae0d285d03ad1805805ce62b069343967083febeedea5"
       },
       {
         "name": "run-down-a",
-        "rgba": "13454905d26c975d37685bb7907687ee5b77a62d8480085f6840ec14806e0283"
+        "rgba": "723b96eff3626b7ea8a9448ce6db3d744c93391542c3fd88ca5599236181ce6b"
       },
       {
         "name": "run-between-3",
-        "rgba": "5cf686a111e3efe51c6764813d71250eec4fa519ceee3d72376642cdd5607112"
+        "rgba": "370df298463bcf17c6e26b4b47cc9a6fdfbe030d347ffedaf0785aaad156c7e8"
       },
       {
         "name": "run-passing-a",
-        "rgba": "131fc0168473e251952a18bd04f2cfec2c8f0df93d3b92b19d1d8468314a7db4"
+        "rgba": "f5634b7cd3378b04450b4624aa52eb49946846fc2fefd7832ef4f5ee26e39327"
       },
       {
         "name": "run-between-5",
-        "rgba": "d26fd212709b67cdd67567ce6ef45ec14cb120a4abe3af50ee27853e2c8dcf10"
+        "rgba": "98c19f6ff18fe5b71506efba5976978ec158187e15a0c84b8a2933cff82da4a5"
       },
       {
         "name": "run-up-a",
-        "rgba": "4e9a796761ebc490ef8a9e5989aa12edfdad8ea51d57c5eb4db55dffb30da219"
+        "rgba": "fd9a2a893d6331dcc5f1e4160fc0abe5eb52a2345505617da868620eb9a5c137"
       },
       {
         "name": "run-flight-a",
-        "rgba": "0386d9ea1a5a32950c789fdc9bb3d675ad8dbc6f9f5d113e26390f06edbba76e"
+        "rgba": "4414edecd6d86017ff224a848651e51319d9002fa9c7193074046d60486d65e5"
       },
       {
         "name": "run-contact-b",
-        "rgba": "8e3f0632ed89025e9230be958b33f5a521c6743e94d177585cd0909ed7ec2561"
+        "rgba": "e2ee2b470f8c614b24734f823e1d65506567af0772a6882eddbeabe278a5910a"
       },
       {
         "name": "run-between-9",
-        "rgba": "3e8ee7e714326e01c5ff0675c69e777f8c37a1289aa0ef1ad16dd8eff303971d"
+        "rgba": "ff32de395b9ba48f4cd425d10ad411efc23ea5d521e000a07af32153788d3d96"
       },
       {
         "name": "run-down-b",
-        "rgba": "6851ad58da45c4f8c222bdfbb7478b125fc144c84ee57539ee6ddd712e93a6fe"
+        "rgba": "270dbab8c8f0efee04585a756759ffb4fc442a695aaa103fb8df419f00055c86"
       },
       {
         "name": "run-between-11",
-        "rgba": "fb16b550c33338821b0b525f8b336eed43aca280faa2c1cb1345ba7b3f43946d"
+        "rgba": "2e7e8a829e81d2c6647b8a6499db15356c54cee737ee7f89affc29f4e61ab429"
       },
       {
         "name": "run-passing-b",
-        "rgba": "536a63d8da183a7d1dfef8d581f8ec2467fdf8f1d5d394f95e200a5082ed7923"
+        "rgba": "98c89b802a0123156cf3b7beeac02809949f8fa10213c714100c7270de1ab941"
       },
       {
         "name": "run-between-13",
-        "rgba": "85b93d2ccf3b4c5c6af6d7265876f074ceeb7d794a07a7333bc71c8c09990e84"
+        "rgba": "a371f09286b60d15d1c54eb3bf9ccc1a3f16cb5a9937c69edb8255c280770c42"
       },
       {
         "name": "run-up-b",
-        "rgba": "41029061c7e37fb91db7fe942ba557d4ffca18c7f3e59116de8e4a7efef5d86e"
+        "rgba": "9cecd4a9fb708ff7a75986b96f134157e37d10559dad7ef7ca37cb05d8eb7816"
       },
       {
         "name": "run-flight-b",
-        "rgba": "8ece8c98388095cf811b7ef3fb88536790944a3a3e5adbcd4adb870633a040a3"
+        "rgba": "bebd3aba90b9ece54367c606a4674e058b88f184bc5ef5cd8738e599d2aec695"
       },
       {
         "name": "jump-crouch",
-        "rgba": "7832be408b7c440a23d6c80a600a4d8f0bed3162335a14c4c537f394bacfd040"
+        "rgba": "4b128d630a9bb9860ac8f480397ea0f1e5614ac3bd38a6854926c1de5a5ada01"
       },
       {
         "name": "jump-take-off",
-        "rgba": "e209b102ca43701947714f39d65bbad6b15a6e2582780891fb1466b17ca93921"
+        "rgba": "79d09a1aabf99a9f9a014557abdd7ab7a2c496296d967a9a02354952ada439f5"
       },
       {
         "name": "jump-rise",
-        "rgba": "70ca13ad96a177d6362db368afc42d39c5b3fba8bbde1cc2e4a0b5703ad79c4e"
+        "rgba": "4b73215599f22546e0350f86f3aef2d12f9742eb2cad9d046d908f0461c887c8"
       },
       {
         "name": "jump-apex",
-        "rgba": "16b0aec57723b82a30496b855010bbc156ba8b2ba0f1c55f14f4e40bab8bf038"
+        "rgba": "82b1f27305c1c05b7b393971deeb3de39879927eb0e804a64f1e76f834e986c0"
       },
       {
         "name": "jump-fall",
-        "rgba": "620d01a810647fcc1426a36eb662d6e9258345263735cac60b368012a0abc8a7"
+        "rgba": "cfb5d2b69e259eec6fe5bd867a1cf928066a97c21c8b6db6cb91f146a49f1d1b"
       },
       {
         "name": "jump-land",
-        "rgba": "b98d30319f25886b442459c569a3fa9de6026d608fd6827ab7b47e161d5e0ba3"
+        "rgba": "99ce1e9f69c73a6af36c2d7213a864e760b79986a5d175cca10a855cd1d2d520"
       },
       {
         "name": "jump-recover",
-        "rgba": "504e8ba9bb75e56bf48700ebdd0ffbde6239edcdce3994b8af56366e549e683c"
+        "rgba": "78c48c072de80c317f5703d5f2c18d5f4b47cb8d284a7faa6a1eafe5587d1e46"
       },
       {
         "name": "attack-anticipation",
-        "rgba": "8d0d682c350199685a9e75951b70a8d0b02b8d9675d4276088fa2b1c221823b0"
+        "rgba": "b9f66129d005becd86023fcf78ab49c1fea5820372ab5895f0a1261603adc354"
       },
       {
         "name": "attack-strike",
-        "rgba": "426e1e4e66b9fd833e3df0acffcb85f565b6247aa9dc339c539d61b81ade0876"
+        "rgba": "47703181047d8556a99c55b013085629e12c08f4dbed727fb802407369ee0528"
       },
       {
         "name": "attack-follow-through",
-        "rgba": "9fc5be1438fa7ed93982dc868c5d5fa25f199ef107cb6385592663e3409b99ca"
+        "rgba": "6050d54779dca5965bedc54883f8432729583bff2850d12d2feef1b5ea6e98a1"
       },
       {
         "name": "attack-recover",
-        "rgba": "33dabd017e91c6e7312da4c9a491ff4abbe9cc2fb2ddab326beca3f00dd55e5d"
+        "rgba": "2eceea76492eb8905e3530c72915f24d54b3bb82b35384786a226ddaf19f5b69"
       },
       {
         "name": "hurt-recoil",
-        "rgba": "b9f0b84fd190c2bacc0446cd0eab49b514d9dc5884d62ed1e2d0244966f96d3c"
+        "rgba": "4f16c3d7af0323cac00258b84f30d1e2759a7752bac80da8b31e1315896de377"
       },
       {
         "name": "hurt-recover",
-        "rgba": "df8a721ec8afdaa7053b1d68a09359b82df25639b21bcb9f3e3cc27810d80502"
+        "rgba": "97ced7ae6e1d3d1f551ff0fd0b3f730e28050cd40398c1673640341b37abb50e"
       },
       {
         "name": "prowl-contact-a",
-        "rgba": "ad9ddb7ed90c9986a100de1136d786612ca89faea604f1e3362361304013fb69"
+        "rgba": "321132ac21451e1d8b46272a2e9108c710cedbcab33a7e169b93276be0f3e3b9"
       },
       {
         "name": "prowl-between-1",
-        "rgba": "45cba09b95ec9b78f8ac02e193f745155212dd841f8f6e1745a4adddb55a483d"
+        "rgba": "4ee1c53de7c977e9c4482d829a6a23c601d86b1ed08b0276d2355b61ca255101"
       },
       {
         "name": "prowl-between-2",
-        "rgba": "27ccfc2cf5c0c1e20e11b202b7cb2925a6ebf2a88f6ee33751bf38b6c7047368"
+        "rgba": "dad384bed809ec9eb2465377e8a7ddc6ad1b53df4e51a2609da8320b0d657c1e"
       },
       {
         "name": "prowl-down-a",
-        "rgba": "d76e57e576c9d3b10de8e5c458139c9b3231fc016036504c0950ea682534d09f"
+        "rgba": "ab37eff1b174bfa890945e9ff36323bc6c9dfaff5dd8f48c705acabb5154454d"
       },
       {
         "name": "prowl-between-4",
-        "rgba": "2acf75815b825b7fb106c916d2f7b4c2ebd5b7ad9485e372c23fa0ec4ad39330"
+        "rgba": "7f3641d4a27708fb7df787a6455debc1f574ae98c4ac1755e621c1370fb31158"
       },
       {
         "name": "prowl-between-5",
-        "rgba": "1082f145fc247d3413255654382969a2264640d0de21444136c86f39e3b63731"
+        "rgba": "60bc81271db56af22d8c748eea3ad538117496cd9481054869e167aba523a0da"
       },
       {
         "name": "prowl-passing-a",
-        "rgba": "c040ade46832c20cffba18b88c166df1a8aaf97981c4b0dffb57388f3cf6ae36"
+        "rgba": "102e82afa2035bb1c9528ee32ed10ef00d92444d50c98e159f3765f6cb414a16"
       },
       {
         "name": "prowl-between-7",
-        "rgba": "7386abbecd6a2b22b4b714aa2efbd7cf46ae50203872c7758d9d5accc0146614"
+        "rgba": "f58158d44237fcd28fddafb05fa0c18bd72a6521b55ddeb064b50ea50eded044"
       },
       {
         "name": "prowl-between-8",
-        "rgba": "e12e75e9bcdb7006aa45f7cd9fdb935ad197644adc44badba62ac2f111c89db9"
+        "rgba": "ca99fd28412594317099e1dbed42e964f0fe48d150e150a84abe782a354ee282"
       },
       {
         "name": "prowl-up-a",
-        "rgba": "0ef8e930808c3ec6e34e6e2300ad34435fcf6f877798ddfdc19bd1f1e9608680"
+        "rgba": "b394f514795e87f6aa7521f3d4858dd040c697e01d11f4b1f5a830f75a952a32"
       },
       {
         "name": "prowl-between-10",
-        "rgba": "c9c06de145e2ed681aff4517ab7638fcb663f9b673b1f7207da6ef76f5b3de7e"
+        "rgba": "fc93d304ee8a5c272e2b147c24f8545f84fdbeb34454e651df88045497d4e0e6"
       },
       {
         "name": "prowl-between-11",
-        "rgba": "259ae7aaaf76362b227da4984c17d742b13d9d11a6ae8cc319e391ce5e11e2fe"
+        "rgba": "14903822550c67643a92ec7afe6bfd5b27a61fa99742be193ac868738c53fcb3"
       },
       {
         "name": "prowl-contact-b",
-        "rgba": "5c95d67a5b8b85fc733cf21d7149d6e5aab877323addcf39afa1b5d9295e6f99"
+        "rgba": "7bdd5592cd7e038516ea4d30d8cda3a02728b07b901b2a7de8ca3eb1b2d4f994"
       },
       {
         "name": "prowl-between-13",
-        "rgba": "ae898eec71beb94927a2257401f409a631c6a2fe4988263e8cf850b94e6c885e"
+        "rgba": "42c976689e55c3eb316828584e04fc1623277a38d7e98f7eeb169bb907cd3328"
       },
       {
         "name": "prowl-between-14",
-        "rgba": "ee46be601cfbd0af10c49af87caf47b981136027ec26bf29f719e6b532b720ab"
+        "rgba": "44bce2eabb5c9dcc2f789c29b2c9721036f7d386b7b74ce9a4f29a0bcbc94d75"
       },
       {
         "name": "prowl-down-b",
-        "rgba": "22ed786d128212baea2116eb27143741245a5cf74bef80a904bf7cfff5a094a7"
+        "rgba": "13917847bca7ed3cff2a0c6527c19acc5d2f6f0738c411daead348f5926cc9bc"
       },
       {
         "name": "prowl-between-16",
-        "rgba": "7df72797fbb7366726b5a268659a23b77ed455ea50a44ebf5501398a37109aa1"
+        "rgba": "ddef5edc3bccde3d9e5b28f540184f63685d413675bd6042bce9d073f1657592"
       },
       {
         "name": "prowl-between-17",
-        "rgba": "3a76be61596ebd8ee98f074e0394e79f94572fa272b8ac7a2b826fd56ad352de"
+        "rgba": "139a29ec73c4c241eba961d7906b8be2bc28a7f073157d11a3fc3ae087c41930"
       },
       {
         "name": "prowl-passing-b",
-        "rgba": "f2299729f20f4c596ec9734edf61863f72365107114515f99602ab199378dc95"
+        "rgba": "ce20dfe93f3c5b6d19c75e236a9a84eda424bfbebc782b2fa0be69ddfc72a655"
       },
       {
         "name": "prowl-between-19",
-        "rgba": "40e17701bd23dc11aca3b5a94fa224cded2358b64bbf5871858031efa9bf8249"
+        "rgba": "a7b19fb70ac0dde9422e318f5f483224c18459ababe7d624f43427b34c3a6250"
       },
       {
         "name": "prowl-between-20",
-        "rgba": "07a21c74c9796a6e72abe6d5ddbf337781d31867e5a57c2290c6b43808a5c83e"
+        "rgba": "7ab04c2cd09bbc083837bd8ab22290f6284aea7d35dc43fcfde784ba347bc39b"
       },
       {
         "name": "prowl-up-b",
-        "rgba": "58dc4a89f884623ddb102111bcb85103f6933bb9f8235055d5c8efd45c86bfa7"
+        "rgba": "c3a2dfb34aef82c17a1118319f6be19d16053873bbab33e3f0b1d260539965d9"
       },
       {
         "name": "prowl-between-22",
-        "rgba": "3b736b2ca1b02d50ba4755c66f47af7116de3bf5caf073eef32e297cc0decd7c"
+        "rgba": "df1822aa396dc2f78a8d77feec1f084a653f4bfe49de216ad927581c0e0263e6"
       },
       {
         "name": "prowl-between-23",
-        "rgba": "c32dbd1de5c2b0473ed40b40a9141af5928927d8fd3a3194e31b027460b19418"
+        "rgba": "ca94c6d28668b616f3ee6147905cd813d9148c463beaf3d440114e2162f6efb0"
       },
       {
         "name": "charge-contact-a",
-        "rgba": "3b643b231d57099735617e0d4f706d8c9966d7efc7bb8c6fba1c62a347d12d63"
+        "rgba": "5573ca92bd415212c117849167e3643ff73d66b25896822a24408ee879a88bc0"
       },
       {
         "name": "charge-between-1",
-        "rgba": "fed96ad237efac675a433c622dacc1f2ab410ec575d805dc6da6af0c4d624aaf"
+        "rgba": "2336c02780d4283550671255d628275d72d50bd96c036ab1682ac53064b52e0d"
       },
       {
         "name": "charge-down-a",
-        "rgba": "c520ae6fdbf6a9634d02aab99f6f86c14929a9c61f341cd16da73f56b28f7bc0"
+        "rgba": "494c9f787140f8b705d816091b29acd475bea7dc913eec3498c3687b66fa24ce"
       },
       {
         "name": "charge-between-3",
-        "rgba": "232eaa1cbbc27fc1bcfa512503dbe0ca16f8d9cdeb5c1cc5bb4ed2488dacbee8"
+        "rgba": "373a34b68c12128dca0410c54371c24e5654bf1675e0bd84cde1ed5d94549743"
       },
       {
         "name": "charge-between-4",
-        "rgba": "111352f74baa1099e44ef72d44ab83bf6abd94118c8db53e35828e6ace0c8006"
+        "rgba": "8ef8cd84a7efcd0dec0c4206f9ee78be0b20310a933d40a0a79773a00cee4791"
       },
       {
         "name": "charge-passing-a",
-        "rgba": "711fa7811e3140398f9a00aaf0b52855303a20c11effb99189ff0eae522334bc"
+        "rgba": "4b9e193df01302b5958daf531f9de7707a6a3f95998d20132f2d1768bcc02483"
       },
       {
         "name": "charge-between-6",
-        "rgba": "119518af406c3c3b30414d7784b1a8e01396e51e951924ec3a4f0d49322ac3f7"
+        "rgba": "7e82be00e16c6d53aea31f48bd1e05279f30e4f1611e173c3ea564d93051387a"
       },
       {
         "name": "charge-between-7",
-        "rgba": "8aaceedb2481938416015cfde788c9f1d30f98c07e24215db07c67edd8611063"
+        "rgba": "2d11f8cbc68e74d52fc84a0d8c47d03d153a849fe9f975032b7a76031ed659c8"
       },
       {
         "name": "charge-up-a",
-        "rgba": "e2b0e21e40e89df978d3beedef2420568a5a50d73023712cb6050fea904defe4"
+        "rgba": "5b4d5996735594ccd6b898e34770f030fa3d9cb4abb0b21f6091239e512f33b4"
       },
       {
         "name": "charge-between-9",
-        "rgba": "ca018ea54bd054dd3915204b7d15e6e7edc1444b58ab6aa1762df2715a0251a2"
+        "rgba": "0c4301039c84bc45b198686c13735353671ffe38cdea1cc077992a5d6bfb51b8"
       },
       {
         "name": "charge-flight-a",
@@ -562,43 +562,43 @@
       },
       {
         "name": "charge-contact-b",
-        "rgba": "f45b12f40bb042c87aca5a3e92b0bc740c1205bbc5f08fe81dc924222036ec31"
+        "rgba": "7c463a4eccdbbac5909491ef578cdc0afd439b21726149692f61b1ebe7b6df04"
       },
       {
         "name": "charge-between-12",
-        "rgba": "dd44c1649fa9233d4f0d4ade563bbdf43191ce1b984ed21fedd8eca0c1968bf5"
+        "rgba": "d6f572c4f210717eb67718fb8a5699c8a04cdfc873f50edc426e170e6f169743"
       },
       {
         "name": "charge-down-b",
-        "rgba": "b442a6c9a3f461ad2adb865f07d1e50a25ad2541486c73e7136c6eb2fbb741d5"
+        "rgba": "e07dbb37cb571fc914fe5ab6c7d56f929f050aa9fb6f75d03b03e2372e6f4484"
       },
       {
         "name": "charge-between-14",
-        "rgba": "ec36ca31caaa7b5268a095a8d69717b3ff5c1668ace61488fa2cedb1023ffd70"
+        "rgba": "dbe98fd5f3d470b52b31c36e7e7f122a40999e9ec1bb7422b841225e09bf0468"
       },
       {
         "name": "charge-between-15",
-        "rgba": "a4ddbac53b3dba13f716e947b6d7d971df400823db6a4bb84f14bdb8f278283a"
+        "rgba": "6131307ced86d221910023560464c7ccb0704e11db0b2e19d83abd1271085ceb"
       },
       {
         "name": "charge-passing-b",
-        "rgba": "96f8d0f683c7bfb70fe45164d7bd823c5a97d571f31f7ad6be932242761d4f5f"
+        "rgba": "96999acc0e92025a72f97b2104a7379b3e0696e459ad4fa3fe86d202f76bd845"
       },
       {
         "name": "charge-between-17",
-        "rgba": "0e947ae009480187aa21a21efdae6089e9b277ef538e9e669ffa9c78b680a176"
+        "rgba": "6c1dec8997458864ce4e4a6f96f89bd2b603e14183329e401624318f79e82efe"
       },
       {
         "name": "charge-between-18",
-        "rgba": "2b61f0736d257e3fe13a2324a0019338c68f31062ba7d46cd0bbf88c0fc40e5e"
+        "rgba": "e1844b8cde729531cb3b05a577b7f10e455d1a661b04fda22ec42d2269f17fc3"
       },
       {
         "name": "charge-up-b",
-        "rgba": "ae8a1f98ae25d0776529a706a14fae0ad075fde59bfbb2505cf2b626b05d6064"
+        "rgba": "01642ceb17420ce61c954d92213e7499af65941545fa29869b472c6a96d5bc83"
       },
       {
         "name": "charge-between-20",
-        "rgba": "c77611e4a8a8baa1d53506075106ae021e4cf3747d12145e3b845798138d5612"
+        "rgba": "2cd6ed2fd4d6d9dfe1b8b9fd57d27e18400a4fcc19e39bda11e7bfd0ae7537f5"
       },
       {
         "name": "charge-flight-b",
@@ -607,7 +607,7 @@
     ]
   },
   "plain": {
-    "compiled": "803eb9cd3b8788603806953911fab4674ddf895cb161f0c6775aa85406fed4f2",
+    "compiled": "4470ecf7f86a9080f19e2d6c69a02446f6ea4adcd47efa65ac5728c779aa4ae4",
     "frames": [
       {
         "name": "stand",
@@ -619,7 +619,7 @@
       },
       {
         "name": "idle-inhale",
-        "rgba": "04cc9bd523165a9d7c2aa3c4c3ab71d1288c0344504e6294ffc75606267dbfcd"
+        "rgba": "887a5e090f7f96953179b77578adecf4a26d84dd8e4539f18a2c42d9839316bd"
       },
       {
         "name": "idle-settle",
@@ -627,15 +627,15 @@
       },
       {
         "name": "idle-exhale",
-        "rgba": "efb2ff723e2a4a85bc799ac887b0be9a1c231b101346bca8bb32b83765d92180"
+        "rgba": "c91d33d97bbd19119fc6f03d0db6d46147b347a013e66f91ba6e38c4305cf192"
       },
       {
         "name": "walk-contact-a",
-        "rgba": "86abaa1ee1d1366fde0f734e250f3b27969fede6a08991ef9eacbbc3df4dee78"
+        "rgba": "d1763e8814e4ce888eaec19b47d91d1112be8a651b5f948a35b872101d234f2c"
       },
       {
         "name": "walk-down-a",
-        "rgba": "f782a51fab23e06200f99d3b82b6481078d5130bade1994b6caa4d7faf84c0e8"
+        "rgba": "26beb8b04dafb89fc08dac41c6e3a6a45c24d51d32085463fa531043ff55eae6"
       },
       {
         "name": "walk-passing-a",
@@ -643,15 +643,15 @@
       },
       {
         "name": "walk-up-a",
-        "rgba": "aeb61a18c1018a3f380bf3020a507d8a64b830edcdec993d2ce3c8cd5a390d17"
+        "rgba": "367481cbeb882f1a24204bf46244bc680740801095f7a2651145465a11d4ca2f"
       },
       {
         "name": "walk-contact-b",
-        "rgba": "0269c506aa77823ae5107917140874137f160c22f1196c1e0bd37012f5cfd2af"
+        "rgba": "296bb16026f11a3eeb86f5b8c2594d88dec82e6da55c33bfe0ec979eab1c9fb1"
       },
       {
         "name": "walk-down-b",
-        "rgba": "0219d1c9aafcb8f940fdb1c2608524378c907ef97a5fb3115265d626b1d352ed"
+        "rgba": "de2a06e66047a711de94e7b0fbfad501799891371385460c865fb164154a5d78"
       },
       {
         "name": "walk-passing-b",
@@ -659,15 +659,15 @@
       },
       {
         "name": "walk-up-b",
-        "rgba": "8973fc12a1d6c4ab40d0c426b2db15c31932469b1bca06e5b430656ab25c5bab"
+        "rgba": "2a4ace9aff52a6279aff4d40cb10efb38c41129a0623e4dc481e143a31626b4e"
       },
       {
         "name": "run-contact-a",
-        "rgba": "bcad98a1ded2eb73fd247ee14d9a6aefb2e326ec9d9a57ca11d86c3c04e939f1"
+        "rgba": "da445a42b07b3c9a0b309a6a2b05d1c889a55ddc9db9c0ffed1786a3e78e76b6"
       },
       {
         "name": "run-down-a",
-        "rgba": "5486fca4deb828860591bceeeeb12ee304dcf956b9618da887d23d0f595c997f"
+        "rgba": "9734749c72dc76eaea4ac0b94498ceaed29292004f47dbddb6503b624e43adcb"
       },
       {
         "name": "run-passing-a",
@@ -675,7 +675,7 @@
       },
       {
         "name": "run-up-a",
-        "rgba": "c535de42683cee7cdd9eecd2516f0deaed42beb698ebf8cc4f0056a0a2a014f2"
+        "rgba": "4b2c247038198e0648426eddba4611eeeaaa90612be509aa78baa68c1c5a3948"
       },
       {
         "name": "run-flight-a",
@@ -683,11 +683,11 @@
       },
       {
         "name": "run-contact-b",
-        "rgba": "3c3f454f051c0f41029779b44d97d6307886baf213f7a013eed042f35b0bbe29"
+        "rgba": "5e4f279f36dd673f24320655f97592dd52a7f2033e26be9757380c12c31b139b"
       },
       {
         "name": "run-down-b",
-        "rgba": "622d4616d120bf3d48cfaef4d087aafc563e7e40ff2aaa8e6f47f0ff5cd63b96"
+        "rgba": "d3889a2e7eda905f1779d902d47103b0d5df529d8d04bb3da877eba69e5289a0"
       },
       {
         "name": "run-passing-b",
@@ -695,7 +695,7 @@
       },
       {
         "name": "run-up-b",
-        "rgba": "b7ebd338332ff8068e0e87cf096efdb38de44b758ada0019959ef423b8b91e2b"
+        "rgba": "a453ff89a4744b375cac005ac0dd3bd203115c313f4c90b90295c65aa0c3479f"
       },
       {
         "name": "run-flight-b",
@@ -703,7 +703,7 @@
       },
       {
         "name": "jump-crouch",
-        "rgba": "43a852e173814eef98e86dc5451078181c2acd7094ab6aa06d838313a50d53eb"
+        "rgba": "af95c8578c03ea7fb298749894f17e60c533a28ccf7a63eedf19c43308e44389"
       },
       {
         "name": "jump-take-off",
@@ -711,23 +711,23 @@
       },
       {
         "name": "jump-rise",
-        "rgba": "050bc4d3810a9ed42e4095970d5f37b17786de1811a9ead3f3d3d528a257c8d8"
+        "rgba": "0a21280d75f21d458803d5c63346d4a17fe0e7c8892a3ecad222a3b2c53944ce"
       },
       {
         "name": "jump-apex",
-        "rgba": "b43a77626f24ba34fb4022def83200d9656072bb818b461ceb850637aa44f13a"
+        "rgba": "e396c515cdf7961908c52757948b6185a9156b0f56c2d34a0f467c0f8f8d2d50"
       },
       {
         "name": "jump-fall",
-        "rgba": "8f8715f72e75871d66dcfcf5dbb7904bc61bfbddb6840a38d80a183195bbcd48"
+        "rgba": "2487ab177533ac79b6df7fa05090765a69c45f57d485e4402a41e8787e186d82"
       },
       {
         "name": "jump-land",
-        "rgba": "c7b74476ed26b8f5ac84b4250414805e6abd4135f70479324058ce494c745727"
+        "rgba": "0bc5ef3acc20e1f5d938bcccbe1715297c744fab0bf8d4669b573d318106b664"
       },
       {
         "name": "jump-recover",
-        "rgba": "469c3aa9dcbae5308d5a49a26bbab29cf87efd080b2fac00bba418909bc81092"
+        "rgba": "f43f1d9ff99bc6b0bc87721a6f46df88c9822236dc54a03ffd4411568843b4fe"
       },
       {
         "name": "attack-anticipation",
@@ -743,7 +743,7 @@
       },
       {
         "name": "attack-recover",
-        "rgba": "65005036e9697f79fca990f6ab16275265211db8d48054d4698952e52d3e59c3"
+        "rgba": "db4418797357f962e3ec00fa40bbe1bcdbc1f54878124d4c5623997882da111d"
       },
       {
         "name": "hurt-recoil",
@@ -751,12 +751,12 @@
       },
       {
         "name": "hurt-recover",
-        "rgba": "480dac3ed802efef739abc4c81d223fee02ab47b7957d057b2971eaaa34fd375"
+        "rgba": "9b1cbfce1a84d1a7b0989f534816c599ba121e4c89c77273a4041e438070951c"
       }
     ]
   },
   "fox": {
-    "compiled": "78071e86d64dd48b5776cba68732b61cb219ca0e14bf703ab1a3a1ef95e1c28f",
+    "compiled": "1a464df842d435146c0abad75b1b1d2f79e81ef23f7255ef2e76a521d3c36c34",
     "frames": [
       {
         "name": "stand",
@@ -764,23 +764,23 @@
       },
       {
         "name": "idle-0",
-        "rgba": "bbe032af7758bcbbff19ef58f44654b96e271337310742b12726d9796f223161"
+        "rgba": "c89f4e2618406e77ff2e5ace0a61908151a61a2410feb69fb8b1f38f5666211d"
       },
       {
         "name": "idle-1",
-        "rgba": "5f2258813b129a2a284e06654ea96f1f636c1836add779149a6a86ca77b44e5c"
+        "rgba": "8b64e629bec0564fc261e1713b45445683c927a9a3420c377670da6566eec6d7"
       },
       {
         "name": "idle-2",
-        "rgba": "1705d9704d7799f11e491893b2dc8d7b5cbd9be601673c9ec806e17fe88d422d"
+        "rgba": "cd1243e8f04d995ec9dce160d3830f1b31df6acd7c17b3a0ad25483ef4042b22"
       },
       {
         "name": "idle-3",
-        "rgba": "46b90783b9c4461597d2e027838e461fa2330c3f8caaa39dbda3bd87c53eadaa"
+        "rgba": "8b64e629bec0564fc261e1713b45445683c927a9a3420c377670da6566eec6d7"
       },
       {
         "name": "idle-4",
-        "rgba": "4cb11b4374c2d5300ba6e9c91c2dd4e5db387861fcccf84cfadd52f8d929aa93"
+        "rgba": "c89f4e2618406e77ff2e5ace0a61908151a61a2410feb69fb8b1f38f5666211d"
       },
       {
         "name": "idle-5",
@@ -788,63 +788,63 @@
       },
       {
         "name": "idle-6",
-        "rgba": "31e5b0b1581a057785452d1437893ab039655c4f366a0a458a7ac16d3dd042c0"
+        "rgba": "e4187cfeda02e48cd271fdf45c8a790cc366b611e8c5b42f55fd56a7623dfbe7"
       },
       {
         "name": "idle-7",
-        "rgba": "d51b76fd5bc7a84a92f08fdd7e7b0a7f2b176fea8e1f6179006066690f50d41a"
+        "rgba": "5eb926da36adc0684cbcc1d0b0a01779b826605454e73869939f67233c96e4bb"
       },
       {
         "name": "walk-contact-a",
-        "rgba": "36cbdf53cd66867f0512de9266f4378060ebdee3625c04404966af2bfc2fc0f8"
+        "rgba": "af09173ac86f5bb3aefb97c337d94a9424359c915bf484b17465c246bd3b81bb"
       },
       {
         "name": "walk-between-1",
-        "rgba": "60288e8b87b6908e119e931387a60a32617428318af53ece830366cf2f9a8f32"
+        "rgba": "1dcf51dee4658ca02853def862ed59f7ce05512061046f4eac2ea89fbb92238c"
       },
       {
         "name": "walk-between-2",
-        "rgba": "e14cc8d82a436aea88890dfe8d704f55e6b9211631126e6d3a91997aba684d0a"
+        "rgba": "5d83171795fc768938819f73f7e0123645ac246c248fa03b826a27c9ee637bea"
       },
       {
         "name": "walk-fore-a",
-        "rgba": "a6ba36f7b1bfff40161f5a292a30cc55690f830aebc0d67d84990106494bdeae"
+        "rgba": "6f89332cb88a6ddf685be3e67e4248b7437fd5b60eebdbe8c1c6aee66efd1925"
       },
       {
         "name": "walk-between-4",
-        "rgba": "2b4a778f0eec3f01411a98dea32e5551103c54359abe903ea744c2e88b4cb5f3"
+        "rgba": "4c4ec6b80d7ede1240cb7a47e1548b8906cabd59323236a4cdb59cf4055a0249"
       },
       {
         "name": "walk-between-5",
-        "rgba": "187f8c3d60e82d7be48180a309c3775048e051aa75f3f8ab3fea47a044a19596"
+        "rgba": "13ef7f91854d87612891d2059f0f95be51713f206c716bbbbb0b0b671acddd38"
       },
       {
         "name": "walk-contact-b",
-        "rgba": "d6a3d778a4b32d98624dbfd42750d5079c6d3ed3a3eafdcf943a23abeb54eb82"
+        "rgba": "883af9276c5454edc0cc6f4e827703331ad49ebf97a7ca1419c88d7baf56eb99"
       },
       {
         "name": "walk-between-7",
-        "rgba": "7a2f36d89ca7e4ae90d25026552352b1c66bd6046145981d744f59914bd14e7f"
+        "rgba": "90099eb9bcbf9f76acc15292c1bc37329adc220d6b21c633ee6d3a6185558991"
       },
       {
         "name": "walk-between-8",
-        "rgba": "2e75551e6a72e95a8e004275e47f69684cc12c70a1af634d39a2a5b6e1b4a4ae"
+        "rgba": "dcfc9895f76d7f3521fa52779e83d30945a0179ceff04b890c90ac6e97cdac12"
       },
       {
         "name": "walk-fore-b",
-        "rgba": "caabb66ed62a48395a7d1d4f3bb54b13e50b5cab92f53d34ffac272db850bdda"
+        "rgba": "853d53866b219455c82097fec0943050012bb4ca5c2605f33621dbdccc6ddf51"
       },
       {
         "name": "walk-between-10",
-        "rgba": "bdd1e028997209d33815465fbfa12b34727628deffba609fd1f09e85335482d9"
+        "rgba": "df76476019ca9e1eda620e6802d6b300635e1b4543c2552e744081fdb1770c4a"
       },
       {
         "name": "walk-between-11",
-        "rgba": "0cc69f1534148ff0e1c281eea9f671814b4d3e3093bd5bc0ac0dd5a50cf85600"
+        "rgba": "121e4c7aa8b12d1ebcd58767f80e2da04ab0bc258a3241292c6bf85b3a3f1cf5"
       },
       {
         "name": "trot-contact-a",
-        "rgba": "ba64d5c3e2fb59586153c9df283c8c7b274bbf09228b84a6cd01612dc66986e8"
+        "rgba": "d790b8ec42cdd82d73f59f5c2d1c89fac6241880768c961d09506337bb78fc4e"
       },
       {
         "name": "trot-between-1",
@@ -852,11 +852,11 @@
       },
       {
         "name": "trot-passing-a",
-        "rgba": "9887821f224595826c09bc4d4f32ecac63242a9cc6b469235a95d9235e6b8785"
+        "rgba": "c9b08f6179626ffbe16e9e23cbd69de5bf799f9afc81445acba94fb63ec3dfb0"
       },
       {
         "name": "trot-between-3",
-        "rgba": "7b5abe79dbcdc13f52b4787a3c40e907a9465a6c39cd29e1e556f0b93fc370bb"
+        "rgba": "540fc4001a4bbb89cc367eea48c13d2eb6e2004ebb9694f275860dce42a2ec81"
       },
       {
         "name": "trot-contact-b",
@@ -864,83 +864,83 @@
       },
       {
         "name": "trot-between-5",
-        "rgba": "eb42d0993f0fb19db92fee1519cad0cb49c5cbaa7dc0c740de18995916aa37b8"
+        "rgba": "90489b86e1581c5468cc717b8d0d81cf601345f199077624e635426ec2687a49"
       },
       {
         "name": "trot-passing-b",
-        "rgba": "779897a19fd6d73c28d3de3f23f55a949f9006b4690b23d1b15a874808f83eaf"
+        "rgba": "262f9909a23cd28c0e2fbffd5c8cdf18a44ba27aa477e46a0f8a1d0e2f1b11ee"
       },
       {
         "name": "trot-between-7",
-        "rgba": "331426fa98292e84187c0e43cadff343fa7de51d094f58029e5c49e9ad00dbd5"
+        "rgba": "e3a36dadb8958db211b53594a5f478625066407f6ba1a840731e5d80287a9c39"
       },
       {
         "name": "run-contact-a",
-        "rgba": "e7223aca51f0c9926db922124143731b71a301cc917dd2808aa9d6cebbb4f631"
+        "rgba": "bc7cda7bfc293eccbdb4da48ab843d867800af4b899f71f4a3267d12adc5bbeb"
       },
       {
         "name": "run-contact-b",
-        "rgba": "b8c9c34473cffecb59f01df2bd2a4303571050ee6a39b0fdebf0ddffa9100ff6"
+        "rgba": "4fc9a0901204433ed6b5dab0882eff5b0705bf33e9b11aa141e4ec3c885941b9"
       },
       {
         "name": "run-between-2",
-        "rgba": "863e62bb4430d8ae789ae11d86e0a979b0ece59e1fa701724266bf3dc5aae47b"
+        "rgba": "ad55c64a271c6baa7868d31619714c0eb1f68b03ca948e9cd904ee3f3f33cd2f"
       },
       {
         "name": "run-extended",
-        "rgba": "dbf94a1e550ae8e0d8c624c1ccd4569e652c67d1fa40759413c1a8d3d0c4e156"
+        "rgba": "395773c195c4e13d5bb9ac5646414cebfac651ba245cd95953e8ac78eb25d5e0"
       },
       {
         "name": "run-fore-b",
-        "rgba": "a8c50ff3281fd8033471b0b8324370782fdcd7ce2d70b59456209e64d48d14d2"
+        "rgba": "d8235e4646a22a6dc1a960b903f22d72357374d53270ce75cc1f856ae4cb15c9"
       },
       {
         "name": "run-fore-a",
-        "rgba": "5bc15251b125f4b921a5b482b9f4ed9cf5c9268202ff20b758096a8df8979dd5"
+        "rgba": "684230e723a0a3eecfb7bf73fe8986f12b8bc9a95673936649767544e6e35d75"
       },
       {
         "name": "run-between-6",
-        "rgba": "14638d3031a3bf5ce70025ac89fb3ca5ac3f496772f98c0cf0600e6037da95c7"
+        "rgba": "bff60a057184be128b6dd8a2516047668c6746c70e7d43fae26b9f93b0d026c5"
       },
       {
         "name": "run-gathered",
-        "rgba": "447945d6cedee4d1413780680464263e56f9f82e94025765d3f59feab6d57eac"
+        "rgba": "580ccd35f1a3c14cfebc8c204083435ec67a97d1237b8e1691da11ae21ad962b"
       },
       {
         "name": "jump-crouch",
-        "rgba": "74cddc030a8f1b2c37321bd8b15b5c418a6ff4d21fced3b713acaa6d77529b1c"
+        "rgba": "a623e5b5b425c60aa2065d1c32fcab0e5c71613cf467224d2ddbb494bc922c1a"
       },
       {
         "name": "jump-take-off",
-        "rgba": "8efd7e59bd84eba45aa36edc549e4e2152d9cc5c9e4a9060066eeb080300c0d2"
+        "rgba": "731c166179a09423e029c2fb2476e85608432f68b3dc3f94cd61d8c233ae99a7"
       },
       {
         "name": "jump-rise",
-        "rgba": "756a9fdb610d9728812d243a0e39ad6c29f1feefe829fa2b466f788331b33ce5"
+        "rgba": "073d8b3e8c11030045acc9edead3025b29e85570316ee018afaeff2724b318c6"
       },
       {
         "name": "jump-apex",
-        "rgba": "412f806646e3337ff155532bb8c635424c4c3787ea9cd896880384b5b3cd3aea"
+        "rgba": "b43a39171deb900e61734874b5c5c9de07d15b31e82a56aa0771711f42825ea1"
       },
       {
         "name": "jump-fall",
-        "rgba": "735fe52263ee3ba35923e78acdd8f4cacac77086692c060e57e948e0e3a79d52"
+        "rgba": "0dcdb41acf750dccea47b261a5af0588a6f254571701dde750954cccbef72cbd"
       },
       {
         "name": "jump-land",
-        "rgba": "512d8abee7336a42bb36ba35017277a084a0f76bb4fd0e167251d04ba04809ac"
+        "rgba": "e7a9cddd67cd0b81ba8159c66a0be5df7c6074c7bb708f99209a61b3cc8aeede"
       },
       {
         "name": "jump-recover",
-        "rgba": "7ed46db5183cd8a9cef1055ad544bdc8f64ba3bbdb9bf6933f5771a5131ce3dd"
+        "rgba": "b3553495cd68691146df9b5ae4db273829ba6d021dae79983979415a79c3d7db"
       },
       {
         "name": "hurt-recoil",
-        "rgba": "c341366a2f6c06889d5f7ad12f3d5df295dc7e62af27f224870169eea34380a6"
+        "rgba": "6b1678fb0a8817f598f9ab57fb382b22b06afa8910a65cd2534cad16853c3a27"
       },
       {
         "name": "hurt-recover",
-        "rgba": "ebcc08e45781f27ab1430131273bc374e433ed8476bde400ba2bca1a7bcc1f09"
+        "rgba": "ed7f299bc978488cb3d112491d7a474b5130b448e0f5f7a1f4f89a3fdff98564"
       }
     ]
   }

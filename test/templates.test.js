@@ -278,12 +278,12 @@ test('a sword held with a relative angle turns with the forearm through the atta
   assert.match((await text('docs/agent-quick-start.md')).split('\n').find(line => line.includes('examples/hero.poses.json')), /hero-sword\.poses\.json`: the prop's relative `angle` turns it with the arm/);
 });
 
-test('a tail follows through: it trails in a run, further than in a walk, lifts as a jump falls, whips past rest after a strike and settles round a loop', () => {
+test('a tail follows through: it trails in a run, further than in a walk, lifts as a jump falls, whips past rest after a strike and settles round a loop', async () => {
   // The plain humanoid's scarf hangs down and back from the nape (facing right): a larger relative angle trails it
   // further back, or lifts it.
   const swings = source => {
     const expanded = expandPoses(source), rest = Object.fromEntries(source.poses[0].parts.map(part => [part.name, part.angle]));
-    return name => expanded.poses.find(pose => pose.name === name).parts.filter(part => source.rig.tail.includes(part.name)).map(part => part.angle - rest[part.name]);
+    return name => expanded.poses.find(pose => pose.name === name).parts.filter(part => source.rig.tail.includes(part.name)).map(part => ((part.angle - rest[part.name]) % 360 + 540) % 360 - 180);
   };
   const swing = swings(plainRig()), root = name => swing(name)[0], mean = names => names.reduce((sum, name) => sum + root(name), 0) / names.length;
   const motion = (prefix, count) => expandPoses(plainRig()).poses.filter(pose => pose.name.startsWith(`${prefix}-`)).map(pose => pose.name).slice(0, count);
@@ -308,6 +308,13 @@ test('a tail follows through: it trails in a run, further than in a walk, lifts 
   const still = swings(held), wide = swings(loose);
   assert.ok(expandPoses(held).poses.slice(1).every(pose => still(pose.name).every(degrees => degrees === 0)));
   assert.ok(motion('run').reduce((sum, name) => sum + wide(name)[0], 0) / motion('run').length > run * 1.5);
+  // A chain bends as one curved piece and a link on the figure stops short of flipping over, even on the fox, whose
+  // level tail every fall and landing catches broadside: the cracked-whip tips and upright tails of a loose chain.
+  const fox = JSON.parse(await readFile(new URL('../examples/fox.poses.json', import.meta.url), 'utf8')), foxSwing = swings(fox);
+  for (const pose of expandPoses(fox).poses.slice(1)) {
+    const [root, ...bends] = foxSwing(pose.name);
+    assert.ok(Math.abs(root) <= 75 && bends.every(bend => Math.abs(bend) <= 30), `${pose.name}: ${[root, ...bends]}`);
+  }
   const bare = plainRig(); delete bare.rig.tail;
   bare.motions.run.follow = 1;
   assert.throws(() => expandPoses(bare), /^PixelError: poses\.motions\.run\.follow: follow swings the tail; name its instances in rig\.tail$/);

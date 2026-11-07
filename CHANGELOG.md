@@ -4,6 +4,30 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Fixes from a review before release
+
+- **Breaking bodies:**
+  - A symbol body that breaks no longer crashes a match drawn frame by frame (`pixelbolt sequence`, `pixel_compile` with `sequence`), which broke the crate-smash preset.
+  - An effect's `most` now leaves room by default for every body with `breaks` to break into all its pieces, up to 4,096. Before, it stayed at 256, so late breaks were cut short or skipped without a word. A compile now warns when a break is cut short.
+  - A fixed body that an event breaks is priced in the work estimate as the free pieces it becomes, so such a scene is refused up front instead of running past MCP's time limit.
+  - A `break` event aimed at a hoop is refused, as `breaks` on a hoop already was.
+  - The fluid schema no longer offers `breaks`, which fluids refuse.
+- **Figures:**
+  - A figure facing left (a walk or run with a negative `speed`) bends its knees and leans the way it faces; before, its knees bent backward.
+  - A four-legged walk or run that leaves the ground more than once after the same feet (a quick gait, or 28 frames or more) no longer names two poses alike and fails to compile.
+  - A `rig.tail` instance can't also be a leg or arm bone, the chest or the neck; before, its swing silently overwrote the leg or arm.
+  - The poses schema refuses what the compiler refuses: `fore` without `hind`, `legs` with `fore`, and `chest` or `neck` without `fore`.
+- **Draft views:**
+  - A named point on a column a shear draft drops moves to the kept column beside it, so a blade's tip stays on the blade.
+  - Names the built-in font can't draw are labelled with `?`, in the motion review's arcs key and in a draft sheet, instead of failing the call.
+- **Crystals:**
+  - A crystal that has stopped growing reuses its outline instead of tracing it again each frame, so a large field of crystals draws in seconds instead of minutes, with the same pixels. The work estimate now counts each frame's drawing as well as its painting.
+  - A `light` too short to normalise is refused.
+  - The snowflake schema allows only `count: 1`, which is all the compiler takes.
+- **Package:**
+  - `pixelbolt/crystal` is a package export, as `pixelbolt/wave` and `pixelbolt/bodies` are.
+  - `pixelbolt share` shares crystal and bodies sources as the ordinary grids they compile to, as it does waves.
+
 ### Tails that follow through
 
 - Motion templates move `rig.tail` with the body instead of one fixed sway. Each tail instance hangs from its attach point on a damped spring that holds its rest angle against gravity, and the attach point's own motion swings it: the starts and stops of the body, gravity as the body leans or turns, and the air the figure moves through. A link on another tail link hangs from that link's moving end, so it lags the one before it.
@@ -27,6 +51,7 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - Drafts follow pixel-art rules (`draftTurn` in `src/craft.js`). Quarter turns are exact. A long or thin part slides whole columns along the nearest clean slope (1:6 to 1:1), so straight runs become even staircases and every pixel keeps its colour; repeated columns are dropped to keep its length along the slope, a cross piece such as a guard tilts with it, gaps close in the outline colour and outline pixels left sticking out go. A compact part keeps its area and its outline ring, and a pixel none of its neighbours share (an eye) is drawn once. Only the part's own palette keys are used, and the anchor and points move with the pixels under them.
 - The hero's hand-drawn boot views keyed 30 and 330 are exactly the drafts at 15 and 345, and the drafts at 30 and 330 are those drawings one repeated column shorter. Its hands keep their round shape, where the compiler's turn breaks them. `test/goldens/drafts.json` pins the drafts of the hero's and the courier's parts every 15°.
 - `pictureSheet` in `src/core.js` lays small palette pictures side by side with labels in the built-in font, aligned on their anchors.
+- The sheet is drawn only for `--preview` (and the MCP image), and one too large to draw, such as for a part anchored far from its pixels, never stops the drafts: they come back with `preview` (CLI) or `sheet` (MCP) saying why there is no image. An unfinished authored view at a drafted angle is named, with its path, in that draft's note and left off the sheet.
 
 ### For contributors: one goldens command and related tests
 

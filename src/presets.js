@@ -117,7 +117,7 @@ function about(entry, source, animations) {
     const rest = Array.isArray(source.poses) ? source.poses.find(pose => pose?.name === source.rig?.rest) : undefined;
     const held = (Array.isArray(rest?.parts) ? rest.parts : []).filter(part => hands.has(part?.attach?.part) && source.parts?.[part.part]?.rows
       && !/hand/i.test(`${part.name} ${part.part}`)).map(part => part.name);
-    return templates.length ? `A rig whose motion templates make ${listNames(templates)}${held.length ? `, with ${listNames(held)} in hand` : ''}.` : `Posed parts: ${listNames(names)}.`;
+    return templates.length ? `A ${source.rig?.fore ? 'four-legged ' : ''}rig whose motion templates make ${listNames(templates)}${held.length ? `, with ${listNames(held)} in hand` : ''}.` : `Posed parts: ${listNames(names)}.`;
   }
   if (entry.kind === 'fx') return `Particles and effect shapes: ${listNames(names)}.`;
   if (entry.kind === 'wave') return `A looping wave pattern: ${listNames(names)}.`;

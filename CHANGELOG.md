@@ -4,6 +4,14 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Four-legged creatures
+
+- The motion templates animate four-legged side-view animals. A rig names its front legs in `rig.fore` and its back legs in `rig.hind` (each the near chain, then the far one) instead of `legs`, with an optional `rig.chest`, a bone on the body mass that the fore legs hang from, and `rig.neck`, a bone the head hangs from. A fore leg's solved joint folds forward as its foot lifts (the wrist) and back under weight (the elbow); a hind leg's folds back (the hock).
+- Gaits that plant all four feet without sliding: `walk` is a lateral sequence (near hind, near fore, far hind, far fore) with three feet down; the new `trot` template moves diagonal pairs; `run` is a rotary gallop with an extended and a gathered flight, its spine curling and stretching by `flex` degrees (default 10) while the body rocks onto its hind and then its fore feet and the neck turns back to steady the head. Key poses are named for the foot that lands (`contact-a`, `fore-a`, … `extended`, `gathered`).
+- Idle, jump and hurt fit the body plan: the jump crouches with its back curled, rears up as the hind feet push off with the fore feet already reaching, tucks all four legs and lands front-down; hurt flinches back with the back curled instead of tipping over. `trot`, `flex`, `chest` and `neck` are refused on a biped, and `attack` on a rig without arms says so.
+- The motion review measures all four feet (contacts, slide, ground, and each leg against its partner at the loop seam), reports the biped gait checks as `null` on four legs rather than passing them, and its arcs trace the four feet and ring only the foot that lands.
+- A new example, `examples/fox.poses.json` (brief: `examples/fox.brief.md`): a red fox that idles, walks, trots, gallops, jumps and flinches, also a preset (`fox`). Its body joins with `socket` caps, so the fur has no lines through it. Biped figures are unchanged, pixel for pixel.
+
 ### For contributors: one goldens command and related tests
 
 - Every pinned output hash outside the frozen pre-M0 baseline now lives in `test/goldens/<set>.json`, one set per test file (fluid, bodies, crystal, shapes, fx, spell library, idle squash, figures, terrain and wave), and each case is still defined in its test, checked with the `goldens()` helper from `scripts/goldens.mjs`. A test that stops reaching a pinned case fails instead of passing with less to compare.

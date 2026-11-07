@@ -265,6 +265,56 @@ const slimeIdle = { format: 'pixelforge-poses', version: 1, name: 'slime-idle', 
   motions: { idle: { template: 'idle', frames: 8, squash: 0.15, duration: 140 } },
   sheet: { columns: 8 } };
 
+// A four-legged side-view figure rigged for the gaits: a red fox (brief: examples/fox.brief.md). A round mass at the
+// hips is the rig body and the chest is a bone standing out in front of it, which the gallop bends against the hips;
+// the neck turns back against the chest, so the head stays steadier than the body. Each leg is two bones solved to
+// rig.ground: an orange upper bone whose socket cap blends into the body, a dark stocking and a small grid paw. Fore
+// legs hang from the chest's shoulder and hind legs from the hips; at rest the hind legs bend back at the hock. Near
+// limbs are one ramp step lighter than far ones, the body joins without lines through it, and every motion passes its
+// own checks.
+const foxLeg = (side, end, far, angles) => {
+  const name = `${side}${end[0].toUpperCase()}${end.slice(1)}`, parent = end === 'fore' ? { part: 'chest', point: 'shoulder' } : { part: 'hips', point: 'hip' };
+  return [
+    { name: `${name}Upper`, part: `${far ? 'far' : ''}${far ? end[0].toUpperCase() + end.slice(1) : end}Upper`, attach: parent, angle: angles[0] },
+    { name: `${name}Lower`, part: `${far ? 'far' : ''}${far ? end[0].toUpperCase() + end.slice(1) : end}Lower`, attach: { part: `${name}Upper`, point: 'end' }, angle: angles[1] },
+    { name: `${name}Paw`, part: far ? 'farPaw' : 'paw', attach: { part: `${name}Lower`, point: 'end' } }
+  ];
+};
+const fox = { format: 'pixelforge-poses', version: 1, name: 'fox', width: 48, height: 32,
+  palette: { k: '#24161c', R: '#5e2414', r: '#9a3d1c', o: '#d4652a', y: '#f09a48', c: '#1e1418', d: '#3a2626', e: '#6b4536', f: '#8c5d47', v: '#c8b294', w: '#f3e7cf' },
+  ramps: [['R', 'r', 'o', 'y'], ['c', 'd', 'e', 'f'], ['v', 'w']],
+  light: 225,
+  parts: {
+    hips: { mass: { size: [9, 8], ramp: 0, base: 2, outline: 'k' }, points: { hip: [-1, 1], waist: [3, -1], tail: [-4, -2] } },
+    chest: { bone: { length: 9, width: [6, 7], ramp: 0, base: 2, outline: 'k', caps: ['socket', 'round'] }, points: { end: 'end', shoulder: [7, 2], neck: [8, -2], bib: [10, -1] } },
+    neck: limb(4, [4, 3], 0, 2),
+    head: { rows: ['..k.k.......', '.kdkdk......', '.kdooyk.....', 'kooyyyyokk..', 'kooykyyyoyok', 'krooywwwwwkk', '.kkrwwwwkk..', '...kkkk.....'], anchor: [3, 5] },
+    bib: { rows: ['..w', '.ww', 'www', 'wwv', 'wv.'], anchor: [1, 1] },
+    foreUpper: limb(6, [3, 2], 0, 2), foreLower: limb(4, [2, 2], 1, 2), farForeUpper: limb(6, [3, 2], 0, 1), farForeLower: limb(4, [2, 2], 1, 1),
+    hindUpper: limb(6, [5, 2], 0, 2), hindLower: limb(4, [2, 2], 1, 2), farHindUpper: limb(6, [5, 2], 0, 1), farHindLower: limb(4, [2, 2], 1, 1),
+    paw: { rows: ['keek.', '.kkkk'], anchor: [1, 0] }, farPaw: { rows: ['kddk.', '.kkkk'], anchor: [1, 0] },
+    tail: limb(5, [3, 5], 0, 2), brush: limb(5, [5, 5], 0, 2), tip: limb(4, [5, 1], 2, 1, ['socket', 'point'])
+  },
+  poses: [{ name: 'stand', duration: 200, origin: [24, 30], parts: [
+    { name: 'tail', part: 'tail', attach: { part: 'hips', point: 'tail' }, angle: 165 },
+    { name: 'brush', part: 'brush', attach: { part: 'tail', point: 'end' }, angle: -15 },
+    { name: 'tip', part: 'tip', attach: { part: 'brush', point: 'end' }, angle: 20 },
+    ...foxLeg('far', 'hind', true, [110, -40]), ...foxLeg('far', 'fore', true, [90, 0]),
+    { name: 'hips', part: 'hips', at: [-3, -13] },
+    { name: 'chest', part: 'chest', attach: { part: 'hips', point: 'waist' }, angle: 0 },
+    { name: 'neck', part: 'neck', attach: { part: 'chest', point: 'neck' }, angle: -50 },
+    { name: 'head', part: 'head', attach: { part: 'neck', point: 'end' } },
+    { name: 'bib', part: 'bib', attach: { part: 'chest', point: 'bib' } },
+    ...foxLeg('near', 'hind', false, [110, -40]), ...foxLeg('near', 'fore', false, [90, 0])
+  ], markers: ['nearHind', 'farHind', 'nearFore', 'farFore'].map(leg => ({ name: `${leg}Foot`, part: `${leg}Lower`, point: 'end' })) }],
+  rig: { body: 'hips', chest: 'chest', neck: 'neck', head: 'head', ground: 28, rest: 'stand',
+    hind: [['nearHindUpper', 'nearHindLower'], ['farHindUpper', 'farHindLower']], fore: [['nearForeUpper', 'nearForeLower'], ['farForeUpper', 'farForeLower']],
+    tail: ['tail', 'brush', 'tip'] },
+  motions: { idle: { template: 'idle', frames: 8, duration: 150 }, walk: { template: 'walk', frames: 12, speed: 16, stride: 10, lift: 2, duration: 70 },
+    trot: { template: 'trot', speed: 36, stride: 12, lift: 3, duration: 70 }, run: { template: 'run', frames: 8, speed: 72, stride: 14, lift: 4, duration: 60 },
+    jump: { template: 'jump', apex: 3 }, hurt: { template: 'hurt' } },
+  sheet: { columns: 12 } };
+
 // A lower third for video: 240 × 32 fills the width of a 1080p frame at scale 8. The panel opens, the title is typed
 // in, and the last pose holds. Every duration is a whole number of frames at 30 and at 60 frames per second.
 const panel = width => [{ op: 'rect', x: 0, y: 4, w: 3, h: 24, color: 'gold' }, ...(width ? [{ op: 'rect', x: 3, y: 4, w: width, h: 24, color: 'panel' }, { op: 'rect', x: 3, y: 27, w: width, h: 1, color: 'edge' }] : [])];
@@ -713,7 +763,7 @@ const fluids = { campfire, 'smoke-puff': smokePuff, explosion, 'steam-vent': ste
 
 await mkdir(new URL('../examples/', import.meta.url), { recursive: true });
 // Authored sources are pretty-printed; compiled recipes use the CLI's compact formatting.
-const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'slime-idle.poses': slimeIdle, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
+const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'fox.poses': fox, 'slime-idle.poses': slimeIdle, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
 // Autotile sets drawn from terrain descriptions (scripts/terrain-presets.mjs).
 Object.assign(authored, terrainPresets);
 // Electric gases: arcs, lightning and plasma (scripts/plasma-presets.mjs).

@@ -456,7 +456,7 @@ export function compilePoses(source, mode) {
   if (source.rig?.rest !== undefined) {
     const rest = compiled[source.rig.rest];
     if (!rest) fail('poses.rig.rest', 'unknown rest pose');
-    for (const name of [source.rig.body, source.rig.head, ...(source.rig.legs ?? []).flat(), ...(source.rig.arms ?? []).flat(), ...(source.rig.tail ?? [])].filter(n => n !== undefined)) if (!Object.hasOwn(rest.placed, name)) fail('poses.rig', `unknown rest-pose instance ${name}`);
+    for (const name of [source.rig.body, source.rig.chest, source.rig.neck, source.rig.head, ...['legs', 'hind', 'fore', 'arms'].flatMap(role => (source.rig[role] ?? []).flat()), ...(source.rig.tail ?? [])].filter(n => n !== undefined)) if (!Object.hasOwn(rest.placed, name)) fail('poses.rig', `unknown rest-pose instance ${name}`);
     // Rig output keeps only used, distinct drawings. Lexical selection is independent of cache insertion order.
     const used = [...new Set(frames.flatMap(frame => frame.layers.map(layer => layer.ops[0].symbol)))].sort();
     const canonical = new Map(), aliases = new Map(), unique = {};
@@ -521,7 +521,9 @@ export function compilePoses(source, mode) {
   // a target out of reach without anyone asking for the metadata. Warnings on generated poses are said once per
   // motion and chain, naming the poses, instead of once per pose at a path the author never wrote. A leg that already
   // ends away from rig.ground in the rest pose misses in every motion for that one reason, so it is said once per leg.
-  const restEnd = part => rig?.legs?.some(chain => chain.at(-1) === part) ? rest?.placed[part]?.joints?.end : undefined;
+  // Where a leg ends (legs, or a four-legged rig's hind and fore legs) is said at its rig path.
+  const legAt = part => { for (const role of ['legs', 'hind', 'fore']) { const index = (rig?.[role] ?? []).findIndex(chain => chain.at(-1) === part); if (index >= 0) return `poses.rig.${role}[${index}]`; } };
+  const restEnd = part => legAt(part) ? rest?.placed[part]?.joints?.end : undefined;
   const offGround = part => { const end = restEnd(part); return end !== undefined && Math.abs(end[1] - rig.ground) > 1; };
   const text = [], groups = new Map();
   for (const warning of warnings) {
@@ -539,8 +541,8 @@ export function compilePoses(source, mode) {
       const errors = items.map(item => round(item.error)), by = `by ${span(Math.min(...errors), Math.max(...errors))} px`;
       const shape = items.every(item => item.straightened) ? 'straight' : items.some(item => item.straightened) ? 'straight or folded' : 'folded';
       if (offGround(part)) {
-        const motions = [...new Set(items.map(item => item.motion))], leg = rig.legs.findIndex(chain => chain.at(-1) === part);
-        return `poses.rig.legs[${leg}] (${part}): Motion templates aim the feet at rig.ground (row ${rig.ground}), but in the rest pose "${rig.rest}" this leg ends at row ${restEnd(part)[1]}, so its target is out of reach in ${items.length} generated pose${one ? '' : 's'} (${nameList(motions, 6)}) ${by} and the chain uses its closest ${shape} pose. Move the body or the pose origin until the leg ends near row ${rig.ground}, or set rig.ground to match.`;
+        const motions = [...new Set(items.map(item => item.motion))];
+        return `${legAt(part)} (${part}): Motion templates aim the feet at rig.ground (row ${rig.ground}), but in the rest pose "${rig.rest}" this leg ends at row ${restEnd(part)[1]}, so its target is out of reach in ${items.length} generated pose${one ? '' : 's'} (${nameList(motions, 6)}) ${by} and the chain uses its closest ${shape} pose. Move the body or the pose origin until the leg ends near row ${rig.ground}, or set rig.ground to match.`;
       }
       return `poses.motions.${motion} (${part}).reach: Target is out of reach in ${items.length} of ${new Set(source.animations[motion].frames).size} poses (${names}) ${by}; the chain uses its closest ${shape} pose.${restEnd(part) ? ` In the rest pose "${rig.rest}" this leg ends on rig.ground (row ${rig.ground}), so the motion asks for more than it reaches: lower its stride, lift or bob, or lengthen the leg.` : ''}`;
     }

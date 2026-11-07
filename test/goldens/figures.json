@@ -754,5 +754,194 @@
         "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
       }
     ]
+  },
+  "fox": {
+    "compiled": "78071e86d64dd48b5776cba68732b61cb219ca0e14bf703ab1a3a1ef95e1c28f",
+    "frames": [
+      {
+        "name": "stand",
+        "rgba": "ff2923e25c1823c2ef8524e7914152766b66b94d92e2c379efc6a23711c401ac"
+      },
+      {
+        "name": "idle-0",
+        "rgba": "bbe032af7758bcbbff19ef58f44654b96e271337310742b12726d9796f223161"
+      },
+      {
+        "name": "idle-1",
+        "rgba": "5f2258813b129a2a284e06654ea96f1f636c1836add779149a6a86ca77b44e5c"
+      },
+      {
+        "name": "idle-2",
+        "rgba": "1705d9704d7799f11e491893b2dc8d7b5cbd9be601673c9ec806e17fe88d422d"
+      },
+      {
+        "name": "idle-3",
+        "rgba": "46b90783b9c4461597d2e027838e461fa2330c3f8caaa39dbda3bd87c53eadaa"
+      },
+      {
+        "name": "idle-4",
+        "rgba": "4cb11b4374c2d5300ba6e9c91c2dd4e5db387861fcccf84cfadd52f8d929aa93"
+      },
+      {
+        "name": "idle-5",
+        "rgba": "5eb926da36adc0684cbcc1d0b0a01779b826605454e73869939f67233c96e4bb"
+      },
+      {
+        "name": "idle-6",
+        "rgba": "31e5b0b1581a057785452d1437893ab039655c4f366a0a458a7ac16d3dd042c0"
+      },
+      {
+        "name": "idle-7",
+        "rgba": "d51b76fd5bc7a84a92f08fdd7e7b0a7f2b176fea8e1f6179006066690f50d41a"
+      },
+      {
+        "name": "walk-contact-a",
+        "rgba": "36cbdf53cd66867f0512de9266f4378060ebdee3625c04404966af2bfc2fc0f8"
+      },
+      {
+        "name": "walk-between-1",
+        "rgba": "60288e8b87b6908e119e931387a60a32617428318af53ece830366cf2f9a8f32"
+      },
+      {
+        "name": "walk-between-2",
+        "rgba": "e14cc8d82a436aea88890dfe8d704f55e6b9211631126e6d3a91997aba684d0a"
+      },
+      {
+        "name": "walk-fore-a",
+        "rgba": "a6ba36f7b1bfff40161f5a292a30cc55690f830aebc0d67d84990106494bdeae"
+      },
+      {
+        "name": "walk-between-4",
+        "rgba": "2b4a778f0eec3f01411a98dea32e5551103c54359abe903ea744c2e88b4cb5f3"
+      },
+      {
+        "name": "walk-between-5",
+        "rgba": "187f8c3d60e82d7be48180a309c3775048e051aa75f3f8ab3fea47a044a19596"
+      },
+      {
+        "name": "walk-contact-b",
+        "rgba": "d6a3d778a4b32d98624dbfd42750d5079c6d3ed3a3eafdcf943a23abeb54eb82"
+      },
+      {
+        "name": "walk-between-7",
+        "rgba": "7a2f36d89ca7e4ae90d25026552352b1c66bd6046145981d744f59914bd14e7f"
+      },
+      {
+        "name": "walk-between-8",
+        "rgba": "2e75551e6a72e95a8e004275e47f69684cc12c70a1af634d39a2a5b6e1b4a4ae"
+      },
+      {
+        "name": "walk-fore-b",
+        "rgba": "caabb66ed62a48395a7d1d4f3bb54b13e50b5cab92f53d34ffac272db850bdda"
+      },
+      {
+        "name": "walk-between-10",
+        "rgba": "bdd1e028997209d33815465fbfa12b34727628deffba609fd1f09e85335482d9"
+      },
+      {
+        "name": "walk-between-11",
+        "rgba": "0cc69f1534148ff0e1c281eea9f671814b4d3e3093bd5bc0ac0dd5a50cf85600"
+      },
+      {
+        "name": "trot-contact-a",
+        "rgba": "ba64d5c3e2fb59586153c9df283c8c7b274bbf09228b84a6cd01612dc66986e8"
+      },
+      {
+        "name": "trot-between-1",
+        "rgba": "e1ccb633c731dfa4827d017140d4697dc620beab083a6a5271eb9a205e0d79a9"
+      },
+      {
+        "name": "trot-passing-a",
+        "rgba": "9887821f224595826c09bc4d4f32ecac63242a9cc6b469235a95d9235e6b8785"
+      },
+      {
+        "name": "trot-between-3",
+        "rgba": "7b5abe79dbcdc13f52b4787a3c40e907a9465a6c39cd29e1e556f0b93fc370bb"
+      },
+      {
+        "name": "trot-contact-b",
+        "rgba": "b2f155efe8d8957117bb58687fe332d9b227d9c7c5469590072e9a85dd68dcf6"
+      },
+      {
+        "name": "trot-between-5",
+        "rgba": "eb42d0993f0fb19db92fee1519cad0cb49c5cbaa7dc0c740de18995916aa37b8"
+      },
+      {
+        "name": "trot-passing-b",
+        "rgba": "779897a19fd6d73c28d3de3f23f55a949f9006b4690b23d1b15a874808f83eaf"
+      },
+      {
+        "name": "trot-between-7",
+        "rgba": "331426fa98292e84187c0e43cadff343fa7de51d094f58029e5c49e9ad00dbd5"
+      },
+      {
+        "name": "run-contact-a",
+        "rgba": "e7223aca51f0c9926db922124143731b71a301cc917dd2808aa9d6cebbb4f631"
+      },
+      {
+        "name": "run-contact-b",
+        "rgba": "b8c9c34473cffecb59f01df2bd2a4303571050ee6a39b0fdebf0ddffa9100ff6"
+      },
+      {
+        "name": "run-between-2",
+        "rgba": "863e62bb4430d8ae789ae11d86e0a979b0ece59e1fa701724266bf3dc5aae47b"
+      },
+      {
+        "name": "run-extended",
+        "rgba": "dbf94a1e550ae8e0d8c624c1ccd4569e652c67d1fa40759413c1a8d3d0c4e156"
+      },
+      {
+        "name": "run-fore-b",
+        "rgba": "a8c50ff3281fd8033471b0b8324370782fdcd7ce2d70b59456209e64d48d14d2"
+      },
+      {
+        "name": "run-fore-a",
+        "rgba": "5bc15251b125f4b921a5b482b9f4ed9cf5c9268202ff20b758096a8df8979dd5"
+      },
+      {
+        "name": "run-between-6",
+        "rgba": "14638d3031a3bf5ce70025ac89fb3ca5ac3f496772f98c0cf0600e6037da95c7"
+      },
+      {
+        "name": "run-gathered",
+        "rgba": "447945d6cedee4d1413780680464263e56f9f82e94025765d3f59feab6d57eac"
+      },
+      {
+        "name": "jump-crouch",
+        "rgba": "74cddc030a8f1b2c37321bd8b15b5c418a6ff4d21fced3b713acaa6d77529b1c"
+      },
+      {
+        "name": "jump-take-off",
+        "rgba": "8efd7e59bd84eba45aa36edc549e4e2152d9cc5c9e4a9060066eeb080300c0d2"
+      },
+      {
+        "name": "jump-rise",
+        "rgba": "756a9fdb610d9728812d243a0e39ad6c29f1feefe829fa2b466f788331b33ce5"
+      },
+      {
+        "name": "jump-apex",
+        "rgba": "412f806646e3337ff155532bb8c635424c4c3787ea9cd896880384b5b3cd3aea"
+      },
+      {
+        "name": "jump-fall",
+        "rgba": "735fe52263ee3ba35923e78acdd8f4cacac77086692c060e57e948e0e3a79d52"
+      },
+      {
+        "name": "jump-land",
+        "rgba": "512d8abee7336a42bb36ba35017277a084a0f76bb4fd0e167251d04ba04809ac"
+      },
+      {
+        "name": "jump-recover",
+        "rgba": "7ed46db5183cd8a9cef1055ad544bdc8f64ba3bbdb9bf6933f5771a5131ce3dd"
+      },
+      {
+        "name": "hurt-recoil",
+        "rgba": "c341366a2f6c06889d5f7ad12f3d5df295dc7e62af27f224870169eea34380a6"
+      },
+      {
+        "name": "hurt-recover",
+        "rgba": "ebcc08e45781f27ab1430131273bc374e433ed8476bde400ba2bca1a7bcc1f09"
+      }
+    ]
   }
 }

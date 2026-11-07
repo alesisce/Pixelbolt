@@ -2,6 +2,7 @@
 // (test/fixtures/figures-baseline.json). node scripts/goldens.mjs figures checks them and draws what changed; --write
 // updates them.
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { compilePoses } from '../src/authoring.js';
 import { renderProject } from '../src/core.js';
 import { skinkRig, heroRig, bossRig, plainRig } from './figure-rigs.mjs';
@@ -14,4 +15,6 @@ export function figureSnapshot(source) {
     frames: project.frames.map(frame => ({ name: frame.name, rgba: hash(frame.data) }))
   };
 }
-export const figureSources = { R1: skinkRig, R2: heroRig, R3: bossRig, plain: plainRig };
+// The four-legged example as it ships (examples/fox.poses.json, written by scripts/generate-examples.js).
+const foxRig = () => JSON.parse(readFileSync(new URL('../examples/fox.poses.json', import.meta.url), 'utf8'));
+export const figureSources = { R1: skinkRig, R2: heroRig, R3: bossRig, plain: plainRig, fox: foxRig };

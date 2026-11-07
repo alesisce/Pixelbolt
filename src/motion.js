@@ -179,7 +179,7 @@ export function inspectMotion(project, options = {}) {
     // in which leg is forward, not in silhouette. Posed figures with joint angles therefore also pass when some
     // joint turns at least 20° between them; drawings without joints (a grid-part run) are judged by pixels alone.
     // When the rig names its legs, only leg joints count, so a swaying tail cannot pass identical legs.
-    const legs = new Set(Array.isArray(metadata?.rig?.legs) ? metadata.rig.legs.flat() : []);
+    const legs = new Set(['legs', 'hind', 'fore'].flatMap(role => Array.isArray(metadata?.rig?.[role]) ? metadata.rig[role].flat() : []));
     const turns = jointDifference(a, b).joints.filter(j => !legs.size || legs.has(j.name)).map(j => j.degrees);
     const joints = turns.length ? Math.max(...turns) : null;
     return { from: a.frame.name, to: b.frame.name, ...difference, minimum, ...(joints !== null && { jointDegrees: joints, jointMinimum: 20 }),
@@ -191,7 +191,7 @@ export function inspectMotion(project, options = {}) {
   // Paired rig limbs run half a cycle apart, so one leg's swing-to-contact jump falls on the loop seam while its
   // partner makes the same jump inside the cycle. Each joint is compared with itself and its partner in the pair.
   const partners = new Map();
-  for (const role of ['legs', 'arms']) {
+  for (const role of ['legs', 'hind', 'fore', 'arms']) {
     const chains = Array.isArray(metadata?.rig?.[role]) ? metadata.rig[role] : [];
     for (let j = 0; j + 1 < chains.length; j += 2) for (let k = 0; k < Math.min(chains[j].length, chains[j + 1].length); k++) {
       partners.set(chains[j][k], chains[j + 1][k]); partners.set(chains[j + 1][k], chains[j][k]);
@@ -235,7 +235,7 @@ const place = value => Array.isArray(value) && value.length === 2 && value.every
 // pair drawn later being the near one) and the top of the head above its anchor; with no rig, each marker.
 function arcTracks(entries, metadata) {
   const rig = metadata?.rig, order = Object.keys((entries.find(e => Object.keys(e.parts).length) ?? entries[0]).parts), tracks = [];
-  for (const [role, kind] of [['legs', 'foot'], ['arms', 'hand']]) {
+  for (const [role, kind] of [['legs', 'foot'], ['hind', 'foot'], ['fore', 'foot'], ['arms', 'hand']]) {
     const chains = (Array.isArray(rig?.[role]) ? rig[role] : []).filter(c => Array.isArray(c) && c.length && c.every(n => typeof n === 'string')).slice(0, 8);
     chains.forEach((chain, i) => {
       // Neither drawn: the rig lists the near one of a pair first, as the templates do.
@@ -306,12 +306,15 @@ function drawArcs(put, [ox, oy], { entries, tracks, landings, key, magnification
     const [cx, cy] = at(p);
     for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) dot(cx + x, cy + y, color);
   }
-  // Where a foot lands, its own side's foot and hand and the head are ringed (without a rig, the marker that lands): in
-  // a walk or run the ring on the hand's arc sits at the far end from the ring on the foot's loop.
+  // Where a foot lands, that foot, the hand on its side and the head are ringed (without a rig, the marker that lands):
+  // in a walk or run the ring on the hand's arc sits at the far end from the ring on the foot's loop. A four-legged
+  // rig's other foot on that side is not ringed, since it is not the one landing.
   const ring = (cx, cy, r, color) => { for (let i = -r; i <= r; i++) { dot(cx + i, cy - r, color); dot(cx + i, cy + r, color); dot(cx - r, cy + i, color); dot(cx + r, cy + i, color); } };
+  const ringed = (track, landing) => track.kind === 'marker' ? track.part === landing.marker : track.kind === 'head'
+    || (track.kind === 'foot' ? landing.part === undefined ? track.side === landing.side : track.part === landing.part : track.side === landing.side);
   for (const landing of landings) for (const { track, points } of paths) {
     const p = points[landing.position];
-    if (drawable(p) && (track.kind === 'marker' ? track.part === landing.marker : track.side === landing.side || track.kind === 'head')) ring(...at(p), m + (landing.side === 'far' ? 1 : 0), LANDS[landing.side]);
+    if (drawable(p) && ringed(track, landing)) ring(...at(p), m + (landing.side === 'far' ? 1 : 0), LANDS[landing.side]);
   }
   const top = oy + panelHeight + 3;
   for (const item of key.items) {
@@ -332,8 +335,9 @@ function motionStrip(project, entries, motion, requestedScale, background, metad
   const columns = Math.min(4, count), lanes = Math.min(8, count), timingWidth = columns * (w + 4) + 4, timingHeight = Math.ceil(count / columns) * (h + 4) + 4;
   // The arcs go under the timing cells, magnified to about their width, and trace every displayed frame.
   const tracks = metadata ? arcTracks(entries, metadata) : [], magnification = Math.max(3, Math.min(8, Math.floor((timingWidth - 4) / (w + 2))));
-  const sideOf = (marker, position) => tracks.find(t => t.kind === 'foot' && t.part === entries[position].markers.find(m => m.name === marker)?.part)?.side ?? 'near';
-  const landings = motion.slide.map(({ marker, samples }) => ({ position: samples[0].position, frame: samples[0].frame, marker, side: sideOf(marker, samples[0].position) }));
+  const partOf = (marker, position) => entries[position].markers.find(m => m.name === marker)?.part;
+  const sideOf = (marker, position) => tracks.find(t => t.kind === 'foot' && t.part === partOf(marker, position))?.side ?? 'near';
+  const landings = motion.slide.map(({ marker, samples }) => ({ position: samples[0].position, frame: samples[0].frame, marker, side: sideOf(marker, samples[0].position), part: partOf(marker, samples[0].position) }));
   const arcsWidth = (w + 2) * magnification, key = arcKey(tracks, landings, Math.max(arcsWidth, timingWidth - 4));
   const arcsHeight = (h + 2) * magnification + 3 + key.height + 2;
   let trajectory = motion.speed !== null && span + w + 4 <= 4096, arcs = tracks.length > 0;
@@ -376,7 +380,7 @@ function motionStrip(project, entries, motion, requestedScale, background, metad
     arcsReport = { shown: true, origin, width: arcsWidth, height: (h + 2) * magnification, magnification, figure: entries[0].frame.name,
       mapping: 'panel x = origin[0] + (x + 1) * magnification + floor(magnification / 2), and likewise y',
       tracks: tracks.map(t => ({ kind: t.kind, part: t.part, side: t.side, color: hex(t.color), ...(t.side === 'far' && { dashed: true }) })),
-      landings: landings.map(l => ({ ...l, ring: hex(LANDS[l.side]) })), ...(skipped && { skipped }) };
+      landings: landings.map(({ part, ...l }) => ({ ...l, ring: hex(LANDS[l.side]) })), ...(skipped && { skipped }) };
   } else arcsReport = { shown: false, reason: tracks.length ? 'The arcs would take the image past 4,194,304 pixels.' : 'Arcs need pose metadata with a rig (legs, arms, head) or markers.' };
   return { cells, omitted: entries.length - count, trajectory: { shown: trajectory, ...(trajectory ? { origin: -left, width: panelWidth, lanes } : { reason: motion.speed === null ? 'Specify speed to draw the trajectory.' : 'Travel exceeds the 4096-pixel width or 4,194,304-pixel image limit.' }) },
     arcs: arcsReport,

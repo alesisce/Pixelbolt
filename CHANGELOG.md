@@ -78,6 +78,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - **Save JSON** names a pose source `<name>.poses.json`, as the file name above the editor, the CLI and `examples/` do; it saved as `<name>.pixel.json`. The Frames dialog's command names the file Save JSON gives, so it reads a saved pose or wave source too (it always said `<name>.pixel.json`).
 - The motion review names the gait checks (Arm swing, Knees at contact, Knee lift) with their measure, where it showed `armSwing: pass (undefined)`.
 
+### Faster contact sheets and patch previews
+
+- Contact sheets (inspect, render and patch replies) and the patch preview's before/after image are drawn without a new view of the frame for every pixel, and a revision comparison counts its colour changes by number instead of by string. A patch preview that recolours a 2560 × 1440 still now takes about 0.3 s instead of 1.0 s, a dithered 1920 × 1080 still 0.18 s instead of 0.55 s, and the compiled waterfall's contact sheet 5 ms instead of 43 ms (`npm run bench -- --compare`, interleaved). Every report, sheet and export is byte for byte the same.
+
 ## 0.12.1 (2026-11-06)
 
 ### Fixes from a review of 0.12.0

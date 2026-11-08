@@ -163,6 +163,14 @@ A `pixelforge-crystal` source grows crystals from seeds and lets them come to re
 
 The four presets are in [examples/](examples/) (`*.crystal.json`); agents compile them with MCP `pixel_compile` and read the format with `pixel_help` topic `crystal`. The [crystal growth guide](docs/art-workflow.md#crystal-growth) covers looks, habits, lighting, clusters, snowflakes and timing.
 
+## Falling sand
+
+A `pixelforge-powder` source is a falling-sand sandbox: every pixel holds sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss or a material of your own, and the grid steps 60 times a second. Falls speed up and splash, pools level and rest, heat boils, melts and lights things, burnt-through structures collapse, and moving air carries smoke in plumes. The same source runs live in a game with `createLivePowder` (`pixelbolt/powder`, pointer strokes that replay exactly) and compiles to an ordinary recipe of one-shot clips.
+
+![A hut on a pier burns, drops into its pool and floats there burning while lava pours off the far cliff into the water](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/showcase/powder/hut-fire.gif) ![Lava burns through a moss plug and pours into a pool, crusting to stone in clouds of steam](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/showcase/powder/lava-falls.gif)
+
+The four presets are in [examples/](examples/) (`*.powder.json`); agents compile them with MCP `pixel_compile` and read the format with `pixel_help` topic `powder`. The [falling sand guide](docs/art-workflow.md#falling-sand) covers the starter table, materials, heat, reactions, air, inputs, clips and the live runner.
+
 ## Start
 
 ```sh
@@ -186,7 +194,7 @@ node bin/pixelbolt.js render hero.pixel.json --out output/hero
 
 `inspect` saves a contact sheet of every frame and lists each frame's timing. Add `--grid` to read frames back as palette-key text; `--animation`, `--frames` (names or patterns such as `'flash-*'`) and `--region` narrow the view, and `--step 2 --offset 1` keeps every second cell from the second, so a strobe's A and B frames can be read apart. `validate hero.pixel.json --fps 30` also lists the durations that are not whole video frames at that rate and what a video sequence would do to each animation. `patch hero.pixel.json --changes fix.json` previews targeted edits and reports every pixel they change; add `--out` to save the new recipe. `gif hero.pixel.json --out hero.gif` saves one animation as a GIF for sharing. Command results except help and the preview server are JSON. Errors go to stderr and exit with code 1. Use `-` instead of a filename to read JSON from stdin. Existing output files are protected; add `--force` to replace them. A forced export over an earlier export of the same recipe or sequence also removes the frames it no longer has and lists them as `removed`; a sprite export removes only frame and animation PNGs its own earlier atlas lists and no other atlas in the folder does, so another sprite's frames and PNGs you add there aren't deleted. No command writes over a file it reads, even with `--force` and through a link or another spelling of its path; `patch` may save over the recipe it edits. No export writes over its own recipe or the files it references. You can optionally run `npm link` for the `pixelbolt` command. No `npm install` is needed.
 
-`pixelbolt share <recipe.json|->` prints a playground link (wave, crystal and bodies sources as the grids they compile to); `render` and `scene` accept `--embed-recipe` (recipes up to 1 MiB, so every PNG still opens in Pillow), recovered with `import image.png --embedded --out recipe.json`.
+`pixelbolt share <recipe.json|->` prints a playground link (wave, crystal, powder and bodies sources as the grids they compile to); `render` and `scene` accept `--embed-recipe` (recipes up to 1 MiB, so every PNG still opens in Pillow), recovered with `import image.png --embedded --out recipe.json`.
 
 Both carry the resolved recipe text and engine version: the link in its URL fragment, which browsers do not send to a server, and the PNG in a compressed recipe chunk.
 

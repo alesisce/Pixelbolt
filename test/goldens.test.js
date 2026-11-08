@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 test('every golden set lives in test/goldens with exactly one test file, and the frozen baseline is none of them', () => {
   const sets = goldenSets(root);
-  assert.deepEqual([...sets.keys()], ['bodies', 'crystal', 'drafts', 'figures', 'fluid', 'fx', 'idle-squash', 'shapes', 'spell-library', 'terrain', 'wave']);
+  assert.deepEqual([...sets.keys()], ['bodies', 'crystal', 'drafts', 'figures', 'fluid', 'fx', 'idle-squash', 'powder', 'shapes', 'spell-library', 'terrain', 'wave']);
   for (const { set, fixture, tests } of sets.values()) {
     assert.equal(fixture, `test/goldens/${set}.json`);
     assert.equal(tests.length, 1, `${fixture} is used by ${tests.join(', ') || 'no test'}`);

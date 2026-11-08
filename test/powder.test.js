@@ -1,8 +1,25 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { createLivePowder, packStrokes, unpackStrokes, replayStrokes, sandboxSource, SANDBOX } from '../src/powder.js';
+import { fileURLToPath } from 'node:url';
+import { renderProject } from '../src/core.js';
+import { startMCP } from '../src/mcp.js';
+import { createLivePowder, compilePowder, packStrokes, unpackStrokes, replayStrokes, sandboxSource, SANDBOX, POWDER_INPUTS } from '../src/powder.js';
+import { packageFiles } from '../scripts/build-studio.mjs';
+import { goldens } from '../scripts/goldens.mjs';
+import { powderPresets } from '../scripts/powder-presets.mjs';
+import { POWDER_SHOWCASE, buildPowderGIFs } from '../showcase/powder/build.mjs';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const sha = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// The compiled recipe of every preset, in test/goldens/powder.json. They change with any change to what the grid does
+// or draws: node scripts/goldens.mjs powder draws them before and after, and --write updates them.
+const golden = goldens(new URL('./goldens/powder.json', import.meta.url));
 
 const digest = live => createHash('sha256').update(live.render().rgba).digest('hex');
 const column = (live, x) => Array.from({ length: live.height }, (_, y) => live.at(x, y).material);
@@ -274,4 +291,120 @@ test('air sealed in a pocket of stone stays still and finite', () => {
   for (const value of live.at(22, 22).air ?? [0, 0]) assert.ok(Number.isFinite(value));
   live.erase({ x: 22, y: 22, radius: 10 }).step(30);
   for (const value of live.at(22, 22).air) assert.ok(Number.isFinite(value));
+});
+
+// ---- Compiling ----------------------------------------------------------------------------------------------------
+const tiny = (fields = {}) => ({ format: 'pixelforge-powder', version: 1, name: 'pile', base: 'sandbox', width: 48, height: 32, scene: [{ material: 'stone', rect: [0, 28, 48, 4] }], ...fields });
+
+test('a source compiles to an ordinary recipe that draws what the live grid draws, frame for frame', () => {
+  const source = tiny({ inputs: [{ frames: [0, 30], every: 2, paint: { material: 'sand', x: 20.5, y: 2.5, radius: 1.5 } }, { frame: 10, paint: { material: 'water', x: 34, y: 4, radius: 3 } }],
+    clips: { pour: { frames: 12, every: 3 }, settle: { start: 60, frames: 4, every: 10, duration: 200 } } });
+  const { recipe, metadata } = compilePowder(source), project = renderProject(recipe);
+  assert.deepEqual(Object.keys(recipe.animations), ['pour', 'settle']);
+  assert.deepEqual(recipe.animations.settle, { frames: ['settle-0', 'settle-1', 'settle-2', 'settle-3'], loop: false });
+  assert.deepEqual([recipe.frames[0].duration, recipe.frames.at(-1).duration], [50, 200]);
+  assert.equal(recipe.background, SANDBOX.background);
+  assert.ok(recipe.symbols.still, 'the floor that never changes is drawn once');
+  assert.deepEqual(metadata.clips.settle.start, 60);
+  assert.equal(metadata.steps, 90);
+  // The live runner plays the source's inputs too, so it draws the same frames.
+  const live = createLivePowder(source), times = [...Array.from({ length: 12 }, (_, k) => k * 3), 60, 70, 80, 90];
+  times.forEach((time, k) => { live.step(time - live.frame); assert.ok(Buffer.from(project.frames[k].data).equals(Buffer.from(live.render().rgba)), `frame ${k} at ${time}`); });
+});
+
+test('base "sandbox": the source adds or replaces materials and reactions, and merges its air', () => {
+  const source = tiny({
+    materials: { mud: { state: 'powder', density: 18, colors: ['#4a3626'] }, sand: { state: 'powder', density: 15, colors: ['#ffffff'] } },
+    reactions: [{ a: 'water', b: 'sand', into: ['empty', 'mud'], chance: 1 }, { a: 'lava', b: 'water', into: ['stone', 'steam'], chance: 1 }],
+    air: { flow: { wind: [0.5, 0] } }, scene: [{ material: 'sand', rect: [10, 20, 4, 4] }, { material: 'water', rect: [14, 20, 4, 4] }]
+  });
+  const live = createLivePowder(source);
+  assert.ok(live.materials.includes('mud') && live.materials.includes('moss'));
+  assert.equal(live.palette[live.render().keys[21][11]], '#ffffff', 'the source\'s sand replaced the base\'s');
+  live.step(3);
+  assert.ok((live.measure().counts.mud ?? 0) > 0, 'its own reaction runs');
+  assert.ok(live.at(30, 4).air[0] > 0.3, 'its wind blows');
+  // The base's water and lava pair was replaced, not refused as a second reaction for the pair.
+  assert.doesNotThrow(() => createLivePowder(source));
+});
+
+test('compile mistakes are named by path', () => {
+  const bad = (fields, where, pattern) => assert.throws(() => compilePowder(tiny(fields)), error => error.path === where && pattern.test(error.message), `${where} ${pattern}`);
+  bad({ version: 2 }, 'powder.version', /expected 1/);
+  bad({ name: 'con' }, 'powder.name', /portable name/);
+  bad({ width: 300 }, 'powder.width', /at most 256 pixels a side/);
+  bad({ clips: { a: { frames: 200 }, b: { frames: 100 } } }, 'powder.clips', /300 frames in all/);
+  bad({ clips: { a: { start: 30000 } } }, 'powder.clips.a.start', /expected a whole number from 0 to 20000/);
+  bad({ clips: { a: { tempo: 1 } } }, 'powder.clips.a.tempo', /unknown field/);
+  bad({ base: 'desert' }, 'powder.base', /expected "sandbox"/);
+  bad({ inputs: [{ frame: 1, paint: { material: 'sand', x: 1, y: 1 }, erase: { x: 1, y: 1 } }] }, 'powder.inputs[0]', /exactly one of paint/);
+  bad({ inputs: [{ frames: [1], heat: { x: 1, y: 1 } }] }, 'powder.inputs[0].frames', /expected \[first, last\]/);
+  bad({ inputs: [{ frame: 1, paint: { material: 'gold', x: 1, y: 1 } }] }, 'powder.inputs[0].paint.material', /no material named "gold"/);
+  bad({ air: { flow: false }, inputs: [{ frame: 1, push: { x: 1, y: 1, vx: 1 } }] }, 'powder.inputs[0].push', /no moving air/);
+  assert.throws(() => compilePowder({ ...tiny(), width: 256, height: 256, clips: { long: { frames: 2, every: 60 }, longer: { start: 3000, frames: 2, every: 60 } } }), /million cell steps/);
+});
+
+test('the powder schema lists exactly the fields the reader takes, and the package ships it', async () => {
+  const schema = JSON.parse(await readFile(path.join(root, 'powder.schema.json'), 'utf8')), material = schema.properties.materials.additionalProperties;
+  const unknown = (source, where) => { try { createLivePowder(source); return false; } catch (error) { return error.path === where && /unknown field/.test(error.message); } };
+  const base = () => tiny({ inputs: [{ frame: 0, paint: { material: 'sand', x: 1, y: 1 } }] });
+  const levels = [
+    [schema.properties, (s, key) => { if (s[key] === undefined) s[key] = 0; }, 'powder'],
+    [material.properties, (s, key) => { s.materials = { probe: { state: 'solid', colors: ['#000000'], [key]: 0 } }; }, 'powder.materials.probe'],
+    [schema.properties.air.properties, (s, key) => { s.air = { [key]: 0 }; }, 'powder.air'],
+    [schema.properties.air.properties.flow.oneOf[1].properties, (s, key) => { s.air = { flow: { [key]: 0 } }; }, 'powder.air.flow'],
+    [schema.properties.reactions.items.properties, (s, key) => { s.reactions = [{ a: 'sand', b: 'oil', [key]: 0 }]; }, 'powder.reactions[0]'],
+    [schema.properties.scene.items.properties, (s, key) => { s.scene = [{ material: 'sand', rect: [0, 0, 1, 1], [key]: 0 }]; }, 'powder.scene[0]'],
+    [schema.properties.inputs.items.properties, (s, key) => { s.inputs = [{ frame: 0, [key]: 0 }]; }, 'powder.inputs[0]'],
+    ...Object.keys(POWDER_INPUTS).map(action => [schema.properties.inputs.items.properties[action].properties, (s, key) => { s.inputs = [{ frame: 0, [action]: { x: 1, y: 1, [key]: 0 } }]; }, `powder.inputs[0].${action}`])
+  ];
+  for (const [properties, set, where] of levels) {
+    for (const key of Object.keys(properties)) { const source = base(); set(source, key); assert.ok(!unknown(source, `${where}.${key}`), `${where}.${key} is in the schema but the reader refuses it`); }
+    const source = base(); set(source, 'notAField'); assert.ok(unknown(source, `${where}.notAField`), `${where} accepts a field the schema doesn't list`);
+  }
+  for (const key of Object.keys(schema.properties.clips.additionalProperties.properties)) assert.doesNotThrow(() => compilePowder(tiny({ clips: { c: { [key]: 20 } } })), key);
+  assert.throws(() => compilePowder(tiny({ clips: { c: { notAField: 1 } } })), /powder\.clips\.c\.notAField: unknown field/);
+  for (const action of Object.keys(POWDER_INPUTS)) assert.deepEqual(Object.keys(schema.properties.inputs.items.properties[action].properties), POWDER_INPUTS[action], action);
+  const files = await packageFiles();
+  assert.ok(files.includes('powder.schema.json') && files.includes('src/powder.js'));
+  for (const name of POWDER_SHOWCASE) assert.ok(files.includes(`examples/${name}.powder.json`), name);
+});
+
+test('MCP and the CLI compile powder sources and presets', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-powder-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const input = new PassThrough(), output = new PassThrough(), waiting = new Map();
+  let buffer = '', id = 0;
+  output.on('data', chunk => { buffer += chunk; for (let end; (end = buffer.indexOf('\n')) !== -1; buffer = buffer.slice(end + 1)) { const message = JSON.parse(buffer.slice(0, end)); waiting.get(message.id)?.(message); } });
+  startMCP({ input, output, root: dir, directory: dir }); t.after(() => input.end());
+  const call = (method, params) => new Promise(resolve => { waiting.set(++id, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+  await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'powder-test', version: '1' } });
+  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'powder' } });
+  assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt falling sand');
+  const s = tiny({ inputs: [{ frames: [0, 20], paint: { material: 'sand', x: 20, y: 2, radius: 1.5 } }], clips: { pour: { frames: 10 } } });
+  const compiled = JSON.parse((await call('tools/call', { name: 'pixel_compile', arguments: { source: s, metadata: true } })).result.content[0].text);
+  assert.deepEqual([compiled.ok, compiled.frames, compiled.metadata.format], [true, 10, 'pixelforge-powder-metadata']);
+  const preset = JSON.parse((await call('tools/call', { name: 'pixel_compile', arguments: { preset: 'quarry-blast' } })).result.content[0].text);
+  assert.equal(preset.ok, true);
+  const file = path.join(dir, 'pile.powder.json'), out = path.join(dir, 'pile.json');
+  await writeFile(file, JSON.stringify(s));
+  const cli = spawnSync(process.execPath, [path.join(root, 'bin/pixelbolt.js'), 'compile', file, '--out', out], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(JSON.parse(await readFile(out, 'utf8')).frames.length, 10);
+  const listed = spawnSync(process.execPath, [path.join(root, 'bin/pixelbolt.js'), 'presets', 'lava-falls'], { encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /pixelforge-powder/);
+});
+
+golden.test('every powder example compiles to its golden recipe, as its preset writes it, and its GIF is current', async () => {
+  const recipes = {};
+  for (const name of POWDER_SHOWCASE) {
+    const example = JSON.parse(await readFile(path.join(root, 'examples', `${name}.powder.json`), 'utf8'));
+    assert.deepEqual(example, JSON.parse(JSON.stringify(powderPresets[name])), `examples/${name}.powder.json is stale; run node scripts/generate-examples.js`);
+    const { recipe } = compilePowder(example);
+    golden.equal(name, sha(recipe), { recipe, note: 'Rebuild the GIFs too: node showcase/powder/build.mjs --force.' });
+    recipes[name] = recipe;
+  }
+  assert.deepEqual(Object.keys(powderPresets).sort(), [...POWDER_SHOWCASE].sort());
+  const { files } = await buildPowderGIFs(recipes);
+  for (const [file, bytes] of files) assert.ok(bytes.equals(await readFile(path.join(root, file))), `${file} is stale; run node showcase/powder/build.mjs --force`);
 });

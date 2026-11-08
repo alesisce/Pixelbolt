@@ -663,6 +663,53 @@ A `pixelforge-crystal` source grows crystals from seeds and compiles every frame
 
 **Presets.** [geode](../examples/geode.crystal.json) (amethyst points grow inward from an agate-lined geode), [quartz cluster](../examples/quartz-cluster.crystal.json) (clear quartz points fan up out of a rock, the tall one first), [pyrite](../examples/pyrite.crystal.json) (isometric brass cubes and two octahedra grow out of a dark matrix) and [snowflakes](../examples/snowflakes.crystal.json) (a stellar dendrite with twigs, a sectored plate and a fern-like flake turned on its side).
 
+## Falling sand
+
+A `pixelforge-powder` source is a falling-sand material grid: every pixel holds one material from a table, and the grid steps 60 times a second. Powders pile, liquids spread and level, gases and flames drift, the heavier sinks through the lighter, heat flows, things melt, boil, freeze and burn, neighbours react, and solids marked to fall drop as pieces when what holds them up burns away. The same source runs live in a game or page (`createLivePowder`, a frame at a time with pointer input) and compiles to an ordinary recipe of palette grids, one-shot clips sampled from one run. It is deterministic: the same source and the same inputs draw the same pixels in every engine.
+
+```json
+{ "format": "pixelforge-powder", "version": 1, "name": "pour", "base": "sandbox", "width": 96, "height": 64,
+  "scene": [{ "material": "stone", "rect": [0, 60, 96, 4] }, { "material": "water", "rect": [50, 48, 46, 12] }],
+  "inputs": [{ "frames": [0, 90], "paint": { "material": "sand", "x": 30, "y": 2, "radius": 1.5, "fill": 0.5 } },
+             { "frame": 100, "burst": { "x": 30, "y": 56, "radius": 8, "strength": 4 } }],
+  "clips": { "pour": { "frames": 80, "every": 2 } } }
+```
+
+**The starter table.** `base: "sandbox"` starts from a ready table: sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss (it drinks water beside it and grows into it, and burns fast) and wall, with their reactions (water quenches lava to stone and steam, fire lights wood, oil and moss, water puts out flames and burning wood, lava melts ice), moving air and a dark background. A material the source names again replaces the base's, a reaction for a pair the base has replaces the base's, and `air` and `air.flow` merge field by field. Without a base, the source lists every material itself.
+
+**Materials.** Each has a `state`: `powder` (falls and piles, sliding off slopes), `liquid` (falls and spreads `spread` cells a frame, slowed by `viscosity` once landed), `gas` and `fire` (drift up when lighter than air, down when heavier, at `speed`), or `solid` (stays put). `density` (air is 1) decides what sinks through what; `drag` slows what sinks through a liquid or gas. Powders and liquids carry a velocity: a fall speeds up by the source's `gravity` (default 0.15 pixels a frame, every frame) to at most 6 pixels a frame, a fast landing throws `splash` of its cells back up as spray, a landing liquid surges sideways, and a liquid running off a ledge pours in an arc. A resting liquid moves only downhill, or along its row toward more of its kind, so pools level and come to rest, flat but for one strip at most. A `falls: true` solid drops as one rigid piece, with every falling solid touching it, once no fixed solid and no floor holds the piece up; it sinks through lighter liquids and floats on denser ones, and landing fast on a liquid throws it out from under it.
+
+**Drawing.** `colors` lists a material's colours; each cell takes a seeded one, or one by `pattern` (`blotch` for soft patches, `grain` for streaks along the rows). `colorBy: "age"` runs young to old through a material with a `life`, `shimmer` cycles the colours (lava), `hot` glows from `from` to `to` degrees, a liquid's `top` draws its surface line and `streak` trails cells falling two pixels a frame or faster, so rain reads as rain. `colorBy: "density"` draws a gas or flame as a cloud: each pixel takes the thin-to-thick colour for how many of its cells crowd round, so smoke reads as smoke rather than dust; a lone gas cell is not drawn, a lone flame is a spark. Burning cells flicker through `burn.colors`, or the colours of the flame they give off.
+
+**Heat and change.** Temperatures are degrees (`ambient`, default 20, is what everything drifts toward); heat passes between neighbours at the lower of their `conduct`, exactly, and `cool` drifts a material toward the ambient on its own. `above` and `below` change a material past a temperature (`into`, with a `chance` a frame); `latent` degrees more must be taken in or given out first, so a hot stone boils a few cells of a pool rather than all of it. `burn` lights a material at its `temperature`: it holds `heat`, gives off what `emit` lists (fire, smoke) and after its `frames` becomes `into`. `life` ends a cell after its frames. A gas with `expand` fills that many free cells beside it when a phase change or reaction makes it, so steam billows.
+
+**Reactions.** Each names `a` and `b`, materials that touch (one reaction per pair): `into` says what each becomes (null keeps it, `"empty"` clears it), `chance` is a frame, `heat` warms both (or cools), `ignite` and `douse` light or put out one side, and `burning` waits until that side burns.
+
+**Air.** `air.flow` adds moving air on a coarse grid (`cell` pixels a side, default 4): heat lifts it (`rise`), it curls (`swirl`), it settles toward a `wind` ([x, y] pixels a frame) at `calm` a frame, and it is solved so it flows round walls (cells mostly solid, powder or liquid). Gases and flames ride it, so smoke rises in plumes that curl, gathers under an overhang and spills past it, and flames lean in a breeze; what falls through it is carried by its lightness (`carry`): ash drifts, sand barely leans. The floor is a wall and the other edges are open: wind blows through, and gases that ride out are gone. Without `air.flow`, gases simply drift.
+
+**Scene and inputs.** `scene` fills the starting grid in order, each fill a `rect`, a `disc` or `rows` of characters with a `legend` from `at`, with `fill` (a share, for a spray), `replace: false` (keep what is there), `temperature` and `burning`. `inputs` are scripted strokes, each one of `paint` (a material, `fill`, `replace`), `erase`, `wall`, `heat` (`amount` degrees), `push` (drags the air by `vx`, `vy`) or `burst` (a blast: loose cells nearest it are thrown out first to the first free cell along their line, so a crater opens and its spray flies from the rim), on `frame`, or on every `every`th of `frames`: [first, last]. A stroke covers the cells within `radius` of (`x`, `y`), or of the segment to (`x2`, `y2`).
+
+**Clips.** `clips` names one-shot animations sampled from the one run: `start` (the frame it starts on), `frames` (drawn, default 60), `every` (frames simulated between drawn ones, default 2) and `duration` (milliseconds a frame shows, default `every` × 1000 / 60). With no clips, one clip is named after the source. A compiled grid is at most 256 pixels a side, at most 256 frames and 4,194,304 pixels in all, and at most 200 million cell steps. Pixels that never change are drawn once, as the symbol `still`; each frame draws the rest as palette grids, cropped to where anything changes.
+
+**Live.** `createLivePowder(source)` from `pixelbolt/powder` runs the same grid in a game loop, up to 1024 pixels a side; a busy 320 × 180 sandbox steps and draws in a few milliseconds, and settled regions cost almost nothing. It plays the source's own `inputs` too, so a live run draws what the compiled clips show.
+
+```js
+import { createLivePowder } from 'pixelbolt/powder';
+const live = createLivePowder(source, { record: true });
+const image = new ImageData(live.width, live.height);
+function frame() {
+  if (pointer.down) live.paint({ material: 'sand', x: pointer.x, y: pointer.y, x2: pointer.lastX, y2: pointer.lastY, radius: 2, fill: 0.6 });
+  live.step();
+  live.render(image.data);
+  context.putImageData(image, 0, 0);
+  requestAnimationFrame(frame);
+}
+```
+
+`paint`, `erase`, `wall`, `heat`, `push` and `burst` queue for the next step; `at(x, y)` reads a cell (material, temperature, velocity, air), `measure()` counts materials, burning cells and the chunks the last step visited, and `render()` returns RGBA pixels and, on demand, palette-key rows. With `record: true`, `live.strokes` keeps every input; `packStrokes(strokes, frames)` packs them into a few bytes for a link, and `replayStrokes` plays them back exactly.
+
+**Presets.** [hut fire](../examples/hut-fire.powder.json) (a hut on a pier burns, drops into its pool and floats there burning, while lava pours off the far cliff into the water), [lava falls](../examples/lava-falls.powder.json) (lava burns through a moss plug and pours into a pool, crusting to stone in steam), [quarry blast](../examples/quarry-blast.powder.json) (a blast throws sand and water in arcs that rain back down and settle) and [rain on fire](../examples/rain-on-fire.powder.json) (a campfire leans in a breeze until rain hisses it out in steam). Their GIFs are in [showcase/powder/](../showcase/powder/) (`node showcase/powder/build.mjs --check`).
+
 ## Lossless raster return path
 
 ```sh

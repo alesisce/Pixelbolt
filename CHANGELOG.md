@@ -4,6 +4,16 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Falling sand
+
+- A new source format, `pixelforge-powder` (`src/powder.js`, `powder.schema.json`, `pixel_help` topic `powder`, `pixelbolt/powder`): a falling-sand material grid where every pixel holds one material from a table: powders, liquids, gases, fire, fixed solids and solids that fall. It runs live in a game (`createLivePowder`: step it every frame, paint, erase, wall, heat, push and burst with the pointer, and render) and compiles with `pixel_compile` and `pixelbolt compile` into one-shot clips of palette grids sampled from one run. The same source and inputs draw the same pixels everywhere, and recorded strokes pack into a few bytes and replay exactly.
+- `base: "sandbox"` starts from a starter table of sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss and wall with their reactions; a source adds or replaces materials and reactions.
+- Motion that reads: falls speed up, fast landings splash and liquids surge and pour in arcs; pools level and come to rest; solids marked `falls` drop as rigid pieces when what holds them up burns away and float on denser liquids; smoke and flames are drawn as clouds by density; fast drops trail streaks, so rain reads as rain.
+- Heat in whole degrees, conducted exactly, with latent heat, phase changes, burning, lives and a table of reactions between neighbours; a gas with `expand` billows when it is made.
+- Moving air (`air.flow`) on a coarse grid: heat lifts it, it curls, a wind blows through, smoke rises in plumes and spills round overhangs, ash drifts, and a blast opens a crater and throws its spray.
+- Settled regions sleep, so a big quiet scene costs almost nothing; a busy 320 × 180 sandbox steps and draws in a few milliseconds (a speed budget case in `scripts/bench.mjs`).
+- Presets `hut-fire`, `lava-falls`, `quarry-blast` and `rain-on-fire` (`scripts/powder-presets.mjs`, `examples/*.powder.json`), with their GIFs in `showcase/powder/` (`node showcase/powder/build.mjs --check`) and golden hashes in `test/goldens/powder.json`.
+
 ### Parallax and haze survive export to game engines
 
 A scene's parallax planes and haze used to exist only in Pixelbolt's own renders: `scene.tmx` dropped parallax and drew hazed placements without their haze, and the Godot export had no parallax.

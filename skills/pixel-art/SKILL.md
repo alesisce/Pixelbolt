@@ -21,6 +21,8 @@ For looping interference or portal interiors, start from `examples/interference.
 
 For crystals that grow from seeds (a quartz cluster, an amethyst geode, pyrite cubes, snowflakes), start from `examples/quartz-cluster.crystal.json`, `examples/geode.crystal.json`, `examples/pyrite.crystal.json` or `examples/snowflakes.crystal.json` and compile it ([crystal growth](../../docs/art-workflow.md#crystal-growth)). Draw the rock they grow from as the source's underlay, and its front lip as the overlay so their feet grow out of it.
 
+For falling-sand scenes (things burning and collapsing, lava meeting water, a blast throwing sand, rain putting out a fire), start from `examples/hut-fire.powder.json`, `examples/lava-falls.powder.json`, `examples/quarry-blast.powder.json` or `examples/rain-on-fire.powder.json` ([falling sand](../../docs/art-workflow.md#falling-sand)): `base: "sandbox"` gives the starter materials, the scene and scripted inputs set it going, and clips sample it.
+
 ## Art direction
 
 For finished artwork, also read the sections of `docs/art-workflow.md` that fit the task, starting with "Write a brief outside the recipe" and "Quality checkpoints". Establish a small art brief outside the recipe: native/display size, three silhouette landmarks, palette roles, light direction, projection (side, 3/4 top-down, isometric 2:1 or top-down, one for the whole set) and depth planes, material rules, outline treatment, action intent, contact/origin and scene role. Record the actual strengths and failures of each review. A rendered file, frame count or passing test is not evidence of artistic quality. These checkpoints do not require user permission.

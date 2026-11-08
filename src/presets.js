@@ -1,6 +1,6 @@
 // Node-side: the shipped examples an agent can start from instead of drawing an effect or a character from scratch.
 // They are read from examples/ whenever they are asked for, so the listing always matches the folder. A preset is a
-// top-level examples/*.fluid.json, *.fx.json, *.wave.json, *.crystal.json, *.bodies.json or *.poses.json source, or a
+// top-level examples/*.fluid.json, *.fx.json, *.wave.json, *.crystal.json, *.powder.json, *.bodies.json or *.poses.json source, or a
 // plain recipe whose animations all loop (a coin spin, a flickering ember) and that no source there compiles to. Titles
 // and notes come from the Fluid and Effects labs' lists where those have one; anything else is described from its own
 // name and animations.
@@ -17,13 +17,14 @@ import { compileEffects } from './fx.js';
 import { compileFluid } from './fluid.js';
 import { compileWaves } from './wave.js';
 import { compileCrystals } from './crystal.js';
+import { compilePowder } from './powder.js';
 import { compileBodies } from './bodies.js';
 import { EFFECT_PRESETS } from '../studio/effects-controls.js';
 import { FLUID_PRESETS } from '../studio/fluid-controls.js';
 
 export const PRESET_FOLDER = fileURLToPath(new URL('../examples/', import.meta.url));
-const SOURCE = /^(.+)\.(fluid|fx|wave|crystal|bodies|poses)\.json$/;
-const COMPILERS = { 'pixelforge-fluid': compileFluid, 'pixelforge-fx': compileEffects, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-bodies': compileBodies, 'pixelforge-poses': compilePoses };
+const SOURCE = /^(.+)\.(fluid|fx|wave|crystal|powder|bodies|poses)\.json$/;
+const COMPILERS = { 'pixelforge-fluid': compileFluid, 'pixelforge-fx': compileEffects, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-powder': compilePowder, 'pixelforge-bodies': compileBodies, 'pixelforge-poses': compilePoses };
 const TITLES = new Map([...FLUID_PRESETS.map(entry => [`fluid:${entry.file}`, entry]), ...EFFECT_PRESETS.map(entry => [`fx:${entry.file}`, entry])]);
 
 // How to use the listing, and the one way to get fewer frames: a source's own `frames` is its simulation or timeline
@@ -127,6 +128,11 @@ function about(entry, source, animations) {
     for (const effect of Object.values(source.effects ?? {})) for (const crystal of effect?.crystals ?? []) counts.set(crystal?.habit, (counts.get(crystal?.habit) ?? 0) + (Number.isInteger(crystal?.count) ? crystal.count : 1));
     const parts = [...counts].filter(([habit]) => typeof habit === 'string').map(([habit, n]) => `${n} ${habit === 'octahedron' ? (n === 1 ? 'octahedron' : 'octahedra') : `${habit}${n === 1 ? '' : 's'}`}`);
     return `Crystals that grow and come to rest: ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? 'none'}.`;
+  }
+  if (entry.kind === 'powder') {
+    // What the sandbox holds, from its scene and its base table.
+    const named = [...new Set((source.scene ?? []).flatMap(fill => (fill?.legend ? Object.values(fill.legend) : [fill?.material])).filter(name => typeof name === 'string' && name !== 'empty'))];
+    return `A falling-sand sandbox${named.length ? ` of ${listNames(named)}` : ''}.`;
   }
   if (entry.kind === 'bodies') {
     // What falls, bounces and topples: each shape counted with its copies on a ring or a grid.

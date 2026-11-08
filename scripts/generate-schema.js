@@ -761,6 +761,71 @@ const crystal = {
       }, ['frames', 'crystals']) }
   }, ['format', 'version', 'name', 'width', 'height', 'palette', 'looks', 'effects'])
 };
+// Falling-sand grids: a material table, a starting scene, scripted inputs and clips sampled into palette grids.
+const opaque = { type: 'string', pattern: opaqueHex, description: 'An opaque colour: #RGB or #RRGGBB.' };
+const powderName = { type: 'string', pattern: '^[a-z][a-z0-9-]{0,23}$', description: 'A material: lower-case letters, digits and hyphens, starting with a letter; "empty" is empty air.' };
+const powderColors = (description, most = 8) => ({ ...array(opaque, most), minItems: 1, description });
+const degreesOf = description => num(-2000, 9000, description);
+const powderChange = description => object({ temperature: degreesOf('Degrees past which it changes.'), into: { type: 'string', description: 'A material, or "empty".' }, chance: num(0, 1, 'A frame, once past the temperature. Default 1.'), latent: num(0, 9000, 'Degrees more it must take in (above) or give out (below) first, so a hot stone boils a few cells of a pool rather than all of it; the new material starts at the temperature. Default 0.') }, ['temperature', 'into']);
+const powderEmit = { ...array(object({ material: powderName, chance: num(0, 1, 'A frame.') }, ['material', 'chance']), 2), description: 'Given off into a free neighbour, upward more often than sideways.' };
+const powderSpot = { x: num(-4096, 4096, 'Canvas pixels; quarter pixels are kept.'), y: num(-4096, 4096), x2: num(-4096, 4096, 'With y2: a stroke along a segment.'), y2: num(-4096, 4096), radius: num(0.5, 64, 'Default 3.') };
+const powderInputs = {
+  paint: object({ material: powderName, ...powderSpot, fill: num(0, 1, 'The share of cells filled: below 1 is a spray. Default 1.'), replace: { type: 'boolean', description: 'Paint over what is there. Default false: only empty cells.' } }, ['material', 'x', 'y']),
+  erase: object(powderSpot, ['x', 'y']),
+  wall: object(powderSpot, ['x', 'y']),
+  heat: object({ ...powderSpot, amount: num(-2000, 2000, 'Degrees added to every cell in the stroke, air included; negative cools. Default 200.') }, ['x', 'y']),
+  push: object({ ...powderSpot, vx: num(-8, 8, 'Pixels a frame.'), vy: num(-8, 8) }, ['x', 'y']),
+  burst: object({ x: powderSpot.x, y: powderSpot.y, radius: powderSpot.radius, strength: num(0, 8, 'Pixels a frame at the middle. Default 3.') }, ['x', 'y'])
+};
+const powderMaterial = object({
+  state: { enum: ['powder', 'liquid', 'gas', 'solid', 'fire'], description: 'powder and liquid fall and pile or spread; gas and fire drift up (lighter than air) or down; a solid stays put, unless it falls.' },
+  density: num(0.01, 1000, 'Relative to air (1): the heavier sinks through the lighter. Defaults: powder 16, liquid 10, gas 0.5, fire 0.2, a solid that falls 50.'),
+  spread: int(0, 16, 'Liquids, gases and fire: cells it runs sideways a frame. Defaults: liquid 4, gas 2, fire 1.'),
+  speed: num(0, 1, 'Gases and fire: how fast it rises (or sinks) on its own, as a chance a frame, or in pixels a frame in moving air. Default 1.'),
+  expand: int(0, 4, 'Gases: extra free cells beside it that it fills when a phase change or reaction makes it (steam billows). Default 0.'),
+  viscosity: num(0, 0.95, 'Liquids: how slow it is to slide and spread once landed. Default 0.'),
+  drag: num(0, 0.95, 'Liquids and gases: how much it slows what sinks through it. Default 0.5 for a liquid.'),
+  splash: num(0, 1, 'Powders and liquids: the share of fast landings thrown back up as spray. Default 0.12 for a liquid, 0 for a powder.'),
+  falls: { type: 'boolean', description: 'Solids: drops as a rigid piece, with every solid that falls touching it, once no fixed solid and no floor holds the piece up; it sinks through lighter liquids and floats on denser ones.' },
+  colors: powderColors('Opaque colours: a seeded one per cell (or by pattern, age, density or shimmer).'),
+  pattern: { enum: ['speckle', 'blotch', 'grain'], description: 'How a cell\'s colour is chosen where it is made: a seeded draw (speckle, default), soft blotches, or streaks along the rows (grain, for wood).' },
+  top: { ...opaque, description: 'Liquids: the colour of a cell with air or gas above it, a surface line.' },
+  streak: { ...opaque, description: 'Powders and liquids: drawn in empty pixels above a cell falling two pixels a frame or faster, so rain reads as rain.' },
+  haze: { ...opaque, description: 'Gases and fire not drawn by density: an empty pixel between two or more of its cells takes this colour.' },
+  colorBy: { enum: ['cell', 'age', 'density'], description: 'cell (default): a seeded colour per cell; age: young to old, for a material with a life; density: thin to thick, a gas or flame drawn as a cloud by how its cells crowd (a lone gas cell is not drawn).' },
+  shimmer: int(2, 600, 'Frames for a cell\'s colour to cycle once through the colours (lava).'),
+  hot: object({ from: degreesOf('Below this its own colours.'), to: degreesOf('At this the last glow colour.'), colors: powderColors('Glow colours from cool to hot.') }, ['from', 'to', 'colors']),
+  temperature: degreesOf('Degrees it is made at. Default the ambient.'),
+  conduct: num(0, 1, 'How fast heat passes through it (an edge moves at the lower of its two cells). Default 0.2.'),
+  cool: num(0, 1, 'How fast it drifts toward the ambient temperature on its own. Default 0.'),
+  heat: degreesOf('It holds at least this temperature (fire).'),
+  life: object({ frames: { ...pairOf(int(1, 65535)), description: '[fewest, most] frames it lives, drawn per cell.' }, into: { type: 'string', description: 'What it becomes; default "empty".' }, chance: num(0, 1, 'The chance it becomes that rather than empty. Default 1.') }, ['frames']),
+  above: powderChange('A phase change above a temperature (melting, boiling).'),
+  below: powderChange('A phase change below a temperature (freezing, condensing, crusting).'),
+  burn: object({ temperature: degreesOf('It lights at this.'), frames: { ...pairOf(int(1, 65535)), description: '[fewest, most] frames it burns.' }, heat: degreesOf('Holds at least this while it burns. Default 600.'), emit: powderEmit, into: { type: 'string', description: 'What it leaves; default "empty".' }, chance: num(0, 1, 'The chance it leaves that. Default 1.'), colors: powderColors('Burning flicker; default the colours of the flame it gives off.') }, ['temperature', 'frames']),
+  emit: powderEmit
+}, ['state', 'colors']);
+const powderAt = { ...array(int(-4096, 4096), 4) };
+const powder = {
+  $schema: schema.$schema, title: 'Pixelbolt falling sand',
+  description: 'A falling-sand material grid: every pixel holds one material from a table (powders, liquids, gases, fire, fixed solids and solids that fall as rigid pieces), the heavier sinking through the lighter, with velocity (falls that speed up, splashes, surges), heat with phase changes and latent heat, burning, lives, reactions between neighbours and moving air. base "sandbox" starts from the starter materials. The same source runs live (createLivePowder, a frame at a time with pointer input) and compiles to an ordinary recipe of palette grids: each clip samples the grid every `every` frames (60 a second). Deterministic: the same source draws the same pixels everywhere.',
+  ...object({ $schema: { type: 'string' }, format: { const: 'pixelforge-powder' }, version: { const: 1 }, name: { ...id, description: 'The recipe\'s name, and its clip\'s when there are no clips.' },
+    base: { enum: ['sandbox'], description: 'Start from the starter table: sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss and wall, their reactions, moving air and a dark background. Materials named again replace the base\'s, a reaction for a pair the base has replaces the base\'s, and air.flow merges field by field.' },
+    width: int(8, 1024, 'At most 256 to compile; up to 1024 live.'), height: int(8, 1024, 'At most 256 to compile; up to 1024 live.'),
+    seed: int(0, 2147483647, 'Seeds every draw. Default 1.'), ambient: degreesOf('Degrees everything drifts toward. Default 20.'),
+    background: { ...color, description: 'Drawn where nothing is (and the compiled recipe\'s background). Default transparent.' },
+    gravity: num(0.02, 1, 'Pixels a frame gained each frame by whatever falls (at least a pixel a frame, at most 6). Default 0.15.'),
+    air: object({ conduct: num(0, 1, 'How air passes heat on. Default 0.01.'), cool: num(0, 1, 'How fast air drifts to the ambient temperature. Default 0.03.'),
+      flow: { oneOf: [{ type: 'boolean' }, object({ cell: int(2, 16, 'Pixels a side of each air cell. Default 4.'), wind: { ...pairOf(num(-2, 2)), description: '[x, y] pixels a frame the air settles toward. Default [0, 0].' }, rise: num(0, 4, 'How strongly heat lifts the air. Default 0.25.'), swirl: num(0, 2, 'How much the air curls. Default 0.3.'), calm: num(0, 1, 'How fast the air settles to the wind, a frame. Default 0.02.'), carry: num(0, 1, 'How much the air carries falling powders and liquids, by their lightness. Default 0.3.') })], description: 'Moving air: it carries gases and flames, lifts over heat and takes push and burst inputs. Edges are open but for the floor.' } }),
+    wall: { ...powderName, description: 'The fixed solid the wall input paints; default the material named "wall".' },
+    materials: { type: 'object', maxProperties: 200, propertyNames: powderName, additionalProperties: powderMaterial, description: 'Materials by name; at most 89 different colours in all.' },
+    reactions: { ...array(object({ a: powderName, b: { type: 'string', description: 'A material, or "empty".' }, into: { ...pairOf({ type: ['string', 'null'] }), description: '[what a becomes, what b becomes]: a material, "empty", or null to keep it.' }, chance: num(0, 1, 'A frame, when one picks the other as its neighbour. Default 1.'), heat: num(-2000, 9000, 'Degrees added to both (negative cools).'), ignite: { enum: ['a', 'b'], description: 'Lights that side (it must burn).' }, douse: { enum: ['a', 'b'], description: 'Puts that side out, cooling it to the temperature it is made at.' }, burning: { enum: ['a', 'b'], description: 'Only while that side burns.' } }, ['a', 'b']), 256), description: 'A cell of a next to a cell of b; one reaction per pair.' },
+    scene: { ...array(object({ material: { type: 'string' }, rect: { ...powderAt, minItems: 4, description: '[x, y, width, height].' }, disc: { ...array(int(-4096, 4096), 3), minItems: 3, description: '[x, y, radius].' }, rows: { ...array({ type: 'string', maxLength: 1024 }, 1024), description: 'Rows of characters drawn with legend from at.' }, at: point, legend: { type: 'object', additionalProperties: { type: 'string' }, description: 'Character → material.' }, fill: num(0, 1, 'The share of cells filled. Default 1.'), replace: { type: 'boolean', description: 'false keeps what earlier fills put there. Default true.' }, temperature: degreesOf('Degrees the cells start at.'), burning: { type: 'boolean', description: 'Starts alight (a material that burns).' } }), 512), description: 'The starting grid, filled in order: exactly one of rect, disc or rows each.' },
+    inputs: { ...array(object({ frame: int(0, 20000, 'The frame it happens on.'), frames: { ...pairOf(int(0, 20000)), description: '[first, last]: every frame between, or every `every`th.' }, every: int(1, 20000, 'Default 1.'), ...powderInputs }), 512), description: 'Scripted strokes, each exactly one of paint, erase, wall, heat, push or burst, at the start of a frame: the compiler and the live runner both play them.' },
+    clips: { type: 'object', minProperties: 1, maxProperties: 16, propertyNames: { ...id, maxLength: 60 }, additionalProperties: object({ start: int(0, 20000, 'The frame it starts on. Default 0.'), frames: int(1, 256, 'Frames drawn. Default 60.'), every: int(1, 60, 'Frames simulated between drawn frames. Default 2.'), duration: int(10, 10000, 'Milliseconds a drawn frame shows. Default every × 1000 / 60.') }), description: 'One-shot animations sampled from the one run; default one clip named after the source. At most 256 frames and 4,194,304 pixels in all, and 200 million cell steps.' }
+  }, ['format', 'version', 'name', 'width', 'height']),
+  anyOf: [{ required: ['base'] }, { required: ['materials'] }]
+};
 const normals = {
   $schema: schema.$schema, title: 'Pixelbolt normal pass',
   description: 'Derives a lighting normal pass from a colour recipe and compiles it to an ordinary recipe aligned with it (same size, frame names and durations, animations and atlas layout), ready for a scene asset\'s normal and editable like any recipe. Each separate shape is rounded from its silhouette, lighter colours can be raised by detail, and every pixel takes the nearest of 17 directions: palette key 5 faces the viewer, the keypad digits 1–4 and 6–9 lean 30° the way they sit around 5, and q w e a d z x c lean 60° the same way.',
@@ -771,4 +836,4 @@ const normals = {
     faces: { type: 'object', minProperties: 1, additionalProperties: { enum: NORMAL_KEYS }, description: 'Flat faces by colour: maps the colour recipe\'s palette keys to one direction each, so a box, wall or building gets flat planes instead of a cushion. Pixels drawn in that key\'s colour take the direction; all others are rounded as usual. Side view: tops w, fronts 5. 3/4 top-down: tops w or 8, south faces 2 or 5. Isometric 2:1: tops w, left faces z, right faces c.' }
   }, ['format', 'version', 'recipe']), $defs: { ...schema.$defs, recipe: recipeSchema }
 };
-for (const [file, value] of [['poses.schema.json', poses], ['scene.schema.json', scene], ['autotile.schema.json', autotile], ['fx.schema.json', fx], ['fluid.schema.json', fluid], ['wave.schema.json', wave], ['crystal.schema.json', crystal], ['bodies.schema.json', bodies], ['normals.schema.json', normals]]) await writeFile(new URL(`../${file}`, import.meta.url), JSON.stringify(value, null, 2) + '\n');
+for (const [file, value] of [['poses.schema.json', poses], ['scene.schema.json', scene], ['autotile.schema.json', autotile], ['fx.schema.json', fx], ['fluid.schema.json', fluid], ['wave.schema.json', wave], ['crystal.schema.json', crystal], ['powder.schema.json', powder], ['bodies.schema.json', bodies], ['normals.schema.json', normals]]) await writeFile(new URL(`../${file}`, import.meta.url), JSON.stringify(value, null, 2) + '\n');

@@ -9,7 +9,7 @@
 // every draw comes from an xorshift stream seeded by craft.js's hash (per frame, and per input) and read in a fixed
 // scan order, and there is no Math.random and no trigonometry. Temperatures are kept in sixteenths of a degree and
 // velocities in 256ths of a pixel per frame.
-import { PixelError, parseColor } from './core.js';
+import { PixelError, parseColor, renderProject, CANVAS_SIDE, FRAME_AREA } from './core.js';
 import { hash, ditherThreshold } from './craft.js';
 
 const fail = (path, message) => { throw new PixelError(path, message); };
@@ -44,14 +44,20 @@ const ONE = 4294967296; // a chance of 1, as a threshold on a 32-bit draw
 const SUB = 256, TOP = 6 * SUB, SPLASH = 2 * SUB;
 // How far a resting liquid looks along its row for somewhere lower, or for more of its kind to join.
 const FAR = 40;
-const LIMITS = { side: 1024, materials: 200, reactions: 256, colors: 8, emits: 2, scene: 512, strokes: 65536 };
+const LIMITS = { side: 1024, materials: 200, reactions: 256, colors: 8, emits: 2, scene: 512, strokes: 65536, inputs: 512, clips: 16, frames: 256, steps: 20000, work: 200e6 };
 // Single-character palette keys. '.' marks an empty pixel.
 const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#$%&*+-=?@^~!<>/|:;,_()[]{}';
 // Salts that keep the random streams apart.
-const SALT = { step: 1, input: 2, scene: 3, flicker: 4 };
+const SALT = { step: 1, input: 2, scene: 3, script: 5 };
 
-const MATERIAL_FIELDS = ['state', 'density', 'spread', 'speed', 'viscosity', 'drag', 'splash', 'falls', 'colors', 'pattern', 'top', 'streak', 'haze', 'colorBy', 'shimmer', 'hot', 'temperature', 'conduct', 'cool', 'heat', 'life', 'above', 'below', 'burn', 'emit'];
-const SOURCE_FIELDS = ['format', 'width', 'height', 'seed', 'ambient', 'background', 'gravity', 'air', 'wall', 'materials', 'reactions', 'scene'];
+const MATERIAL_FIELDS = ['state', 'density', 'spread', 'speed', 'expand', 'viscosity', 'drag', 'splash', 'falls', 'colors', 'pattern', 'top', 'streak', 'haze', 'colorBy', 'shimmer', 'hot', 'temperature', 'conduct', 'cool', 'heat', 'life', 'above', 'below', 'burn', 'emit'];
+const SOURCE_FIELDS = ['$schema', 'format', 'version', 'name', 'base', 'width', 'height', 'seed', 'ambient', 'background', 'gravity', 'air', 'wall', 'materials', 'reactions', 'scene', 'inputs', 'clips'];
+// What a scripted input or a live call can do, and the fields each takes.
+export const POWDER_INPUTS = { paint: ['material', 'x', 'y', 'x2', 'y2', 'radius', 'fill', 'replace'], erase: ['x', 'y', 'x2', 'y2', 'radius'], wall: ['x', 'y', 'x2', 'y2', 'radius'], heat: ['x', 'y', 'x2', 'y2', 'radius', 'amount'], push: ['x', 'y', 'x2', 'y2', 'radius', 'vx', 'vy'], burst: ['x', 'y', 'radius', 'strength'] };
+const recipeName = (value, path) => {
+  if (typeof value !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,59}$/.test(value) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(value)) fail(path, 'expected a portable name: 1–60 letters, digits, underscores or hyphens, starting with a letter');
+  return value;
+};
 const NAME = /^[a-z][a-z0-9-]{0,23}$/;
 
 // ---- The source ---------------------------------------------------------------------------------------------------
@@ -66,11 +72,32 @@ function colourList(value, path) {
 const chanceOf = (value, path) => Math.min(ONE, Math.round(number(value, path, 0, 1) * ONE));
 const degrees = (value, path) => Math.round(number(value, path, T_LOW, T_HIGH) * SIXTEENTHS);
 
+// A source that names a `base` starts from that table: its ambient, background, gravity, air and wall unless the
+// source sets them, its materials with the source's added (a material named again replaces the base's), and its
+// reactions with the source's added (a reaction for a pair the base has replaces the base's).
+function withBase(source) {
+  if (source.base === undefined) return source;
+  if (source.base !== 'sandbox') fail('powder.base', 'expected "sandbox" (the starter materials: sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss and wall)');
+  const base = structuredClone(SANDBOX), merged = { ...base, ...source };
+  if (source.materials !== undefined && !isObject(source.materials)) fail('powder.materials', 'expected an object of materials by name');
+  if (source.reactions !== undefined && !Array.isArray(source.reactions)) fail('powder.reactions', 'expected a list of reactions');
+  merged.materials = { ...base.materials, ...source.materials };
+  const pair = r => (isObject(r) ? [r.a, r.b].map(String).sort().join(' ') : null), named = new Set((source.reactions ?? []).map(pair));
+  // The source's own first, so a mistake in one is named by its own index.
+  merged.reactions = [...(source.reactions ?? []), ...base.reactions.filter(r => !named.has(pair(r)))];
+  if (isObject(source.air)) merged.air = { ...base.air, ...source.air, ...(isObject(source.air.flow) && { flow: { ...base.air.flow, ...source.air.flow } }) };
+  delete merged.base;
+  return merged;
+}
+
 // Reads a pixelforge-powder source into flat tables, one entry per material id (0 is empty air).
-function readPowder(source) {
-  if (!isObject(source)) fail('powder', 'expected a pixelforge-powder source object');
-  known(source, SOURCE_FIELDS, 'powder');
-  if (source.format !== 'pixelforge-powder') fail('powder.format', 'expected "pixelforge-powder"');
+function readPowder(given) {
+  if (!isObject(given)) fail('powder', 'expected a pixelforge-powder source object');
+  known(given, SOURCE_FIELDS, 'powder');
+  if (given.format !== 'pixelforge-powder') fail('powder.format', 'expected "pixelforge-powder"');
+  if (given.version !== undefined && given.version !== 1) fail('powder.version', 'expected 1');
+  if (given.name !== undefined) recipeName(given.name, 'powder.name');
+  const source = withBase(given);
   const width = integer(source.width, 'powder.width', 8, LIMITS.side), height = integer(source.height, 'powder.height', 8, LIMITS.side);
   const seed = integer(source.seed ?? 1, 'powder.seed', 0, 2147483647);
   const ambient = degrees(source.ambient ?? 20, 'powder.ambient');
@@ -105,7 +132,7 @@ function readPowder(source) {
   const t = {
     names: ['empty', ...names], width, height, seed, ambient, background, gravity, M,
     state: new Uint8Array(M), density: new Int32Array(M), spread: new Uint8Array(M), still: new Float64Array(M), drag: new Float64Array(M),
-    splash: new Float64Array(M), falls: new Uint8Array(M), streak: new Int16Array(M).fill(-1), dense: new Uint8Array(M),
+    splash: new Float64Array(M), falls: new Uint8Array(M), expand: new Uint8Array(M), streak: new Int16Array(M).fill(-1), dense: new Uint8Array(M),
     birth: new Int32Array(M), conduct: new Int32Array(M), cool: new Int32Array(M), hold: new Int32Array(M).fill(NEVER_BELOW),
     lifeMin: new Uint16Array(M), lifeMax: new Uint16Array(M), lifeInto: new Uint8Array(M), lifeChance: new Float64Array(M),
     aboveLatent: new Int32Array(M), belowLatent: new Int32Array(M),
@@ -265,6 +292,10 @@ function readPowder(source) {
       t.haze[m] = colourList([def.haze], `${path}.haze`).map(colour)[0];
     }
     if (def.speed !== undefined && state !== GAS && state !== FIRE) fail(`${path}.speed`, 'speed is the chance a gas or flame moves in a frame');
+    // A gas made by a phase change or a reaction, or given off, takes more room than what it came from: it also fills
+    // up to `expand` free cells beside it (steam from water billows).
+    if (def.expand !== undefined && state !== GAS) fail(`${path}.expand`, 'expand is for gases');
+    t.expand[m] = integer(def.expand ?? 0, `${path}.expand`, 0, 4);
     t.speed[m] = chanceOf(def.speed ?? 1, `${path}.speed`);
     t.hotRamp[m] = [];
     if (def.hot !== undefined) {
@@ -321,6 +352,8 @@ function readPowder(source) {
   t.anyFalls = t.falls.some(f => f);
   t.scene = source.scene ?? [];
   if (!Array.isArray(t.scene) || t.scene.length > LIMITS.scene) fail('powder.scene', `expected a list of at most ${LIMITS.scene} fills`);
+  t.inputs = source.inputs ?? [];
+  if (!Array.isArray(t.inputs) || t.inputs.length > LIMITS.inputs) fail('powder.inputs', `expected a list of at most ${LIMITS.inputs} scripted inputs`);
   t.ref = ref;
   return t;
 }
@@ -334,7 +367,7 @@ const QUEUED = 4096;
 export function createLivePowder(source, options = {}) {
   known(options, ['record'], 'live');
   const T = readPowder(source), { width: W, height: H, M, seed, ambient, gravity: G } = T, N = W * H;
-  const { aboveLatent, belowLatent, state, density, spread, speed, still, drag, splash, falls, birth, conduct, cool, hold, lifeMin, lifeMax, lifeInto, lifeChance, aboveAt, aboveInto, aboveChance, belowAt, belowInto, belowChance, igniteAt, burnMin, burnMax, burnInto, burnChance, burnHeat, emitMat, emitChance, burnEmitMat, burnEmitChance, reactive, pair, reactions } = T;
+  const { aboveLatent, belowLatent, state, density, spread, speed, expand, still, drag, splash, falls, birth, conduct, cool, hold, lifeMin, lifeMax, lifeInto, lifeChance, aboveAt, aboveInto, aboveChance, belowAt, belowInto, belowChance, igniteAt, burnMin, burnMax, burnInto, burnChance, burnHeat, emitMat, emitChance, burnEmitMat, burnEmitChance, reactive, pair, reactions } = T;
   // Cells: material, colour shade, flags, frames of life (or of burning) left, the frame last moved, temperature,
   // and a velocity with the fraction of a pixel moved so far along each axis.
   const mat = new Uint8Array(N), shade = new Uint8Array(N), flag = new Uint8Array(N), life = new Uint16Array(N), stamp = new Uint16Array(N);
@@ -558,6 +591,15 @@ export function createLivePowder(source, options = {}) {
     become(c, m);
     if (m) temp[c] = warm > birth[m] ? warm : birth[m];
     stamp[c] = tick;
+    if (expand[m]) puff(c, m);
+  };
+  // A gas that expands fills up to `expand` free cells beside it, at its temperature.
+  const puff = (c, m) => {
+    const x = c % W, start = rand() & 3;
+    for (let k = 0, made = 0; k < 4 && made < expand[m]; k++) {
+      const side = (start + k) & 3, d = side === 0 ? (c >= W ? c - W : -1) : side === 1 ? (x < W - 1 ? c + 1 : -1) : side === 2 ? (c < N - W ? c + W : -1) : (x > 0 ? c - 1 : -1);
+      if (d >= 0 && mat[d] === 0) { become(d, m); temp[d] = temp[c]; stamp[d] = tick; made++; }
+    }
   };
   const swap = (a, b) => {
     let v = mat[a]; mat[a] = mat[b]; mat[b] = v;
@@ -731,6 +773,7 @@ export function createLivePowder(source, options = {}) {
   // One frame: queued inputs, then every cell from the bottom row up (each row in alternating directions), then heat.
   const advance = () => {
     tick = tick === 65535 ? 1 : tick + 1;
+    script.forEach((entry, n) => { if (t >= entry.from && t <= entry.to && (t - entry.from) % entry.every === 0) { reseed(SALT.script, t, n); entry.run(); } });
     queue.forEach((input, n) => { reseed(SALT.input, t, n); input(); });
     queue = [];
     const was = awake;
@@ -749,8 +792,8 @@ export function createLivePowder(source, options = {}) {
           if (m === 0 || stamp[c] === tick) continue;
           // Phase changes.
           const heat = temp[c];
-          if (heat >= aboveAt[m] + aboveLatent[m]) { if (aboveChance[m] === ONE || rand() < aboveChance[m]) { temp[c] = heat - aboveLatent[m]; m = become(c, aboveInto[m]); if (!m) continue; } else keep(c); }
-          else if (heat <= belowAt[m] - belowLatent[m]) { if (belowChance[m] === ONE || rand() < belowChance[m]) { temp[c] = heat + belowLatent[m]; m = become(c, belowInto[m]); if (!m) continue; } else keep(c); }
+          if (heat >= aboveAt[m] + aboveLatent[m]) { if (aboveChance[m] === ONE || rand() < aboveChance[m]) { temp[c] = heat - aboveLatent[m]; m = become(c, aboveInto[m]); if (!m) continue; if (expand[m]) puff(c, m); } else keep(c); }
+          else if (heat <= belowAt[m] - belowLatent[m]) { if (belowChance[m] === ONE || rand() < belowChance[m]) { temp[c] = heat + belowLatent[m]; m = become(c, belowInto[m]); if (!m) continue; if (expand[m]) puff(c, m); } else keep(c); }
           // Burning, or a life running out.
           if (flag[c] & BURNING) {
             keep(c);
@@ -922,7 +965,18 @@ export function createLivePowder(source, options = {}) {
         if (d >= N) free = false;
         else if (seen[d] !== own) { const n = mat[d], s = state[n]; free = n === 0 || s === GAS || s === FIRE || (s === LIQUID && density[n] < weight); }
       }
-      if (!free) { v = 0; break; }
+      if (!free) {
+        // Landing fast on a liquid it floats on, it throws that liquid out from under it, up and away from its middle.
+        if (v >= SPLASH) {
+          const middle = (cells[0] % W + cells[cells.length - 1] % W) / 2;
+          for (let k = 0; k < cells.length; k++) {
+            const d = cells[k] + W;
+            if (d >= N || seen[d] === own || state[mat[d]] !== LIQUID) continue;
+            vx[d] = (d % W < middle ? -1 : 1) * ((v * 3) >> 2); vy[d] = -(v >> 1); touch(d);
+          }
+        }
+        v = 0; break;
+      }
       for (let k = cells.length - 1; k >= 0; k--) swap(cells[k], cells[k] + W);
       for (let k = 0; k < cells.length; k++) seen[cells[k]] = 0;
       for (let k = 0; k < cells.length; k++) seen[cells[k] += W] = own;
@@ -1054,76 +1108,111 @@ export function createLivePowder(source, options = {}) {
       }
       stirred = true;
     }
-    capsule(at.x, at.y, at.x, at.y, at.radius, c => {
-      const st = state[mat[c]];
-      if (st !== POWDER && st !== LIQUID) return;
-      const x = c % W, dx = x + 0.5 - at.x, dy = (c - x) / W + 0.5 - at.y, d = Math.sqrt(dx * dx + dy * dy) || 1, w = 1 - d / (at.radius + 0.5);
-      let kx = vx[c] + Math.round(strength * w * dx / d * SUB), ky = vy[c] + Math.round(strength * w * (dy / d - 0.5) * SUB);
+    // Loose cells, nearest first, are each thrown out along their line from the blast (tipped upward) to the first free
+    // cell on it, before a solid, with that speed: the blast opens a crater and its spray flies from the rim.
+    const loose = [];
+    capsule(at.x, at.y, at.x, at.y, at.radius, c => { const st = state[mat[c]]; if (st === POWDER || st === LIQUID) loose.push(c); });
+    const distance = c => { const x = c % W, dx = x + 0.5 - at.x, dy = (c - x) / W + 0.5 - at.y; return dx * dx + dy * dy; };
+    loose.sort((a, b) => distance(a) - distance(b) || a - b);
+    for (const c of loose) {
+      const x = c % W, y = (c - x) / W, dx = x + 0.5 - at.x, dy = y + 0.5 - at.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      let ux = dx / d, uy = dy / d - 0.6;
+      const length = Math.sqrt(ux * ux + uy * uy) || 1;
+      ux /= length; uy /= length;
+      const w = 1 - d / (at.radius + 0.5), speed = strength * (0.35 + 0.65 * w);
+      let to = c;
+      for (let k = 1; k <= at.radius * 2 + 4; k++) {
+        const tx = Math.floor(x + 0.5 + ux * k), ty = Math.floor(y + 0.5 + uy * k);
+        if (tx < 0 || ty < 0 || tx >= W || ty >= H) break;
+        const e = ty * W + tx, st = state[mat[e]];
+        if (st === SOLID) break;
+        if (mat[e] === 0) { to = e; break; }
+      }
+      if (to !== c) swap(c, to);
+      let kx = Math.round(speed * ux * SUB), ky = Math.round(speed * uy * SUB);
       kx = kx > TOP ? TOP : kx < -TOP ? -TOP : kx; ky = ky > TOP ? TOP : ky < -TOP ? -TOP : ky;
-      vx[c] = kx; vy[c] = ky === 0 ? -1 : ky;
-      touch(c);
-    });
+      vx[to] = kx; vy[to] = ky === 0 ? -1 : ky; fx[to] = 0; fy[to] = 0;
+      touch(to);
+    }
   };
   const paintInput = (m, at, fill, replace, temperature) => () => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => {
     if (fill < 1 && rand() >= fill * ONE) return;
     if (!replace && mat[c] !== 0) return;
     place(c, m, temperature);
   });
+  // Each input as [what it does, the stroke a recording keeps], read from its fields at `path`.
+  const make = {
+    // Fills free cells within `radius` of (x, y), or of the segment to (x2, y2), with a material: `fill` is the share
+    // of them filled (a spray), `replace` paints over what is there.
+    paint(input, path) {
+      const at = spot(input, path, POWDER_INPUTS.paint);
+      const m = T.ref(input.material, `${path}.material`, false), fill = Math.round(number(input.fill ?? 1, `${path}.fill`, 0, 1) * 100) / 100, replace = !!input.replace;
+      return [paintInput(m, at, fill, replace), { op: 0, m, ...at, fill, replace }];
+    },
+    erase(input, path) {
+      const at = spot(input, path, POWDER_INPUTS.erase);
+      return [() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => place(c, 0)), { op: 1, ...at }];
+    },
+    // Paints the source's wall material over anything: a fixed solid nothing reacts with unless the table says so.
+    wall(input, path) {
+      if (!T.wall) fail(path, 'the source names no wall material (add one called "wall", or set "wall")');
+      const at = spot(input, path, POWDER_INPUTS.wall);
+      return [paintInput(T.wall, at, 1, true), { op: 2, ...at }];
+    },
+    // Adds `amount` degrees (negative cools) to every cell in the disc, air included.
+    heat(input, path) {
+      const at = spot(input, path, POWDER_INPUTS.heat);
+      const amount = Math.round(number(input.amount ?? 200, `${path}.amount`, -2000, 2000));
+      return [() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => { temp[c] = clampT(temp[c] + amount * SIXTEENTHS); touch(c); }), { op: 3, ...at, amount }];
+    },
+    // Drags the air within `radius` of (x, y), or of the segment to (x2, y2), by (vx, vy) pixels a frame, softly to the
+    // rim, as a pointer sweeping through smoke does. Needs moving air (`air.flow`).
+    push(input, path) {
+      if (!F) fail(path, 'the source has no moving air; set air.flow');
+      const at = spot(input, path, POWDER_INPUTS.push);
+      const pvx = Math.round(number(input.vx ?? 0, `${path}.vx`, -8, 8) * 16) / 16, pvy = Math.round(number(input.vy ?? 0, `${path}.vy`, -8, 8) * 16) / 16;
+      return [() => pushAir(at, pvx, pvy), { op: 4, ...at, vx: pvx, vy: pvy }];
+    },
+    // A blast at (x, y): air pushed out from it, and loose powders and liquids within `radius` thrown outward at up to
+    // `strength` pixels a frame (and a little up), the nearer the harder.
+    burst(input, path) {
+      const at = spot(input, path, POWDER_INPUTS.burst);
+      const strength = Math.round(number(input.strength ?? 3, `${path}.strength`, 0, 8) * 16) / 16;
+      return [() => blast(at, strength), { op: 5, x: at.x, y: at.y, radius: at.radius, strength }];
+    }
+  };
+  // The source's scripted inputs: each on `frame`, or on every `every`th frame from frames[0] to frames[1], applied at
+  // the start of the step before the live calls queued for it. The compiler and the live runner both play them.
+  const script = T.inputs.map((entry, n) => {
+    const path = `powder.inputs[${n}]`, actions = Object.keys(POWDER_INPUTS).filter(key => isObject(entry) && entry[key] !== undefined);
+    if (!isObject(entry)) fail(path, 'expected { frame or frames, and one of paint, erase, wall, heat, push or burst }');
+    known(entry, ['frame', 'frames', 'every', ...Object.keys(POWDER_INPUTS)], path);
+    if (actions.length !== 1) fail(path, 'expected exactly one of paint, erase, wall, heat, push or burst');
+    if ((entry.frame === undefined) === (entry.frames === undefined)) fail(path, 'expected frame (one frame) or frames ([first, last])');
+    let from, to;
+    if (entry.frame !== undefined) from = to = integer(entry.frame, `${path}.frame`, 0, LIMITS.steps);
+    else {
+      if (!Array.isArray(entry.frames) || entry.frames.length !== 2) fail(`${path}.frames`, 'expected [first, last] frames');
+      from = integer(entry.frames[0], `${path}.frames[0]`, 0, LIMITS.steps); to = integer(entry.frames[1], `${path}.frames[1]`, from, LIMITS.steps);
+    }
+    const every = integer(entry.every ?? 1, `${path}.every`, 1, LIMITS.steps), [run] = make[actions[0]](entry[actions[0]], `${path}.${actions[0]}`);
+    return { from, to, every, run };
+  });
 
   const live = {
     width: W, height: H, materials: T.names.slice(1), palette: {}, strokes,
-    // The palette key of the background colour, which render() draws where nothing is (and keys mark '.').
+    // The palette key of the background colour, which render() draws where nothing is (and keys mark '.'), and the
+    // colour itself (null when transparent): a compiled recipe's background.
     backgroundKey: KEY_CHARS[0],
+    backgroundColor: T.background[3] ? `#${T.background.slice(0, T.background[3] === 255 ? 3 : 4).map(v => v.toString(16).padStart(2, '0')).join('')}` : null,
     get frame() { return t; },
     step(n = 1) {
       integer(n, 'step', 0, 100000);
       for (let k = 0; k < n; k++) advance();
       return live;
     },
-    // Fills free cells within `radius` of (x, y), or of the segment to (x2, y2), with a material: `fill` is the share
-    // of them filled (a spray), `replace` paints over what is there.
-    paint(input) {
-      const at = spot(input, 'paint', ['material', 'x', 'y', 'x2', 'y2', 'radius', 'fill', 'replace']);
-      const m = T.ref(input.material, 'paint.material', false), fill = Math.round(number(input.fill ?? 1, 'paint.fill', 0, 1) * 100) / 100, replace = !!input.replace;
-      enqueue(paintInput(m, at, fill, replace), { op: 0, m, ...at, fill, replace });
-      return live;
-    },
-    erase(input) {
-      const at = spot(input, 'erase', ['x', 'y', 'x2', 'y2', 'radius']);
-      enqueue(() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => place(c, 0)), { op: 1, ...at });
-      return live;
-    },
-    // Paints the source's wall material over anything: a static solid nothing reacts with unless the table says so.
-    wall(input) {
-      if (!T.wall) fail('wall', 'the source names no wall material (add one called "wall", or set "wall")');
-      const at = spot(input, 'wall', ['x', 'y', 'x2', 'y2', 'radius']);
-      enqueue(paintInput(T.wall, at, 1, true), { op: 2, ...at });
-      return live;
-    },
-    // Adds `amount` degrees (negative cools) to every cell in the disc, air included.
-    heat(input) {
-      const at = spot(input, 'heat', ['x', 'y', 'x2', 'y2', 'radius', 'amount']);
-      const amount = Math.round(number(input.amount ?? 200, 'heat.amount', -2000, 2000));
-      enqueue(() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => { temp[c] = clampT(temp[c] + amount * SIXTEENTHS); touch(c); }), { op: 3, ...at, amount });
-      return live;
-    },
-    // Drags the air within `radius` of (x, y), or of the segment to (x2, y2), by (vx, vy) pixels a frame, softly to the
-    // rim, as a pointer sweeping through smoke does. Needs moving air (`air.flow`).
-    push(input) {
-      if (!F) fail('push', 'the source has no moving air; set air.flow');
-      const at = spot(input, 'push', ['x', 'y', 'x2', 'y2', 'radius', 'vx', 'vy']);
-      const pv = [Math.round(number(input.vx ?? 0, 'push.vx', -8, 8) * 16) / 16, Math.round(number(input.vy ?? 0, 'push.vy', -8, 8) * 16) / 16];
-      enqueue(() => pushAir(at, pv[0], pv[1]), { op: 4, ...at, vx: pv[0], vy: pv[1] });
-      return live;
-    },
-    // A blast at (x, y): air pushed out from it, and loose powders and liquids within `radius` thrown outward at up to
-    // `strength` pixels a frame (and a little up), the nearer the harder.
-    burst(input) {
-      const at = spot(input, 'burst', ['x', 'y', 'radius', 'strength']);
-      const strength = Math.round(number(input.strength ?? 3, 'burst.strength', 0, 8) * 16) / 16;
-      enqueue(() => blast(at, strength), { op: 5, x: at.x, y: at.y, radius: at.radius, strength });
-      return live;
-    },
+    // Inputs, queued for the next step: paint, erase, wall, heat, push and burst (see `make` for what each does).
+    ...Object.fromEntries(Object.keys(POWDER_INPUTS).map(action => [action, input => { const [run, stroke] = make[action](input, action); enqueue(run, stroke); return live; }])),
     // What is at a pixel now.
     at(x, y) {
       const c = integer(y, 'at.y', 0, H - 1) * W + integer(x, 'at.x', 0, W - 1);
@@ -1311,6 +1400,84 @@ export function createLivePowder(source, options = {}) {
   return live;
 }
 
+// ---- Compiling ----------------------------------------------------------------------------------------------------
+// Bakes a source into an ordinary recipe: the grid runs from its scene, playing its scripted inputs, and each clip
+// samples it every `every` steps from `start` (60 steps a second), drawn exactly as render() draws it. Pixels that never
+// change in any sampled frame are drawn once, as the symbol `still`, stamped under every frame; each frame draws the
+// rest as one palette grid per 16-row band, cropped to where anything changes.
+export function compilePowder(source) {
+  if (!isObject(source)) fail('powder', 'expected a pixelforge-powder source object');
+  if (source.version !== 1) fail('powder.version', 'expected 1');
+  const name = recipeName(source.name, 'powder.name');
+  const live = createLivePowder(source), { width: W, height: H } = live;
+  if (W > CANVAS_SIDE || H > CANVAS_SIDE) fail(W > CANVAS_SIDE ? 'powder.width' : 'powder.height', `a compiled powder grid is an animation, at most ${CANVAS_SIDE} pixels a side; run a larger one live (createLivePowder) or as video frames (pixelbolt sequence)`);
+  // Clips: each a one-shot animation.
+  const given = source.clips ?? { [name]: {} };
+  if (!isObject(given) || !Object.keys(given).length || Object.keys(given).length > LIMITS.clips) fail('powder.clips', `expected 1 to ${LIMITS.clips} named clips: { start, frames, every, duration }`);
+  const clips = Object.entries(given).map(([clip, value]) => {
+    const path = `powder.clips.${clip}`;
+    recipeName(clip, path);
+    if (!isObject(value)) fail(path, 'expected { start, frames, every, duration }');
+    known(value, ['start', 'frames', 'every', 'duration'], path);
+    const start = integer(value.start ?? 0, `${path}.start`, 0, LIMITS.steps), frames = integer(value.frames ?? 60, `${path}.frames`, 1, LIMITS.frames);
+    const every = integer(value.every ?? 2, `${path}.every`, 1, 60), duration = integer(value.duration ?? Math.round(every * 1000 / 60), `${path}.duration`, 10, 10000);
+    return { clip, start, frames, every, duration, last: start + (frames - 1) * every };
+  });
+  if (new Set(clips.map(c => c.clip.toLowerCase())).size !== clips.length) fail('powder.clips', 'clip names must be unique ignoring case');
+  const total = clips.reduce((sum, c) => sum + c.frames, 0), steps = Math.max(...clips.map(c => c.last));
+  if (total > LIMITS.frames) fail('powder.clips', `${total} frames in all; a recipe holds at most ${LIMITS.frames}`);
+  if (W * H * total > FRAME_AREA) fail('powder.clips', `${total} frames of ${W}×${H} are ${(W * H * total).toLocaleString('en')} pixels; a recipe holds at most 4,194,304 (fewer frames, or a smaller grid)`);
+  if (steps > LIMITS.steps) fail('powder.clips', `the clips need ${steps} steps; at most ${LIMITS.steps}`);
+  if (W * H * steps > LIMITS.work) fail('powder.clips', `the clips need about ${Math.round(W * H * steps / 1e6)} million cell steps, more than ${LIMITS.work / 1e6} million; fewer steps or a smaller grid`);
+
+  // Every sampled moment, in time order, then each clip's frames from them.
+  const times = [...new Set(clips.flatMap(c => Array.from({ length: c.frames }, (_, k) => c.start + k * c.every)))].sort((a, b) => a - b);
+  const keys = new Map(), summaries = {};
+  for (const time of times) {
+    live.step(time - live.frame);
+    keys.set(time, live.render().keys.join(''));
+    for (const c of clips) if (c.last === time) {
+      const { counts, chunks } = live.measure();
+      summaries[c.clip] = { start: c.start, frames: c.frames, every: c.every, duration: c.duration, steps: c.last, counts, settled: chunks.stepped === 0 };
+    }
+  }
+  // The still layer: pixels the same in every sampled frame.
+  const first = keys.get(times[0]), moving = new Uint8Array(W * H);
+  for (const time of times) { const k = keys.get(time); for (let c = 0; c < W * H; c++) if (k[c] !== first[c]) moving[c] = 1; }
+  const still = [];
+  let anyStill = false;
+  for (let y = 0; y < H; y++) { let row = ''; for (let x = 0; x < W; x++) { const c = y * W + x, key = moving[c] ? '.' : first[c]; if (key !== '.') anyStill = true; row += key; } still.push(row); }
+  // Each band's box round its changing pixels.
+  const boxes = [];
+  for (let y0 = 0; y0 < H; y0 += 16) {
+    let left = W, right = -1, top = H, bottom = -1;
+    for (let y = y0; y < Math.min(H, y0 + 16); y++) for (let x = 0; x < W; x++) if (moving[y * W + x]) { if (x < left) left = x; if (x > right) right = x; if (y < top) top = y; if (y > bottom) bottom = y; }
+    if (right >= 0) boxes.push({ x: left, y: top, w: right - left + 1, h: bottom - top + 1 });
+  }
+  const used = new Set();
+  const frameOps = time => {
+    const k = keys.get(time), ops = anyStill ? [{ op: 'stamp', symbol: 'still', x: 0, y: 0 }] : [];
+    for (const box of boxes) {
+      const rows = [];
+      for (let y = box.y; y < box.y + box.h; y++) { let row = ''; for (let x = box.x; x < box.x + box.w; x++) { const c = y * W + x, key = moving[c] ? k[c] : '.'; if (key !== '.') used.add(key); row += key; } rows.push(row); }
+      ops.push({ op: 'grid', x: box.x, y: box.y, rows });
+    }
+    return ops;
+  };
+  const frames = [], animations = {};
+  for (const c of clips) {
+    const names = [];
+    for (let n = 0; n < c.frames; n++) { const frameName = `${c.clip}-${n}`; names.push(frameName); frames.push({ name: frameName, duration: c.duration, ops: frameOps(c.start + n * c.every) }); }
+    animations[c.clip] = { frames: names, loop: false };
+  }
+  for (const row of still) for (const key of row) if (key !== '.') used.add(key);
+  const palette = Object.fromEntries(Object.entries(live.palette).filter(([key]) => used.has(key)));
+  const background = live.backgroundColor;
+  const recipe = { version: 1, name, width: W, height: H, ...(background && { background }), palette, ...(anyStill && { symbols: { still } }), frames, animations };
+  renderProject(recipe);
+  return JSON.parse(JSON.stringify({ recipe, metadata: { format: 'pixelforge-powder-metadata', version: 1, steps, clips: summaries } }));
+}
+
 // ---- Recorded strokes ---------------------------------------------------------------------------------------------
 // Replays recorded strokes on a fresh runner of the same source: each on its frame, then a step, for `frames` frames.
 export function replayStrokes(live, strokes, frames) {
@@ -1413,7 +1580,7 @@ export const SANDBOX = {
       colors: ['#22212b', '#2c2b35', '#373640', '#43424c', '#504f58', '#5e5d65']
     },
     steam: {
-      state: 'gas', density: 0.4, spread: 2, speed: 0.7, cool: 0.015, conduct: 0.1, temperature: 110, life: { frames: [60, 150] }, colorBy: 'density',
+      state: 'gas', density: 0.4, spread: 2, speed: 0.7, expand: 3, cool: 0.015, conduct: 0.1, temperature: 110, life: { frames: [60, 150] }, colorBy: 'density',
       colors: ['#252935', '#313746', '#424a5c', '#5a6478', '#7c879b', '#a9b4c6'],
       below: { temperature: 65, into: 'water', chance: 0.001 }
     },

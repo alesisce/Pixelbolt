@@ -116,6 +116,7 @@ test('every module the browser imports is served by the studio and packed with s
   served['/motion.js'] = 'src/motion.js';
   served['/fluid-controls.js'] = 'studio/fluid-controls.js';
   Object.assign(served, { '/fx.js': 'src/fx.js', '/shapes.js': 'src/shapes.js', '/wave.js': 'src/wave.js', '/effects-lab.js': 'studio/effects-lab.js', '/effects-controls.js': 'studio/effects-controls.js' });
+  Object.assign(served, { '/powder.js': 'src/powder.js', '/powder-lab.js': 'studio/powder-lab.js', '/powder-controls.js': 'studio/powder-controls.js' });
   for (const route of Object.keys(served)) assert.ok(STUDIO_PATHS.includes(route), `${route} is not served`);
   // Every module those import, and everything that imports in turn (bodies.js brought territory.js, which the labs then
   // failed to load), is served too.

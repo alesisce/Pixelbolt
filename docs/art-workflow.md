@@ -710,6 +710,8 @@ function frame() {
 
 **Presets.** [hut fire](../examples/hut-fire.powder.json) (a hut on a pier burns, drops into its pool and floats there burning, while lava pours off the far cliff into the water), [lava falls](../examples/lava-falls.powder.json) (lava burns through a moss plug and pours into a pool, crusting to stone in steam), [quarry blast](../examples/quarry-blast.powder.json) (a blast throws sand and water in arcs that rain back down and settle) and [rain on fire](../examples/rain-on-fire.powder.json) (a campfire leans in a breeze until rain hisses it out in steam). Their GIFs are in [showcase/powder/](../showcase/powder/) (`node showcase/powder/build.mjs --check`).
 
+**In the studio.** The **Powder lab** (`/powder.html`, linked from the studio) runs the live grid in the browser: a sandbox and the presets, a brush for every material and for erase, wall, heat, cool, wind (`push`) and blast (`burst`), pause and step. It shows each stroke as its `live` call and as a scripted input to paste into a source, copies a link that replays every stroke to the same pixels, and bakes a preset's clip to a GIF or recipe beside the matching command line and MCP calls.
+
 ## Lossless raster return path
 
 ```sh

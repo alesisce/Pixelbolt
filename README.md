@@ -169,7 +169,7 @@ A `pixelforge-powder` source is a falling-sand sandbox: every pixel holds sand, 
 
 ![A hut on a pier burns, drops into its pool and floats there burning while lava pours off the far cliff into the water](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/showcase/powder/hut-fire.gif) ![Lava burns through a moss plug and pours into a pool, crusting to stone in clouds of steam](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/showcase/powder/lava-falls.gif)
 
-The four presets are in [examples/](examples/) (`*.powder.json`); agents compile them with MCP `pixel_compile` and read the format with `pixel_help` topic `powder`. The [falling sand guide](docs/art-workflow.md#falling-sand) covers the starter table, materials, heat, reactions, air, inputs, clips and the live runner.
+The four presets are in [examples/](examples/) (`*.powder.json`); agents compile them with MCP `pixel_compile` and read the format with `pixel_help` topic `powder`. In the studio, **Powder lab** (`/powder.html`) runs the sandbox live in your browser: paint any material, heat, cool, blow and blast with the pointer, and copy a link that replays every stroke to the same pixels. The [falling sand guide](docs/art-workflow.md#falling-sand) covers the starter table, materials, heat, reactions, air, inputs, clips and the live runner.
 
 ## Start
 

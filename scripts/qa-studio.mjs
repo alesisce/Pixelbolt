@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readZip } from './build-studio.mjs';
 import { FLUID_PRESETS } from '../studio/fluid-controls.js';
 import { EFFECT_PRESETS } from '../studio/effects-controls.js';
+import { POWDER_SCENES, POWDER_TOOLS, SANDBOX_SOURCE, pixelDigest, readReplayLink } from '../studio/powder-controls.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const options = { app: root, 'browser-arg': [] };
@@ -802,6 +803,141 @@ try {
     assert.equal(gif.toString('latin1', 0, 6), 'GIF89a');
     await click('#reset'); await compiledFx();
     return `${before} → ${await particles()} particles after reset; bursts doubled in the saved source`;
+  });
+
+  // The powder lab runs src/powder.js's live grid in the page; its status line counts the chunks awake once it draws.
+  console.log('Powder lab');
+  const running = (page = studio) => page.until(`document.getElementById('status').textContent.includes('chunks awake') && !document.getElementById('play').disabled`, 'the powder lab to run');
+  const frameNumber = (page = studio) => page.evaluate(`Number(document.getElementById('frame').textContent.replace(/\\D/g, ''))`);
+  const gridDigest = (page = studio) => page.evaluate(`(async () => { const { pixelDigest } = await import('/powder-controls.js'), c = document.getElementById('canvas'); return pixelDigest(c.getContext('2d').getImageData(0, 0, c.width, c.height).data); })()`);
+  // Real mouse input on grid cells: press at the first, move through the rest, hold, release at the last.
+  const gridPoint = (x, y) => evaluate(`(() => { const c = document.getElementById('canvas'), box = c.getBoundingClientRect(); return { x: box.left + (${x} + 0.5) * box.width / c.width, y: box.top + (${y} + 0.5) * box.height / c.height }; })()`);
+  const drag = async (cells, hold = 0) => {
+    await evaluate(`document.getElementById('canvas').scrollIntoView({ block: 'center', inline: 'center' })`);
+    const at = []; for (const [x, y] of cells) at.push(await gridPoint(x, y));
+    await studio.page('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at[0].x, y: at[0].y });
+    await studio.page('Input.dispatchMouseEvent', { type: 'mousePressed', x: at[0].x, y: at[0].y, button: 'left', buttons: 1, clickCount: 1 });
+    for (const point of at.slice(1)) await studio.page('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y, button: 'left', buttons: 1 });
+    if (hold) await sleep(hold);
+    await studio.page('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.at(-1).x, y: at.at(-1).y, button: 'left', buttons: 0, clickCount: 1 });
+  };
+  await check('the powder lab lists its scenes, runs the sandbox in the browser and paints sand with the mouse', async () => {
+    await studio.size(1440, 900); await studio.goto(`${origin}/powder.html`); await running();
+    assert.deepEqual([await evaluate('document.title'), await evaluate(`document.querySelectorAll('#scenes .example').length`), await evaluate(`document.getElementById('error').hidden`), await evaluate('location.hash')], ['Pixelbolt · Powder lab', POWDER_SCENES.length, true, '#sandbox']);
+    const start = await frameNumber();
+    await until(`Number(document.getElementById('frame').textContent.replace(/\\D/g, '')) > ${start + 10}`, 'the grid to step');
+    const shown = await evaluate(`[document.getElementById('canvas').width, parseFloat(document.getElementById('canvas').style.width)]`);
+    assert.ok(shown[1] >= shown[0] * 2, `the sandbox is shown at ${shown[1] / shown[0]}× in a 1440 × 900 window`);
+    const sand = `(() => { const c = document.getElementById('canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 190 && d[i + 1] > 140 && d[i + 1] < 200 && d[i + 2] < 140) n++; return n; })()`;
+    const before = await evaluate(sand);
+    await click('[data-brush="sand"]'); await drag([[118, 12], [124, 12], [130, 12]], 400);
+    await until(`${sand} > ${before + 40}`, 'poured sand to show');
+    assert.match(await text('stroke'), /^live\.paint\(\{ material: 'sand', x: [\d.]+, y: 12\.5, .*fill: 0\.35 \}\)\n\{ "frame": \d+, "paint": \{ "material": "sand"/);
+    assert.match(await text('recorded'), /^\d+ strokes recorded$/);
+    await studio.shot('powder-lab');
+    return `${await evaluate(sand)} sand pixels; ${await text('status')}`;
+  });
+  await check('paused, every material and tool lays a stroke, and Step moves one frame at a time', async () => {
+    if (await evaluate(`document.getElementById('play').getAttribute('aria-label')`) === 'Pause simulation') await click('#play');
+    const materials = await evaluate(`[...document.querySelectorAll('#materials [data-brush]')].map(button => button.dataset.brush)`), made = [];
+    assert.deepEqual(materials, ['sand', 'water', 'stone', 'wood', 'fire', 'smoke', 'steam', 'oil', 'lava', 'ice', 'ash', 'moss']);
+    const action = { erase: 'erase', wall: 'wall', heat: 'heat', cool: 'heat', wind: 'push', blast: 'burst' };
+    for (const [n, brush] of [...materials, ...POWDER_TOOLS.map(tool => tool.id)].entries()) {
+      const x = 12 + (n % 9) * 26, y = 20 + Math.floor(n / 9) * 40;
+      await click(`[data-brush="${brush}"]`);
+      assert.equal(await evaluate(`document.querySelector('[data-brush="${brush}"]').getAttribute('aria-pressed')`), 'true', brush);
+      await drag([[x, y], [x + 4, y + 1], [x + 8, y + 2]]);
+      const call = await text('stroke');
+      assert.ok(call.startsWith(`live.${action[brush] ?? 'paint'}({ `), `${brush}: ${call}`);
+      if (!action[brush]) assert.ok(call.includes(`material: '${brush}'`), `${brush}: ${call}`);
+      if (brush === 'cool') assert.ok(call.includes('amount: -80'), call);
+      made.push(`${brush} → ${call.slice(5, call.indexOf('('))}`);
+    }
+    const before = await frameNumber();
+    for (let k = 0; k < 3; k++) await click('#step');
+    assert.equal(await frameNumber(), before + 3);
+    assert.equal(await evaluate(`document.getElementById('error').hidden`), true);
+    return made.join(', ');
+  });
+  await check('a replay link opens in another tab on the same pixels, and Node replays it to them too', async () => {
+    // A stroke made after the last step waits for the next one: the link carries it, and the replay leaves it waiting.
+    await click('[data-brush="water"]'); await drag([[150, 30], [154, 30]]);
+    const sent = await gridDigest(), frames = await frameNumber();
+    await click('#link');
+    await until(`document.getElementById('link-text').value.includes('#s=sandbox&i=')`, 'the replay link');
+    const link = await evaluate(`document.getElementById('link-text').value`);
+    assert.ok(link.startsWith(`${origin}/powder.html#s=sandbox&i=`) && link.endsWith(`&h=${sent}`), link);
+    assert.match(await text('notice'), /link replaying [\d,]+ strokes over [\d,]+ frames, [\d,]+ characters\.$/);
+    const other = await openPage();
+    try {
+      await other.size(1440, 900); await other.goto(link);
+      await other.until(`document.getElementById('notice').textContent.startsWith('Replayed')`, 'the replay to finish');
+      assert.match(await other.evaluate(`document.getElementById('notice').textContent`), /: the same pixels the sender saw\./);
+      assert.deepEqual([await gridDigest(other), await frameNumber(other)], [sent, frames]);
+      assert.equal(await other.evaluate(`document.getElementById('play').getAttribute('aria-label')`), 'Play simulation');
+      // The waiting stroke lands on the next step in both tabs alike.
+      await other.click('#step'); await click('#step');
+      assert.equal(await gridDigest(other), await gridDigest());
+    } finally {
+      // A tab behind another gets no animation frames, so the lab would stop stepping: bring the studio back to the front.
+      await other.close(); await studio.page('Page.bringToFront');
+    }
+    const { createLivePowder, unpackStrokes, replayStrokes, applyStroke } = await import(pathToFileURL(path.join(path.resolve(options.app), 'src', 'powder.js')));
+    const read = await readReplayLink(link), { frames: replayFrames, strokes } = unpackStrokes(read.packed), live = createLivePowder(SANDBOX_SOURCE);
+    replayStrokes(live, strokes, replayFrames);
+    for (const stroke of strokes.filter(s => s.f === replayFrames)) applyStroke(live, stroke);
+    assert.equal(pixelDigest(live.render().rgba), sent, 'Node replays the link to other pixels');
+    return `${strokes.length} strokes over ${replayFrames} frames, ${link.length} characters`;
+  });
+  await check('every powder preset runs live in the browser and compiles there to the same recipe as Node', async () => {
+    const { compilePowder } = await import(pathToFileURL(path.join(path.resolve(options.app), 'src', 'powder.js')));
+    const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex'), seen = [];
+    if (await evaluate(`document.getElementById('play').getAttribute('aria-label')`) === 'Play simulation') await click('#play');
+    for (const { file } of POWDER_SCENES.filter(entry => entry.file)) {
+      await click(`#scenes .example[data-scene="${file}"]`);
+      await until(`location.hash === '#${file}' && document.getElementById('name').textContent !== 'Loading'`, `${file} to open`); await running();
+      const start = await frameNumber();
+      await until(`Number(document.getElementById('frame').textContent.replace(/\\D/g, '')) > ${start + 5}`, `${file} to step`);
+      assert.equal(await evaluate(`document.getElementById('error').hidden`), true, file);
+      const browser = await evaluate(`(async () => { const { compilePowder } = await import('/powder.js'), source = await (await fetch('/examples/${file}.powder.json')).json(); const bytes = new TextEncoder().encode(JSON.stringify(compilePowder(source).recipe)); return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join(''); })()`);
+      assert.equal(browser, digest(compilePowder(JSON.parse(await readFile(path.join(path.resolve(options.app), 'examples', `${file}.powder.json`), 'utf8'))).recipe), `${file} compiles differently in the browser`);
+      await studio.shot(`powder-${file}`);
+      seen.push(`${file} (${(await text('status')).match(/step ([\d.]+ ms)/)[1]} a step)`);
+    }
+    return seen.join(', ');
+  });
+  await check('the bake downloads the clip as a GIF, the recipe and the source, with the matching calls', async () => {
+    await click('#scenes .example[data-scene="quarry-blast"]');
+    await until(`location.hash === '#quarry-blast'`, 'the quarry blast to open'); await running();
+    assert.match(await text('cli'), /^pixelbolt compile quarry-blast\.powder\.json --out quarry-blast\.json\npixelbolt gif quarry-blast\.json --scale \d+ --out quarry-blast\.gif$/);
+    assert.match(await text('mcp'), /^pixel_compile \{ "preset": "quarry-blast" \}\n/);
+    const gif = await readFile(await download(() => click('#gif')));
+    assert.equal(gif.toString('latin1', 0, 6), 'GIF89a');
+    const decoded = await evaluate(`(async () => { const decoder = new ImageDecoder({ data: Uint8Array.from(atob(${JSON.stringify(gif.toString('base64'))}), c => c.charCodeAt(0)), type: 'image/gif' }); try { await decoder.tracks.ready; await decoder.completed; return decoder.tracks.selectedTrack.frameCount; } finally { decoder.close(); } })()`);
+    assert.equal(decoded, 60);
+    const recipe = JSON.parse(await readFile(await download(() => click('#recipe')), 'utf8'));
+    assert.deepEqual([recipe.name, recipe.frames.length], ['quarry-blast', 60]);
+    const source = JSON.parse(await readFile(await download(() => click('#powder-source')), 'utf8'));
+    assert.deepEqual(source, JSON.parse(await readFile(path.join(path.resolve(options.app), 'examples', 'quarry-blast.powder.json'), 'utf8')));
+    // The sandbox has no clip worth baking, so only its source downloads.
+    await click('#scenes .example[data-scene="sandbox"]'); await until(`location.hash === '#sandbox'`, 'the sandbox to open'); await running();
+    assert.deepEqual([await evaluate(`document.getElementById('gif').disabled`), await evaluate(`document.getElementById('recipe').disabled`), await evaluate(`document.getElementById('powder-source').disabled`)], [true, true, false]);
+    // Restart drops the strokes and starts the scene again.
+    await click('[data-brush="sand"]'); await drag([[60, 20], [64, 20]]);
+    assert.notEqual(await text('recorded'), '0 strokes recorded');
+    await click('#restart'); await until(`document.getElementById('recorded').textContent === '0 strokes recorded'`, 'the restart'); await running();
+    return `GIF with ${decoded} frames, ${gif.length} bytes`;
+  });
+  await check('the powder lab fits a phone-sized window without scrolling sideways', async () => {
+    // A query makes this a new page load rather than a change of fragment on the open one.
+    await studio.size(390, 844); await studio.goto(`${origin}/powder.html?narrow#hut-fire`);
+    await until(`location.hash === '#hut-fire' && document.getElementById('name').textContent === 'Hut fire'`, 'the hut fire to open'); await running();
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true, 'the page scrolls sideways');
+    const shown = await evaluate(`parseFloat(document.getElementById('canvas').style.width)`);
+    assert.ok(shown <= 390, `the grid is ${shown} px wide`);
+    await studio.shot('powder-lab-narrow', true);
+    await studio.size(1440, 900);
+    return `the grid at ${shown} px`;
   });
 
   console.log('Afterwards');

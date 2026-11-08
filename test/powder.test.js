@@ -207,3 +207,27 @@ test('drawing: fast drops trail streaks, gases draw as clouds and a lone gas cel
   assert.ok(smoke.includes(still.palette[fresh[69][2]]), 'the pixel above the cloud is hazed');
   assert.equal(fresh[74][12], '.', 'the lone steam cell is not drawn');
 });
+
+test('settled regions: a quiet scene stops costing steps, a poke wakes what it reaches, and heat crosses into sleeping chunks', () => {
+  const live = createLivePowder(sandboxSource(128, 96, [
+    { material: 'stone', rect: [0, 88, 128, 8] }, { material: 'sand', rect: [4, 60, 40, 28] },
+    { material: 'stone', rect: [60, 56, 4, 32] }, { material: 'stone', rect: [124, 56, 4, 32] }, { material: 'water', rect: [64, 64, 60, 24] }
+  ]));
+  live.step(300);
+  assert.deepEqual(live.measure().chunks, { stepped: 0, of: 48 }, 'everything has settled');
+  live.paint({ material: 'sand', x: 100.5, y: 8.5, radius: 2 }).step();
+  const woken = live.measure().chunks.stepped;
+  assert.ok(woken >= 1 && woken <= 4, `the poke woke ${woken} chunks`);
+  live.step(300);
+  assert.equal(live.measure().chunks.stepped, 0, 'and the sand sank into the pool and settled again');
+  // A hot spot in a settled slab: the heat spreads over chunk edges, exactly.
+  const slab = createLivePowder({ format: 'pixelforge-powder', width: 64, height: 48, air: { conduct: 0, cool: 0 }, materials: { stone: { state: 'solid', conduct: 1, colors: ['#666666'] } }, scene: [{ material: 'stone', rect: [0, 0, 64, 48] }] });
+  slab.step(2);
+  assert.equal(slab.measure().chunks.stepped, 0);
+  const total = () => slab.cells.temp.reduce((sum, v) => sum + v, 0);
+  slab.heat({ x: 8, y: 8, radius: 3, amount: 1500 }).step();
+  const start = total();
+  slab.step(400);
+  assert.equal(total(), start);
+  assert.ok(slab.at(34, 8).temperature > 20 && slab.at(30, 30).temperature > 20, 'two chunks away warmed');
+});

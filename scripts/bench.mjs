@@ -76,6 +76,21 @@ const STEAM = { format: 'pixelforge-fluid', version: 1, name: 'fluid', width: 12
     emitters: [{ name: 'breath', at: [86, 54], radius: 2, rate: 1, density: 0.6, temperature: 0.5, velocity: [0, -1.1], noise: 0.15, flicker: 0.2, pulse: { amplitude: 0.6, period: 16 } }, { at: [64, 0], area: [128, 12], rate: 1, density: -0.3 }],
     look: [{ field: 'density', colors: ['s', 'w'], thresholds: [0.16, 0.5] }, { field: 'shadow', colors: ['k'], thresholds: [0.5], dither: 0 }], cleanup: { strays: true, corners: true } } } };
 
+// A busy falling-sand sandbox: half the grid sand falling through water, over wooden frames alight on a stone floor.
+const busySandbox = (sandboxSource, width, height) => {
+  const half = height / 2, floor = height - 4, scene = [
+    { material: 'stone', rect: [0, floor, width, 4] },
+    { material: 'sand', rect: [0, 0, width, half], fill: 0.5 },
+    { material: 'water', rect: [0, 0, width, half], replace: false }
+  ];
+  for (let x = 6; x + 16 < width; x += 32) {
+    const top = half + 8;
+    scene.push({ material: 'wood', rect: [x, top, 3, floor - top] }, { material: 'wood', rect: [x + 13, top, 3, floor - top] }, { material: 'wood', rect: [x, top, 16, 3] });
+    scene.push({ material: 'wood', rect: [x, floor - 4, 16, 4], burning: true });
+  }
+  return sandboxSource(width, height, scene);
+};
+
 // A case: setup (untimed, once per process) returns the state; fresh(state), if given, makes each run's own state
 // untimed; run(state) is timed and returns { frames, hash }. `budget`, where given, is the most its median may take,
 // in milliseconds a run.
@@ -143,6 +158,11 @@ const CASES = [
     // Each run starts a new runner (its warm-up untimed), so the hash doesn't depend on --runs or --warmup.
     fresh: ({ createLiveFluid, source }) => createLiveFluid(source),
     run: live => { let shown; for (let i = 0; i < 30; i++) { live.step(); shown = live.render(); } return { frames: 30, hash: hash(JSON.stringify(shown.keys), shown.rgba) }; } },
+  // A game's frame: 16 ms at most for a busy 320 × 180 sandbox, stepped and drawn.
+  { id: 'live/powder-busy', what: 'createLivePowder: step and render 120 frames of a busy 320 × 180 sandbox', budget: 120 * 16,
+    setup: async load => ({ powder: await load('src/powder.js') }),
+    fresh: ({ powder }) => powder.createLivePowder(busySandbox(powder.sandboxSource, 320, 180)).step(30),
+    run: live => { let shown; for (let i = 0; i < 120; i++) { live.step(); shown = live.render(); } return { frames: 120, hash: hash(shown.rgba) }; } },
   // 250 ms a frame at most, pushed every eighth frame.
   { id: 'live/steam', what: 'createLiveFluid: step and render 48 pushed frames', budget: 48 * 250,
     setup: async load => ({ createLiveFluid: (await load('src/fluid.js')).createLiveFluid }),

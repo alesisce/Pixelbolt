@@ -326,6 +326,28 @@ export function createLivePowder(source, options = {}) {
   let t = 0, tick = 0, r = 1;
   // Set when a solid appears or goes, so the pieces that fall are found again; and while any piece is loose.
   let supportChanged = T.anyFalls, loose = false;
+  // Settled regions. The grid is cut into 16 × 16 chunks, and a chunk is stepped (its cells and its heat) only while
+  // something in it moved, changed or still might. A cell that moves or changes wakes its chunk for the next frame,
+  // and the chunks beside it when it lies on an edge; a cell that is busy without changing (burning, ageing, a gas, a
+  // chance not yet taken, a neighbour it may react with) keeps its own chunk awake; heat that flows wakes both ends.
+  // A big quiet scene costs little more than drawing it.
+  const CW = (W + 15) >> 4, CH = (H + 15) >> 4;
+  let awake = new Uint8Array(CW * CH).fill(1), next = new Uint8Array(CW * CH).fill(1);
+  const chunkOf = new Uint16Array(N), edges = new Uint8Array(N);
+  for (let y = 0, c = 0; y < H; y++) for (let x = 0; x < W; x++, c++) {
+    chunkOf[c] = (y >> 4) * CW + (x >> 4);
+    edges[c] = ((x & 15) === 0 && x > 0 ? 1 : 0) | ((x & 15) === 15 && x < W - 1 ? 2 : 0) | ((y & 15) === 0 && y > 0 ? 4 : 0) | ((y & 15) === 15 && y < H - 1 ? 8 : 0);
+  }
+  const keep = c => { next[chunkOf[c]] = 1; };
+  const touch = c => {
+    const k = chunkOf[c], e = edges[c];
+    next[k] = 1;
+    if (!e) return;
+    if (e & 1) next[k - 1] = 1;
+    if (e & 2) next[k + 1] = 1;
+    if (e & 4) { next[k - CW] = 1; if (e & 1) next[k - CW - 1] = 1; if (e & 2) next[k - CW + 1] = 1; }
+    if (e & 8) { next[k + CW] = 1; if (e & 1) next[k + CW - 1] = 1; if (e & 2) next[k + CW + 1] = 1; }
+  };
   // The random stream: xorshift32, reseeded from craft's hash at every frame and every input.
   const rand = () => { r ^= r << 13; r ^= r >>> 17; r ^= r << 5; return r >>> 0; };
   const reseed = (...values) => { r = hash(seed, ...values) | 0 || 1; };
@@ -347,6 +369,7 @@ export function createLivePowder(source, options = {}) {
     if (state[mat[c]] === SOLID || state[m] === SOLID) supportChanged = true;
     mat[c] = m; flag[c] = 0; shade[c] = m ? shadeAt(c, m) : 0; life[c] = lifeDraw(m);
     vx[c] = 0; vy[c] = 0; fx[c] = 0; fy[c] = 0;
+    touch(c);
     return m;
   };
   // A new cell (given off, or made by a reaction): at least as warm as its material is made.
@@ -366,14 +389,19 @@ export function createLivePowder(source, options = {}) {
     v = fx[a]; fx[a] = fx[b]; fx[b] = v;
     v = fy[a]; fy[a] = fy[b]; fy[b] = v;
     stamp[b] = tick;
+    touch(a); touch(b);
   };
   // Can a falling cell of m move into d? Into air, or by sinking through anything lighter that moves.
+  // `chancy` is set when it could have but the draw said not this frame, so the cell's chunk stays awake.
+  let chancy = false;
   const sinks = (m, d) => {
     const n = mat[d];
     if (n === 0) return true;
     const s = state[n];
     if (s === SOLID || density[n] >= density[m]) return false;
-    return drag[n] === 0 || rand() >= drag[n];
+    if (drag[n] === 0 || rand() >= drag[n]) return true;
+    chancy = true;
+    return false;
   };
   // Can a gas or flame move into d, the way it drifts (up if lighter than air)? A gas bubbles up through liquids
   // and heavier gases; fire only through gases.
@@ -450,6 +478,7 @@ export function createLivePowder(source, options = {}) {
       }
     }
     vy[at] = v; vx[at] = u;
+    if (v || u) keep(at);
   };
   // Where a falling cell lands, its velocity becomes landV and landU. Onto a cell still falling, it keeps that cell's
   // speed, so a falling mass falls together. A fast landing (SPLASH or more) throws a share of cells back up as spray
@@ -478,7 +507,7 @@ export function createLivePowder(source, options = {}) {
     const d = roll < 2 ? (y > 0 ? c - W : -1) : roll === 2 ? (x > 0 ? c - 1 : -1) : (x < W - 1 ? c + 1 : -1);
     if (d >= 0 && mat[d] === 0) born(d, m, temp[c]);
   };
-  const light = c => { flag[c] = BURNING; life[c] = burnMin[mat[c]] + rand() % (burnMax[mat[c]] - burnMin[mat[c]] + 1); };
+  const light = c => { flag[c] = BURNING; life[c] = burnMin[mat[c]] + rand() % (burnMax[mat[c]] - burnMin[mat[c]] + 1); touch(c); };
 
   // A reaction between c (material m) and its neighbour d.
   const react = (c, d, index) => {
@@ -495,6 +524,20 @@ export function createLivePowder(source, options = {}) {
     // Put out, it cools to the temperature its material is made at, so it must be heated through again to relight.
     if (out >= 0 && flag[out] & BURNING) { flag[out] = 0; life[out] = 0; temp[out] = birth[mat[out]]; }
     stamp[a] = tick; stamp[b] = tick;
+    touch(a); touch(b);
+  };
+  // Whether c (material m) has a neighbour it could react with now: its chunk stays awake until it has.
+  const ready = (c, d, index) => {
+    if (index === -1) return false;
+    const rx = reactions[index >> 1];
+    if (!rx.burning) return true;
+    const forward = !(index & 1);
+    return !!(flag[rx.burning === 1 ? (forward ? c : d) : (forward ? d : c)] & BURNING);
+  };
+  const couldReact = (c, x, y, m) => {
+    const row = m * M;
+    return (y > 0 && ready(c, c - W, pair[row + mat[c - W]])) || (x < W - 1 && ready(c, c + 1, pair[row + mat[c + 1]])) ||
+      (y < H - 1 && ready(c, c + W, pair[row + mat[c + W]])) || (x > 0 && ready(c, c - 1, pair[row + mat[c - 1]]));
   };
 
   // One frame: queued inputs, then every cell from the bottom row up (each row in alternating directions), then heat.
@@ -502,100 +545,114 @@ export function createLivePowder(source, options = {}) {
     tick = tick === 65535 ? 1 : tick + 1;
     queue.forEach((input, n) => { reseed(SALT.input, t, n); input(); });
     queue = [];
+    const was = awake;
+    awake = next; next = was; next.fill(0);
     reseed(SALT.step, t);
     for (let y = H - 1; y >= 0; y--) {
-      const row = y * W, forward = ((y + t) & 1) === 0;
-      for (let k = 0; k < W; k++) {
-        const x = forward ? k : W - 1 - k, c = row + x;
-        let m = mat[c];
-        if (m === 0 || stamp[c] === tick) continue;
-        // Phase changes.
-        const heat = temp[c];
-        if (heat >= aboveAt[m] + aboveLatent[m]) { if (aboveChance[m] === ONE || rand() < aboveChance[m]) { temp[c] = heat - aboveLatent[m]; m = become(c, aboveInto[m]); if (!m) continue; } }
-        else if (heat <= belowAt[m] - belowLatent[m]) { if (belowChance[m] === ONE || rand() < belowChance[m]) { temp[c] = heat + belowLatent[m]; m = become(c, belowInto[m]); if (!m) continue; } }
-        // Burning, or a life running out.
-        if (flag[c] & BURNING) {
-          if (temp[c] < burnHeat[m]) temp[c] = burnHeat[m];
+      const row = y * W, forward = ((y + t) & 1) === 0, band = (y >> 4) * CW;
+      for (let q = 0; q < CW; q++) {
+        const cx = forward ? q : CW - 1 - q;
+        if (!awake[band + cx]) continue;
+        const x0 = cx << 4, x1 = x0 + 16 < W ? x0 + 16 : W;
+        for (let k = x0; k < x1; k++) {
+          const x = forward ? k : x0 + x1 - 1 - k, c = row + x;
+          let m = mat[c];
+          if (m === 0 || stamp[c] === tick) continue;
+          // Phase changes.
+          const heat = temp[c];
+          if (heat >= aboveAt[m] + aboveLatent[m]) { if (aboveChance[m] === ONE || rand() < aboveChance[m]) { temp[c] = heat - aboveLatent[m]; m = become(c, aboveInto[m]); if (!m) continue; } else keep(c); }
+          else if (heat <= belowAt[m] - belowLatent[m]) { if (belowChance[m] === ONE || rand() < belowChance[m]) { temp[c] = heat + belowLatent[m]; m = become(c, belowInto[m]); if (!m) continue; } else keep(c); }
+          // Burning, or a life running out.
+          if (flag[c] & BURNING) {
+            keep(c);
+            if (temp[c] < burnHeat[m]) temp[c] = burnHeat[m];
+            const e = m * 2;
+            if (burnEmitMat[e] && rand() < burnEmitChance[e]) emitInto(c, x, y, burnEmitMat[e]);
+            if (burnEmitMat[e + 1] && rand() < burnEmitChance[e + 1]) emitInto(c, x, y, burnEmitMat[e + 1]);
+            if (--life[c] === 0) { m = become(c, burnChance[m] === ONE || rand() < burnChance[m] ? burnInto[m] : 0); if (!m) continue; }
+          } else if (temp[c] >= igniteAt[m]) light(c);
+          else if (lifeMax[m]) { keep(c); if (--life[c] === 0) { m = become(c, lifeChance[m] === ONE || rand() < lifeChance[m] ? lifeInto[m] : 0); if (!m) continue; } }
+          if (hold[m] > temp[c]) { temp[c] = hold[m]; keep(c); }
           const e = m * 2;
-          if (burnEmitMat[e] && rand() < burnEmitChance[e]) emitInto(c, x, y, burnEmitMat[e]);
-          if (burnEmitMat[e + 1] && rand() < burnEmitChance[e + 1]) emitInto(c, x, y, burnEmitMat[e + 1]);
-          if (--life[c] === 0) { m = become(c, burnChance[m] === ONE || rand() < burnChance[m] ? burnInto[m] : 0); if (!m) continue; }
-        } else if (temp[c] >= igniteAt[m]) light(c);
-        else if (lifeMax[m] && --life[c] === 0) { m = become(c, lifeChance[m] === ONE || rand() < lifeChance[m] ? lifeInto[m] : 0); if (!m) continue; }
-        if (hold[m] > temp[c]) temp[c] = hold[m];
-        const e = m * 2;
-        if (emitMat[e] && rand() < emitChance[e]) emitInto(c, x, y, emitMat[e]);
-        if (emitMat[e + 1] && rand() < emitChance[e + 1]) emitInto(c, x, y, emitMat[e + 1]);
-        // One neighbour, chosen at random, may react.
-        if (reactive[m]) {
-          const side = rand() & 3;
-          const d = side === 0 ? (y > 0 ? c - W : -1) : side === 1 ? (x < W - 1 ? c + 1 : -1) : side === 2 ? (y < H - 1 ? c + W : -1) : (x > 0 ? c - 1 : -1);
-          if (d >= 0) {
-            const index = pair[m * M + mat[d]];
-            if (index !== -1) { react(c, d, index); m = mat[c]; if (!m || stamp[c] === tick) continue; }
+          if (emitMat[e] || emitMat[e + 1]) keep(c);
+          if (emitMat[e] && rand() < emitChance[e]) emitInto(c, x, y, emitMat[e]);
+          if (emitMat[e + 1] && rand() < emitChance[e + 1]) emitInto(c, x, y, emitMat[e + 1]);
+          // One neighbour, chosen at random, may react.
+          if (reactive[m]) {
+            const side = rand() & 3;
+            const d = side === 0 ? (y > 0 ? c - W : -1) : side === 1 ? (x < W - 1 ? c + 1 : -1) : side === 2 ? (y < H - 1 ? c + W : -1) : (x > 0 ? c - 1 : -1);
+            if (d >= 0) {
+              const index = pair[m * M + mat[d]];
+              if (index !== -1) { react(c, d, index); m = mat[c]; if (!m || stamp[c] === tick) continue; }
+            }
+            if (reactive[m] && !next[chunkOf[c]] && couldReact(c, x, y, m)) keep(c);
           }
-        }
-        // Moving.
-        const s = state[m];
-        if (s === POWDER || s === LIQUID) {
-          // In the air (moving, or with nothing under it): it flies.
-          if (vy[c]) { fly(c, x, y, m, s, false); continue; }
-          if (y < H - 1) {
-            const d = c + W;
-            if (sinks(m, d)) { fly(c, x, y, m, s, true); continue; }
-            // A viscous liquid falls freely but is slow to slide and spread.
-            if (s === LIQUID && still[m] && rand() < still[m]) continue;
-            const side = rand() >>> 31 ? 1 : -1;
-            if (x + side >= 0 && x + side < W && sinks(m, d + side)) { swap(c, d + side); continue; }
-            if (x - side >= 0 && x - side < W && sinks(m, d - side)) { swap(c, d - side); continue; }
-          }
-          if (s === LIQUID) {
-            const u = vx[c], ahead = y < H - 1 ? W : 0;
-            if (u) {
-              // A surge: the liquid runs on the way it landed, as far as its speed carries it, slowing by a quarter a
-              // frame, until it meets a wall or a drop.
-              const reach = u < 0 ? -u >> 8 : u >> 8, to = run(c, x, u < 0 ? -1 : 1, reach > spread[m] ? reach : spread[m], ahead, true);
-              if (to < 0) vx[c] = 0;
-              else { swap(c, to); const left = u - (u >> 2); vx[to] = left > -SUB && left < SUB ? 0 : left; }
-            } else if (spread[m]) {
-              // Downhill first: the nearer place within FAR either way where it could fall, approached at most its
-              // spread a frame, so a terrace's end steps down onto the next and a puddle drains into a hole. Otherwise
-              // a liquid holds together, and moves only the row's way (left on even rows, right on odd, so nothing
-              // goes back and forth): the end of a strip joins the next strip of its kind, and a lone cell on a pool
-              // drifts on until it meets something. Puddles and pools come to rest, flat but for one strip.
-              const reach = spread[m], way = y & 1 ? 1 : -1;
-              const r = run(c, x, 1, FAR, ahead, true), rd = dropped, rb = blocker;
-              const l = run(c, x, -1, FAR, ahead, true), ld = dropped, lb = blocker;
-              let to = -1;
-              if (rd || ld) {
-                const dr = rd ? r - c : FAR + 1, dl = ld ? c - l : FAR + 1, dir = dr < dl || (dr === dl && way > 0) ? 1 : -1, dist = dir > 0 ? dr : dl;
-                to = c + dir * (dist < reach ? dist : reach);
-              } else {
-                const end = way > 0 ? r : l;
-                if (end >= 0) {
-                  const dist = (end - c) * way, lone = (x === 0 || mat[c - 1] !== m) && (x === W - 1 || mat[c + 1] !== m);
-                  if ((way > 0 ? rb : lb) === m || (lone && ahead && state[mat[c + W]] === LIQUID)) to = c + way * (dist < reach ? dist : reach);
+          // Moving.
+          const s = state[m];
+          if (s === POWDER || s === LIQUID) {
+            // In the air (moving, or with nothing under it): it flies.
+            if (vy[c]) { fly(c, x, y, m, s, false); continue; }
+            chancy = false;
+            if (y < H - 1) {
+              const d = c + W;
+              if (sinks(m, d)) { fly(c, x, y, m, s, true); continue; }
+              // A viscous liquid falls freely but is slow to slide and spread.
+              if (s === LIQUID && still[m] && rand() < still[m]) { keep(c); continue; }
+              const side = rand() >>> 31 ? 1 : -1;
+              if (x + side >= 0 && x + side < W && sinks(m, d + side)) { swap(c, d + side); continue; }
+              if (x - side >= 0 && x - side < W && sinks(m, d - side)) { swap(c, d - side); continue; }
+            }
+            if (chancy) keep(c);
+            if (s === LIQUID) {
+              const u = vx[c], ahead = y < H - 1 ? W : 0;
+              if (u) {
+                // A surge: the liquid runs on the way it landed, as far as its speed carries it, slowing by a quarter a
+                // frame, until it meets a wall or a drop.
+                const reach = u < 0 ? -u >> 8 : u >> 8, to = run(c, x, u < 0 ? -1 : 1, reach > spread[m] ? reach : spread[m], ahead, true);
+                if (to < 0) vx[c] = 0;
+                else { swap(c, to); const left = u - (u >> 2); vx[to] = left > -SUB && left < SUB ? 0 : left; }
+                keep(c);
+              } else if (spread[m]) {
+                // Downhill first: the nearer place within FAR either way where it could fall, approached at most its
+                // spread a frame, so a terrace's end steps down onto the next and a puddle drains into a hole. Otherwise
+                // a liquid holds together, and moves only the row's way (left on even rows, right on odd, so nothing
+                // goes back and forth): the end of a strip joins the next strip of its kind, and a lone cell on a pool
+                // drifts on until it meets something. Puddles and pools come to rest, flat but for one strip.
+                const reach = spread[m], way = y & 1 ? 1 : -1;
+                const r = run(c, x, 1, FAR, ahead, true), rd = dropped, rb = blocker;
+                const l = run(c, x, -1, FAR, ahead, true), ld = dropped, lb = blocker;
+                let to = -1;
+                if (rd || ld) {
+                  const dr = rd ? r - c : FAR + 1, dl = ld ? c - l : FAR + 1, dir = dr < dl || (dr === dl && way > 0) ? 1 : -1, dist = dir > 0 ? dr : dl;
+                  to = c + dir * (dist < reach ? dist : reach);
+                } else {
+                  const end = way > 0 ? r : l;
+                  if (end >= 0) {
+                    const dist = (end - c) * way, lone = (x === 0 || mat[c - 1] !== m) && (x === W - 1 || mat[c + 1] !== m);
+                    if ((way > 0 ? rb : lb) === m || (lone && ahead && state[mat[c + W]] === LIQUID)) to = c + way * (dist < reach ? dist : reach);
+                  }
                 }
+                if (to >= 0) swap(c, to);
               }
+            } else if (vx[c]) vx[c] = 0;
+          } else if (s === GAS || s === FIRE) {
+            keep(c);
+            if (speed[m] < ONE && rand() >= speed[m]) continue;
+            const up = density[m] < AIR, dy = up ? -1 : 1, yy = y + dy, roll = rand();
+            // Mostly straight on; a gas wanders sideways one frame in four, fire one in eight.
+            if (yy >= 0 && yy < H && (roll & (s === FIRE ? 7 : 3)) !== 0) {
+              const d = c + dy * W;
+              if (drifts(m, d, up)) { swap(c, d); continue; }
+              const side = roll & 8 ? 1 : -1;
+              if (x + side >= 0 && x + side < W && drifts(m, d + side, up)) { swap(c, d + side); continue; }
+              if (x - side >= 0 && x - side < W && drifts(m, d - side, up)) { swap(c, d - side); continue; }
+            }
+            if (spread[m]) {
+              const side = roll & 16 ? 1 : -1, ahead = yy >= 0 && yy < H ? dy * W : 0;
+              let to = run(c, x, side, spread[m], ahead, false);
+              if (to < 0) to = run(c, x, -side, spread[m], ahead, false);
               if (to >= 0) swap(c, to);
             }
-          } else if (vx[c]) vx[c] = 0;
-        } else if (s === GAS || s === FIRE) {
-          if (speed[m] < ONE && rand() >= speed[m]) continue;
-          const up = density[m] < AIR, dy = up ? -1 : 1, yy = y + dy, roll = rand();
-          // Mostly straight on; a gas wanders sideways one frame in four, fire one in eight.
-          if (yy >= 0 && yy < H && (roll & (s === FIRE ? 7 : 3)) !== 0) {
-            const d = c + dy * W;
-            if (drifts(m, d, up)) { swap(c, d); continue; }
-            const side = roll & 8 ? 1 : -1;
-            if (x + side >= 0 && x + side < W && drifts(m, d + side, up)) { swap(c, d + side); continue; }
-            if (x - side >= 0 && x - side < W && drifts(m, d - side, up)) { swap(c, d - side); continue; }
-          }
-          if (spread[m]) {
-            const side = roll & 16 ? 1 : -1, ahead = yy >= 0 && yy < H ? dy * W : 0;
-            let to = run(c, x, side, spread[m], ahead, false);
-            if (to < 0) to = run(c, x, -side, spread[m], ahead, false);
-            if (to >= 0) swap(c, to);
           }
         }
       }
@@ -682,32 +739,55 @@ export function createLivePowder(source, options = {}) {
   const conductHeat = () => {
     const from = temp, to = spare;
     to.set(from);
-    for (let y = 0; y < H; y++) {
-      let c = y * W;
-      let kc = conduct[mat[c]];
-      for (let x = 0; x < W - 1; x++, c++) {
-        const kn = conduct[mat[c + 1]], k = kc < kn ? kc : kn;
-        kc = kn;
-        if (!k) continue;
-        const d = from[c] - from[c + 1];
-        if (!d) continue;
-        const f = d > 0 ? (d * k) >> 12 : -((-d * k) >> 12);
-        to[c] -= f; to[c + 1] += f;
+    for (let cy = 0; cy < CH; cy++) for (let cx = 0; cx < CW; cx++) {
+      const k = cy * CW + cx;
+      if (!awake[k]) continue;
+      const x0 = cx << 4, x1 = x0 + 16 < W ? x0 + 16 : W, y0 = cy << 4, y1 = y0 + 16 < H ? y0 + 16 : H;
+      // Its edges, those to the chunks right of and below it, and those to the chunks left of and above it when they
+      // sleep (an awake one moves heat across them itself). Heat that moves wakes the chunks at both ends.
+      const left = cx > 0 && !awake[k - 1], hx0 = left ? x0 - 1 : x0, hx1 = x1 < W ? x1 : W - 1;
+      let moved = false, west = false, east = false, north = false, south = false;
+      for (let y = y0; y < y1; y++) {
+        let c = y * W + hx0, kc = conduct[mat[c]];
+        for (let x = hx0; x < hx1; x++, c++) {
+          const kn = conduct[mat[c + 1]], kk = kc < kn ? kc : kn;
+          kc = kn;
+          if (!kk) continue;
+          const d = from[c] - from[c + 1];
+          if (!d) continue;
+          const f = d > 0 ? (d * kk) >> 12 : -((-d * kk) >> 12);
+          if (!f) continue;
+          to[c] -= f; to[c + 1] += f; moved = true;
+          if (x < x0) west = true; else if (x === x1 - 1) east = true;
+        }
       }
+      const up = cy > 0 && !awake[k - CW], vy0 = up ? y0 - 1 : y0, vy1 = y1 < H ? y1 : H - 1;
+      for (let y = vy0; y < vy1; y++) for (let x = x0, c = y * W + x0; x < x1; x++, c++) {
+        const d = from[c] - from[c + W];
+        if (!d) continue;
+        const ka = conduct[mat[c]], kb = conduct[mat[c + W]], kk = ka < kb ? ka : kb;
+        if (!kk) continue;
+        const f = d > 0 ? (d * kk) >> 12 : -((-d * kk) >> 12);
+        if (!f) continue;
+        to[c] -= f; to[c + W] += f; moved = true;
+        if (y < y0) north = true; else if (y === y1 - 1) south = true;
+      }
+      if (moved) next[k] = 1;
+      if (west) next[k - 1] = 1;
+      if (east) next[k + 1] = 1;
+      if (north) next[k - CW] = 1;
+      if (south) next[k + CW] = 1;
     }
-    for (let c = 0; c < N - W; c++) {
-      const d = from[c] - from[c + W];
-      if (!d) continue;
-      const ka = conduct[mat[c]], kb = conduct[mat[c + W]], k = ka < kb ? ka : kb;
-      if (!k) continue;
-      const f = d > 0 ? (d * k) >> 12 : -((-d * k) >> 12);
-      to[c] -= f; to[c + W] += f;
-    }
-    for (let c = 0; c < N; c++) {
-      const k = cool[mat[c]];
-      if (!k) continue;
-      const d = ambient - to[c];
-      if (d) to[c] += d > 0 ? (d * k + SCALE - 1) >> 12 : -((-d * k + SCALE - 1) >> 12);
+    for (let cy = 0; cy < CH; cy++) for (let cx = 0; cx < CW; cx++) {
+      const k = cy * CW + cx;
+      if (!awake[k]) continue;
+      const x0 = cx << 4, x1 = x0 + 16 < W ? x0 + 16 : W, y0 = cy << 4, y1 = y0 + 16 < H ? y0 + 16 : H;
+      for (let y = y0; y < y1; y++) for (let c = y * W + x0, end = y * W + x1; c < end; c++) {
+        const kk = cool[mat[c]];
+        if (!kk) continue;
+        const d = ambient - to[c];
+        if (d) { to[c] += d > 0 ? (d * kk + SCALE - 1) >> 12 : -((-d * kk + SCALE - 1) >> 12); next[k] = 1; }
+      }
     }
     temp = to; spare = from;
   };
@@ -737,6 +817,7 @@ export function createLivePowder(source, options = {}) {
     if (state[mat[c]] === SOLID || state[m] === SOLID) supportChanged = true;
     mat[c] = m; flag[c] = 0; shade[c] = m ? shadeAt(c, m) : 0; life[c] = m ? lifeDraw(m) : 0; temp[c] = m ? temperature ?? birth[m] : ambient; stamp[c] = 0;
     vx[c] = 0; vy[c] = 0; fx[c] = 0; fy[c] = 0;
+    touch(c);
   };
   // Pointer-driven inputs are rounded as a recording keeps them (quarter pixels, hundredths, whole degrees), so a
   // replay of the recording makes exactly the same calls.
@@ -787,7 +868,7 @@ export function createLivePowder(source, options = {}) {
     heat(input) {
       const at = spot(input, 'heat', ['x', 'y', 'x2', 'y2', 'radius', 'amount']);
       const amount = Math.round(number(input.amount ?? 200, 'heat.amount', -2000, 2000));
-      enqueue(() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => { temp[c] = clampT(temp[c] + amount * SIXTEENTHS); }), { op: 3, ...at, amount });
+      enqueue(() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => { temp[c] = clampT(temp[c] + amount * SIXTEENTHS); touch(c); }), { op: 3, ...at, amount });
       return live;
     },
     // What is at a pixel now.
@@ -800,7 +881,10 @@ export function createLivePowder(source, options = {}) {
       const counts = new Uint32Array(M);
       let burning = 0;
       for (let c = 0; c < N; c++) { counts[mat[c]]++; if (flag[c]) burning++; }
-      return { counts: Object.fromEntries(T.names.map((name, m) => [name, counts[m]]).filter(([, n]) => n)), burning };
+      let stepped = 0;
+      for (let k = 0; k < awake.length; k++) stepped += awake[k];
+      // `chunks`: how many of the grid's 16 × 16 chunks the last step visited, of how many.
+      return { counts: Object.fromEntries(T.names.map((name, m) => [name, counts[m]]).filter(([, n]) => n)), burning, chunks: { stepped, of: awake.length } };
     },
     render: target => render(target),
     // The cell arrays, for tests and for hooks that read the grid (temperatures in sixteenths of a degree, velocities in

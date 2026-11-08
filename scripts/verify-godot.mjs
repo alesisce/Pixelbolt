@@ -18,6 +18,9 @@ import { createSceneBundle } from '../src/scene-export.js';
 import { compileAutotile, compileNormals } from '../src/authoring.js';
 import { neighbourMask, expandTilemap } from '../src/autotile.js';
 import { renderProject } from '../src/core.js';
+import { prepareScene, renderScene } from '../src/scene.js';
+import { decodePNG } from '../src/import.js';
+import { parallaxScene, PARALLAX_CAMERAS } from './parallax-scene.mjs';
 
 // A trimmed, scaled, padded sheet with unequal frame times: a 1×1 cell for an empty frame, a half-transparent frame, a
 // frame that fills the canvas, a 5 ms flash (Godot's 120 FPS ceiling), 33 and 34 ms frames (fractional durations),
@@ -632,6 +635,185 @@ export async function verifyGodotLit({ godot = findGodot(), keep = false, log = 
     if (!keep) await rm(dir, { recursive: true, force: true });
   }
 }
+// ---- Parallax scenes -----------------------------------------------------------------------------------------------
+// Runs in Godot, headless: instances the exported scene.tscn and reports its camera, background and planes (each
+// Parallax2D's scroll scale and its Sprite2D's position, texture and pixels against the exported PNG), then moves the
+// camera to each position and reports where each plane's image and the background are on screen.
+const parallaxCheck = cameras => `extends SceneTree
+
+const CAMERAS = ${JSON.stringify(cameras)}
+var scene: Node
+var camera: Camera2D
+var step := 0
+var wait := 0
+var report := {"cameras": []}
+
+func _initialize():
+	scene = (load("res://parallax/scene.tscn") as PackedScene).instantiate()
+	root.add_child(scene)
+	camera = scene.get_node("Camera2D")
+	var background: Parallax2D = scene.get_node("Background")
+	var color: ColorRect = background.get_node("Color")
+	report["root"] = [String(scene.name), scene.texture_filter]
+	report["camera"] = [camera.anchor_mode, camera.position.x, camera.position.y, camera.enabled]
+	report["background"] = [background.scroll_scale.x, background.scroll_scale.y, color.color.r8, color.color.g8, color.color.b8, color.color.a8, color.size.x, color.size.y]
+	var planes := []
+	for child in scene.get_children():
+		if not (child is Parallax2D) or child == background:
+			continue
+		var sprite: Sprite2D = child.get_node("Image")
+		var image := sprite.texture.get_image()
+		image.convert(Image.FORMAT_RGBA8)
+		var expected := Image.load_from_file(ProjectSettings.globalize_path(sprite.texture.resource_path))
+		expected.convert(Image.FORMAT_RGBA8)
+		var wrong := 0
+		if expected.get_size() != image.get_size():
+			wrong = -1
+		else:
+			for y in image.get_height():
+				for x in image.get_width():
+					var a := image.get_pixel(x, y)
+					var b := expected.get_pixel(x, y)
+					# Godot's importer bleeds edge colours into transparent pixels (fix_alpha_border), so those only stay transparent.
+					if not (a.a8 == 0 and b.a8 == 0) and (a.r8 != b.r8 or a.g8 != b.g8 or a.b8 != b.b8 or a.a8 != b.a8):
+						wrong += 1
+		planes.append([String(child.name), child.scroll_scale.x, child.scroll_scale.y, sprite.position.x, sprite.position.y, sprite.centered, sprite.texture.resource_path, image.get_width(), image.get_height(), wrong])
+	report["planes"] = planes
+
+func _process(_delta: float) -> bool:
+	if step >= CAMERAS.size():
+		print("PIXELBOLT " + JSON.stringify(report))
+		quit()
+		return true
+	if wait == 0:
+		camera.position = Vector2(CAMERAS[step][0], CAMERAS[step][1])
+	wait += 1
+	if wait < 3:
+		return false
+	var at := []
+	for child in scene.get_children():
+		if child is Parallax2D:
+			var item: CanvasItem = child.get_child(0)
+			var origin := item.get_global_transform_with_canvas().origin
+			at.append([String(child.name), origin.x, origin.y])
+	report["cameras"].append(at)
+	step += 1
+	wait = 0
+	return false
+`;
+
+// Runs in Godot with a window the scene's size (it renders): the scene at each camera position, saved as PNGs.
+const parallaxRender = cameras => `extends SceneTree
+
+const CAMERAS = ${JSON.stringify(cameras)}
+var camera: Camera2D
+var step := 0
+var wait := 0
+
+func _initialize():
+	var scene := (load("res://parallax/scene.tscn") as PackedScene).instantiate()
+	root.add_child(scene)
+	camera = scene.get_node("Camera2D")
+
+func _process(_delta: float) -> bool:
+	if step >= CAMERAS.size():
+		print("PIXELBOLT " + JSON.stringify({"size": [root.size.x, root.size.y]}))
+		quit()
+		return true
+	if wait == 0:
+		camera.position = Vector2(CAMERAS[step][0], CAMERAS[step][1])
+	wait += 1
+	if wait < 5:
+		return false
+	var image := root.get_texture().get_image()
+	image.convert(Image.FORMAT_RGBA8)
+	image.save_png(ProjectSettings.globalize_path("res://render-%d.png" % step))
+	step += 1
+	wait = 0
+	return false
+`;
+
+// Exports the three-plane scene (scripts/parallax-scene.mjs: a sky at parallax 0, hills at 0.5 hazed 0.6, the ground
+// at 1) and loads its scene.tscn in a real Godot 4: a Camera2D at the camera's start anchored at its top-left, the
+// background on a Parallax2D that stays on screen, and a Parallax2D per plane with the plane's parallax as its scroll
+// scale over a Sprite2D of the plane's image, imported pixel for pixel. Godot then places each plane as the camera
+// moves to the start, halfway and the end: it must be at its scene position less its parallax times the camera, where
+// Pixelbolt draws it, and the planes laid there must draw Pixelbolt's unlit view (exactly, but for a step of one where a
+// partly transparent pixel blends). Godot can't render headless; with render (a window opens) Godot draws the scene in
+// a window the scene's size at each position too, which must be that view.
+export async function verifyGodotParallax({ godot = findGodot(), keep = false, log = console.log, render = false } = {}) {
+  if (!godot) throw new Error('Godot 4 was not found: pass --godot <path> or set GODOT');
+  const version = godotRun(godot, ['--version']).output.trim().split('\n')[0];
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-godot-parallax-'));
+  try {
+    await writeFile(path.join(dir, 'project.godot'), 'config_version=5\n\n[application]\n\nconfig/name="Pixelbolt parallax check"\n');
+    const source = await parallaxScene(), bundle = await createSceneBundle(source), alignment = JSON.parse(bundle.files.get('alignment.json'));
+    assert.deepEqual(bundle.warnings, [], 'scene export warnings');
+    for (const [file, bytes] of bundle.files) if (file === 'scene.tscn' || file.startsWith('planes/')) {
+      await mkdir(path.dirname(path.join(dir, 'parallax', file)), { recursive: true });
+      await writeFile(path.join(dir, 'parallax', file), bytes);
+    }
+    await writeFile(path.join(dir, 'parallaxcheck.gd'), parallaxCheck(PARALLAX_CAMERAS));
+    await writeFile(path.join(dir, 'parallaxrender.gd'), parallaxRender(PARALLAX_CAMERAS));
+    const imported = godotRun(godot, ['--path', dir, '--import']);
+    const problems = imported.output.split('\n').filter(line => /ERROR|WARNING/.test(line) && /parallax\//.test(line));
+    assert.deepEqual(problems, [], `Godot reported problems while importing:\n${imported.output}`);
+    const report = godotReport(godotRun(godot, ['--path', dir, '--script', 'res://parallaxcheck.gd']));
+    const scene = prepareScene(source), [r, g, b, a] = scene.background, planes = alignment.planes;
+    assert.deepEqual(report.root, [source.name, 1], 'the root, drawn with nearest filtering');
+    assert.deepEqual(report.camera, [0, ...renderScene(scene).camera, true], 'the camera: anchored at its top-left, at its start');
+    assert.deepEqual(report.background, [0, 0, r, g, b, a, scene.width, scene.height], 'the background');
+    assert.deepEqual(report.planes, planes.map((plane, k) => [['sun', 'hills', 'ground'][k], ...plane.parallax, ...plane.at, false, `res://parallax/${plane.image}`, ...plane.size, 0]), 'the planes');
+    const images = await Promise.all(planes.map(async plane => decodePNG(bundle.files.get(plane.image))));
+    let exact = 0, near = 0, drawn = '';
+    const compare = (camera, got, what) => {
+      const panned = prepareScene({ ...source, camera }), view = renderScene(panned, { lit: false, draws: true }), blended = new Uint8Array(scene.width * scene.height);
+      for (const draw of view.draws) {
+        const project = panned.assets[draw.asset].recipe, data = project.frames[draw.frame].data, s = draw.scale;
+        for (let y = 0; y < project.height * s; y++) for (let x = 0; x < project.width * s; x++) {
+          const alpha = data[(Math.floor(y / s) * project.width + Math.floor(x / s)) * 4 + 3], sx = draw.x + x, sy = draw.y + y;
+          if (alpha > 0 && alpha < 255 && sx >= 0 && sy >= 0 && sx < scene.width && sy < scene.height) blended[sy * scene.width + sx] = 1;
+        }
+      }
+      const wrong = [];
+      for (let y = 0; y < scene.height; y++) for (let x = 0; x < scene.width; x++) {
+        const pixel = got(x, y), want = view.data.subarray((y * scene.width + x) * 4, (y * scene.width + x) * 4 + 3), off = Math.max(...pixel.map((v, k) => Math.abs(Math.round(v) - want[k])));
+        if (off === 0) exact++;
+        else if (off === 1 && blended[y * scene.width + x]) near++;
+        else wrong.push(`${x},${y}: ${what} ${pixel.map(Math.round).join(' ')}, Pixelbolt ${[...want].join(' ')}`);
+      }
+      assert.deepEqual(wrong.slice(0, 12), [], `camera at ${camera}: ${wrong.length} pixels of ${what} differ from the unlit scene`);
+    };
+    PARALLAX_CAMERAS.forEach((camera, step) => {
+      const at = report.cameras[step];
+      assert.deepEqual(at, [['Background', 0, 0], ...planes.map((plane, k) => [report.planes[k][0], ...plane.at.map((v, axis) => v - plane.parallax[axis] * camera[axis])])], `camera at ${camera}: where Godot puts each plane`);
+      compare(camera, (x, y) => {
+        const pixel = [r, g, b];
+        images.forEach((image, k) => {
+          const ix = x - Math.round(at[k + 1][1]), iy = y - Math.round(at[k + 1][2]);
+          if (ix < 0 || iy < 0 || ix >= image.width || iy >= image.height) return;
+          const p = (iy * image.width + ix) * 4, alpha = image.data[p + 3] / 255;
+          for (let c = 0; c < 3; c++) pixel[c] = image.data[p + c] * alpha + pixel[c] * (1 - alpha);
+        });
+        return pixel;
+      }, 'the planes where Godot puts them');
+    });
+    if (render) {
+      const shown = godotReport(godotRun(godot, ['--path', dir, '--rendering-method', 'gl_compatibility', '--audio-driver', 'Dummy', '--resolution', `${scene.width}x${scene.height}`, '--script', 'res://parallaxrender.gd'], { headless: false }));
+      assert.deepEqual(shown.size, [scene.width, scene.height], 'the window is the scene\'s size');
+      for (const [step, camera] of PARALLAX_CAMERAS.entries()) {
+        const image = decodePNG(await readFile(path.join(dir, `render-${step}.png`)));
+        compare(camera, (x, y) => [...image.data.subarray((y * image.width + x) * 4, (y * image.width + x) * 4 + 3)], 'Godot\'s render');
+      }
+      drawn = ' Godot drew the scene in a window at each position as Pixelbolt does.';
+    }
+    log(`${version}: scene.tscn holds a top-left Camera2D at the camera's start, the background and ${planes.length} Parallax2D planes (scroll scale ${planes.map(plane => plane.parallax[0]).join(', ')}) whose images Godot imported pixel for pixel; with the camera at ${PARALLAX_CAMERAS.map(c => `[${c}]`).join(', ')}, Godot put every plane where Pixelbolt draws it, and the planes there draw the unlit scene exactly in ${exact} pixels and within one step in ${near}, where partly transparent pixels blend.${drawn}`);
+    return { version, report, dir: keep ? dir : null };
+  } finally {
+    if (!keep) await rm(dir, { recursive: true, force: true });
+  }
+}
+
 // The JSON a check script printed after PIXELBOLT, once Godot reported no errors.
 function godotReport(run) {
   const line = run.output.split('\n').find(text => text.startsWith('PIXELBOLT '));
@@ -843,7 +1025,7 @@ export async function verifyGodotTiles({ godot = findGodot(), keep = false, log 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const args = process.argv.slice(2), at = args.indexOf('--godot');
   try {
-    for (const verify of [verifyGodot, verifyGodotTiles, verifyGodotLit]) {
+    for (const verify of [verifyGodot, verifyGodotTiles, verifyGodotLit, verifyGodotParallax]) {
       const result = await verify({ ...(at >= 0 && { godot: args[at + 1] }), keep: args.includes('--keep'), render: args.includes('--render') });
       if (result.dir) console.log(`Kept the Godot project at ${result.dir}`);
     }

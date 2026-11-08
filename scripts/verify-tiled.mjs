@@ -24,6 +24,7 @@ import { renderProject } from '../src/core.js';
 import { prepareScene, renderScene } from '../src/scene.js';
 import { decodePNG } from '../src/import.js';
 import { GODOT_TILE_SOURCES, GODOT_LAYERED_SOURCE, GODOT_LAYERED_MAPS, GODOT_TILE_MAPS, godotTileRecipe } from './verify-godot.mjs';
+import { parallaxScene, PARALLAX_CAMERAS } from './parallax-scene.mjs';
 
 export function findTiled(given = process.env.TILED) {
   if (given) return given;
@@ -373,10 +374,99 @@ export async function verifyTiledScene({ tiled = findTiled(), keep = false, log 
   }
 }
 
+// ---- Parallax and haze ---------------------------------------------------------------------------------------------
+// Runs in Tiled: reads scene.tmx and reports its tilesets (name, tile count, image) and, per layer, its kind, name,
+// parallax factor and offset.
+const TILED_PARALLAX_CHECK = String.raw`
+const [mapFile, outFile] = tiled.scriptArguments;
+let result;
+try {
+  const map = tiled.mapFormat('tmx').read(mapFile);
+  result = { tilesets: map.tilesets.map(ts => [ts.name, ts.tileCount, ts.image]),
+    layers: map.layers.map(layer => [layer.isTileLayer ? 'tiles' : 'objects', layer.name, layer.parallaxFactor.x, layer.parallaxFactor.y, layer.offset.x, layer.offset.y]) };
+} catch (error) { result = { error: String(error && error.stack || error) }; }
+const out = new TextFile(outFile, TextFile.WriteOnly);
+out.write(JSON.stringify(result));
+out.commit();
+`;
+
+// Exports the three-plane scene (scripts/parallax-scene.mjs: a sky at parallax 0, hills at 0.5 hazed 0.6, the ground at
+// 1), has Tiled read scene.tmx, and renders each layer alone with tmxrasterizer. Each layer must carry its plane's
+// parallax as Tiled reads it, and the hills must be drawn from the hazed copy of their tileset. Then, at the camera's
+// start, halfway and its end, the layers are laid on the background in order, each moved left by its parallax factor
+// (the one Tiled read) times the camera, as a game scrolls them, and must draw what Pixelbolt draws there, unlit: every
+// pixel exact, but for a step of one where a partly transparent pixel blends.
+export async function verifyTiledParallax({ tiled = findTiled(), keep = false, log = console.log } = {}) {
+  if (!tiled) throw new Error('Tiled was not found: pass --tiled <path> or set TILED');
+  const rasterizer = [path.join(path.dirname(tiled), process.platform === 'win32' ? 'tmxrasterizer.exe' : 'tmxrasterizer')].find(existsSync) ?? 'tmxrasterizer';
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-tiled-parallax-'));
+  try {
+    const source = await parallaxScene(), bundle = await createSceneBundle(source);
+    assert.deepEqual(bundle.warnings, [], 'scene export warnings');
+    for (const [file, bytes] of bundle.files) if (/\.(tmx|tsx|png)$/.test(file)) { await mkdir(path.dirname(path.join(dir, file)), { recursive: true }); await writeFile(path.join(dir, file), bytes); }
+    await writeFile(path.join(dir, 'parallaxcheck.js'), TILED_PARALLAX_CHECK);
+    const evaluated = run(tiled, ['--evaluate', path.join(dir, 'parallaxcheck.js'), path.join(dir, 'scene.tmx'), path.join(dir, 'map.json')]);
+    assert.ok(existsSync(path.join(dir, 'map.json')), `Tiled wrote no report (exit ${evaluated.status}):\n${evaluated.output}`);
+    const read = JSON.parse(await readFile(path.join(dir, 'map.json'), 'utf8'));
+    assert.ok(!read.error, `Tiled failed to read scene.tmx: ${read.error}`);
+    // Every asset's tileset, then the hills' hazed copy over its own sheet.
+    const scene = prepareScene(source), tiles = id => scene.assets[id].recipe.sheet.columns * Math.ceil(scene.assets[id].recipe.frames.length / scene.assets[id].recipe.sheet.columns);
+    assert.deepEqual(read.tilesets.map(([name, count, image]) => [name, count, path.relative(dir, image).split(path.sep).join('/')]),
+      [...Object.keys(scene.assets).map((id, n) => [id, tiles(id), `assets/${n}/color.png`]), ['hills haze 0.6', tiles('hills'), 'assets/2/haze-0.6/color.png']], 'scene.tmx: tilesets');
+    assert.deepEqual(read.layers.map(([kind, name, x, y]) => [kind, name, x, y]), [['objects', 'sun, cloud', 0, 0], ['tiles', 'hills', 0.5, 0.5], ['tiles', 'ground', 1, 1], ['objects', 'spirit', 1, 1]], 'scene.tmx: layers and their parallax');
+    const tmx = await readFile(path.join(dir, 'scene.tmx'), 'utf8'), first = Number(tmx.match(/<tileset firstgid="(\d+)" source="assets\/2\/haze-0\.6\/tileset\.tsx"/)[1]);
+    const hills = tmx.split('name="hills"')[1].split('<data encoding="csv">\n')[1].split('\n</data>')[0].split(/,\n?/).map(Number).filter(Boolean);
+    assert.ok(hills.length && hills.every(gid => gid >= first && gid < first + tiles('hills')), 'scene.tmx: the hills are drawn from their hazed tileset');
+    // Each layer alone; tmxrasterizer widens every render by the tile layers' offsets alike.
+    const layers = [];
+    for (const [k, [, name, x, y]] of read.layers.entries()) {
+      const png = path.join(dir, `layer-${k}.png`), rendered = run(rasterizer, ['--no-smoothing', '--show-layer', name, path.join(dir, 'scene.tmx'), png]);
+      assert.ok(existsSync(png), `tmxrasterizer wrote no image of ${name} (exit ${rendered.status}):\n${rendered.output}`);
+      layers.push({ name, parallax: [x, y], image: decodePNG(await readFile(png)) });
+    }
+    let left = 0, top = 0;
+    for (const [, attributes] of tmx.matchAll(/<layer ([^>]*)>/g)) {
+      left = Math.max(left, Math.ceil(-Number(attributes.match(/offsetx="(-?[\d.]+)"/)?.[1] ?? 0)));
+      top = Math.max(top, Math.ceil(-Number(attributes.match(/offsety="(-?[\d.]+)"/)?.[1] ?? 0)));
+    }
+    const hex = tmx.match(/backgroundcolor="#([0-9a-f]{6})"/)[1], background = [0, 2, 4].map(k => parseInt(hex.slice(k, k + 2), 16));
+    let exact = 0, near = 0;
+    for (const camera of PARALLAX_CAMERAS) {
+      const panned = prepareScene({ ...source, camera }), view = renderScene(panned, { lit: false, draws: true }), blended = new Uint8Array(scene.width * scene.height);
+      for (const draw of view.draws) {
+        const project = panned.assets[draw.asset].recipe, data = project.frames[draw.frame].data, s = draw.scale;
+        for (let y = 0; y < project.height * s; y++) for (let x = 0; x < project.width * s; x++) {
+          const alpha = data[(Math.floor(y / s) * project.width + Math.floor(x / s)) * 4 + 3], sx = draw.x + x, sy = draw.y + y;
+          if (alpha > 0 && alpha < 255 && sx >= 0 && sy >= 0 && sx < scene.width && sy < scene.height) blended[sy * scene.width + sx] = 1;
+        }
+      }
+      const wrong = [];
+      for (let y = 0; y < scene.height; y++) for (let x = 0; x < scene.width; x++) {
+        const got = [...background];
+        for (const { parallax, image } of layers) {
+          const mx = x + Math.round(parallax[0] * camera[0]) + left, my = y + Math.round(parallax[1] * camera[1]) + top;
+          if (mx < 0 || my < 0 || mx >= image.width || my >= image.height) continue;
+          const at = (my * image.width + mx) * 4, alpha = image.data[at + 3] / 255;
+          for (let k = 0; k < 3; k++) got[k] = image.data[at + k] * alpha + got[k] * (1 - alpha);
+        }
+        const want = view.data.subarray((y * scene.width + x) * 4, (y * scene.width + x) * 4 + 3), off = Math.max(...got.map((v, k) => Math.abs(Math.round(v) - want[k])));
+        if (off === 0) exact++;
+        else if (off === 1 && blended[y * scene.width + x]) near++;
+        else wrong.push(`${x},${y}: Tiled ${got.map(Math.round).join(' ')}, Pixelbolt ${[...want].join(' ')}`);
+      }
+      assert.deepEqual(wrong.slice(0, 12), [], `camera at ${camera}: ${wrong.length} pixels of Tiled's layers, scrolled by their parallax, differ from the unlit scene`);
+    }
+    log(`Tiled parallax: Tiled read scene.tmx's ${read.layers.length} layers with parallax ${read.layers.map(layer => `${layer[1]} ${layer[2]}`).join(', ')}, the hills drawn from their hazed tileset; tmxrasterizer's layers, scrolled by those factors, drew the unlit scene with the camera at ${PARALLAX_CAMERAS.map(c => `[${c}]`).join(', ')} exactly in ${exact} of ${PARALLAX_CAMERAS.length * scene.width * scene.height} pixels and within one step in the other ${near}, where partly transparent pixels blend.`);
+    return { dir: keep ? dir : null };
+  } finally {
+    if (!keep) await rm(dir, { recursive: true, force: true });
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const args = process.argv.slice(2), at = args.indexOf('--tiled');
   try {
-    for (const verify of [verifyTiled, verifyTiledScene]) {
+    for (const verify of [verifyTiled, verifyTiledScene, verifyTiledParallax]) {
       const result = await verify({ ...(at >= 0 && { tiled: args[at + 1] }), keep: args.includes('--keep') });
       if (result.dir) console.log(`Kept the Tiled files at ${result.dir}`);
     }

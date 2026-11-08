@@ -421,6 +421,68 @@ export function withLightSettings(written, scene, edited) {
   }
   return saved;
 }
+// A prepared scene's haze as a function (amount, rgba) → [r, g, b]: each colour moves `amount` of the way to the haze
+// colour, as a whole colour rather than per pixel, so every colour of a placement becomes exactly one colour and keeps
+// its place among the others, as a far palette an artist mixes does. With haze colours listed, it then becomes the
+// nearest of them and the haze colour. Alpha is the caller's to keep. The renderer and the exports' hazed sheets both
+// use it, so a sheet baked with it is what the scene draws.
+export function sceneHaze(scene) {
+  const maps = new Map();
+  return (amount, rgba) => {
+    let map = maps.get(amount);
+    if (!map) maps.set(amount, map = new Map());
+    const colour = (rgba[0] << 16) | (rgba[1] << 8) | rgba[2];
+    let out = map.get(colour);
+    if (!out) {
+      const { color, colors } = scene.haze, faded = [0, 1, 2].map(c => Math.round(rgba[c] + (color[c] - rgba[c]) * amount));
+      map.set(colour, out = colors.length ? nearestColor(faded, [color, ...colors]) : faded);
+    }
+    return out;
+  };
+}
+// How much of the camera's movement a placement follows: its own parallax, or its target's when it is attached.
+export const parallaxOf = (scene, i) => scene.instances[scene.instances[i].attach?.index ?? i].parallax;
+
+// The scene's planes, for engines that scroll images: renderScene's `draws` (lit: false) cut into runs of draws that
+// follow the camera alike, in drawing order, each run one image of what it draws at scene positions, hazed as the scene
+// hazes it and transparent elsewhere. Laid on the background in order, each at its `at` less its parallax share of the
+// camera (rounded per plane, as renderScene does), they draw the unlit scene at any camera position, with every frame
+// as it is at the time of the draws. Shade placements darken what is under them, so they are left out. A plane is
+// { parallax, at: [x, y] (its top-left in the scene), width, height, data, instances (indices, in order of first draw) }.
+// Returns { planes, shaded (names of shade placements left out), oversized (names of planes over MAX_PLANE pixels,
+// left out) }.
+export const MAX_PLANE = 16777216;
+export function scenePlanes(scene, draws) {
+  const runs = [], shaded = new Set(), hazed = sceneHaze(scene), label = i => scene.instances[i].name ?? `${scene.instances[i].asset}#${i}`;
+  for (const draw of draws) {
+    if (draw.shade) { shaded.add(label(draw.instance)); continue; }
+    const factor = parallaxOf(scene, draw.instance), last = runs.at(-1);
+    if (last && last.parallax[0] === factor[0] && last.parallax[1] === factor[1]) last.draws.push(draw);
+    else runs.push({ parallax: [...factor], draws: [draw] });
+  }
+  const planes = [], oversized = [];
+  for (const { parallax, draws: run } of runs) {
+    const boxes = run.map(draw => { const { width, height } = scene.assets[draw.asset].recipe; return [draw.x + draw.shift[0], draw.y + draw.shift[1], width * draw.scale, height * draw.scale]; });
+    const left = Math.min(...boxes.map(b => b[0])), top = Math.min(...boxes.map(b => b[1]));
+    const width = Math.max(...boxes.map(b => b[0] + b[2])) - left, height = Math.max(...boxes.map(b => b[1] + b[3])) - top;
+    const instances = [...new Set(run.map(draw => draw.instance))];
+    if (width * height > MAX_PLANE) { oversized.push(instances.map(label).join(', ')); continue; }
+    const data = new Uint8ClampedArray(width * height * 4), rgba = new Uint8ClampedArray(4);
+    run.forEach((draw, k) => {
+      const project = scene.assets[draw.asset].recipe, frame = project.frames[draw.frame].data, s = draw.scale, [x0, y0] = boxes[k];
+      for (let y = 0; y < project.height; y++) for (let x = 0; x < project.width; x++) {
+        const at = (y * project.width + x) * 4;
+        if (!frame[at + 3]) continue;
+        for (let c = 0; c < 4; c++) rgba[c] = frame[at + c];
+        if (draw.haze) rgba.set(hazed(draw.haze, rgba));
+        for (let sy = 0; sy < s; sy++) for (let sx = 0; sx < s; sx++) alphaOver(data, ((y0 - top + y * s + sy) * width + x0 - left + x * s + sx) * 4, rgba);
+      }
+    });
+    planes.push({ parallax, at: [left, top], width, height, data, instances });
+  }
+  return { planes, shaded: [...shaded], oversized };
+}
+
 // `depth: true` also records which placement drew each pixel last and who covers whom, for `depth` in the result and
 // for `sceneImage(view, { mode: 'depth' })`.
 // With `draws`, the result also lists every frame drawn, in drawing order: { instance, cell? (a tilemap cell's index),
@@ -436,7 +498,7 @@ export function renderScene(scene, { time = 0, lit = true, density = false, dept
   const camera = scene.camera ? cameraAt(scene.camera, time) : null;
   const shiftOf = i => {
     if (!camera) return [0, 0];
-    const factor = i < 0 ? [1, 1] : scene.instances[scene.instances[i].attach?.index ?? i].parallax;
+    const factor = i < 0 ? [1, 1] : parallaxOf(scene, i);
     return [Math.round(camera[0] * factor[0]), Math.round(camera[1] * factor[1])];
   };
   for (let at = 0; at < data.length; at += 4) data.set(background, at);
@@ -460,21 +522,8 @@ export function renderScene(scene, { time = 0, lit = true, density = false, dept
   // The lights as they are at this time (where they are, how strong, how far they reach), once the placements they
   // follow are known.
   let lights = [];
-  // Haze, after lighting: each colour moves `amount` of the way to the haze colour, as a whole colour rather than per
-  // pixel, so every colour of a placement becomes exactly one colour and keeps its place among the others, as a far
-  // palette an artist mixes does. With haze colours listed, it then becomes the nearest of them and the haze colour.
-  const hazeMaps = new Map();
-  const hazed = (amount, rgba) => {
-    let map = hazeMaps.get(amount);
-    if (!map) hazeMaps.set(amount, map = new Map());
-    const colour = (rgba[0] << 16) | (rgba[1] << 8) | rgba[2];
-    let out = map.get(colour);
-    if (!out) {
-      const { color, colors } = scene.haze, faded = [0, 1, 2].map(c => Math.round(rgba[c] + (color[c] - rgba[c]) * amount));
-      map.set(colour, out = colors.length ? nearestColor(faded, [color, ...colors]) : faded);
-    }
-    return out;
-  };
+  // Haze comes after lighting (see sceneHaze).
+  const hazed = sceneHaze(scene);
   // Shadows (below): per light, the rank of the last-drawn caster shadowing each pixel, or nothing when none does.
   let shadowMasks = [];
   const drawFrame = (id, index, left, top, s, label, shade = null, unlit, entry, fade = 0, rank) => {

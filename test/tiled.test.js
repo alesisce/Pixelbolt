@@ -129,12 +129,15 @@ test('a scene export maps the scene at its start into Tiled: tile layers where t
   assert.doesNotMatch(spirit, /<wangsets>/);
 });
 
-test('shade and haze have nothing in a Tiled map to become, and the export says so', async () => {
+test('a shade placement has nothing in a Tiled map to become, and the export says so; a hazed one draws from a hazed tileset', async () => {
   const block = { version: 1, name: 'block', width: 4, height: 4, palette: { a: '#204020', b: '#408040', c: '#80c080' }, ramps: [['a', 'b', 'c']], frames: [{ name: 'f', ops: [{ op: 'rect', x: 0, y: 0, w: 4, h: 4, color: 'b' }] }] };
   const { files, warnings } = await createSceneBundle({ format: 'pixelforge-scene', version: 1, name: 'shaded', width: 12, height: 12, haze: { color: '#8090a0' }, assets: { block },
     instances: [{ name: 'floor', asset: 'block', at: [0, 0], repeat: [3, 3] }, { name: 'shadow', asset: 'block', at: [2, 2], shade: -1 }, { name: 'far', asset: 'block', at: [6, 6], haze: 0.5 }] });
-  assert.deepEqual(warnings.filter(warning => warning.startsWith('scene.tmx')), ['scene.tmx: shadow: left out: a shade placement darkens what is drawn under it, which a Tiled map can\'t', 'scene.tmx: far: drawn without haze, which a Tiled map has no way to give']);
-  assert.deepEqual(files.get('scene.tmx').toString().split('\n').filter(line => line.startsWith('  <object ')).map(line => line.match(/name="(\w+)"/)[1]), [...Array(9).fill('floor'), 'far']);
+  assert.deepEqual(warnings.filter(warning => warning.startsWith('scene.tmx')), ['scene.tmx: shadow: left out: a shade placement darkens what is drawn under it, which a Tiled map can\'t']);
+  const map = files.get('scene.tmx').toString();
+  assert.deepEqual(map.split('\n').filter(line => line.startsWith('  <object ')).map(line => line.match(/name="(\w+)" gid="(\d+)"/).slice(1).join(' ')), [...Array(9).fill('floor 1'), 'far 2']);
+  assert.deepEqual(map.split('\n').filter(line => / <tileset /.test(line)), [' <tileset firstgid="1" source="assets/0/tileset.tsx"/>', ' <tileset firstgid="2" source="assets/0/haze-0.5/tileset.tsx"/>']);
+  assert.match(files.get('assets/0/haze-0.5/tileset.tsx').toString(), /<tileset version="1\.10" name="block haze 0\.5" tilewidth="4" tileheight="4" tilecount="1" columns="1">\n <image source="color\.png" /);
 });
 
 test('a tilemap whose rule draws above or left of its first cell keeps every tile, the layer moved back by its offset', async () => {

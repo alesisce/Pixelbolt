@@ -4,6 +4,16 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Parallax and haze survive export to game engines
+
+A scene's parallax planes and haze used to exist only in Pixelbolt's own renders: `scene.tmx` dropped parallax and drew hazed placements without their haze, and the Godot export had no parallax.
+
+- **Tiled:** each layer of `scene.tmx` holds draws on one plane and carries the plane's `parallax` as Tiled's `parallaxx` and `parallaxy`, which a game reads as Pixelbolt does (a layer is drawn at its position less its factor times the camera's top-left). The map keeps Tiled's default parallax origin: Tiled 1.11 changed which way its editor counts one, so no other origin previews the same in every version. With a camera, the map is large enough to hold every tile object.
+- **Haze baked in:** each asset gets a hazed copy of its sheet for each amount of haze its placements stand in (`assets/<n>/haze-<amount>/color.png`), with each colour faded as a whole, as the scene fades it. Each copy has its own Tiled tileset (same tiles and terrains, named `<id> haze <amount>`), which `scene.tmx` draws hazed placements from, and its own Godot `sprite_frames.tres`. `alignment.json` lists the copies under each asset's `haze`.
+- **Planes as images:** a scene export writes each plane, a run of draws on one plane, as an image with its haze baked in (`planes/<k>.png`). `alignment.json` lists each plane with its `parallax` and scene position, so any engine can scroll it (in Phaser, a scroll factor).
+- **Godot:** `scene.tscn`, a Godot 4.3+ scene with a top-left `Camera2D` at the camera's start, the background colour and one `Parallax2D` per plane, its scroll scale the plane's parallax, over a `Sprite2D` of the plane's image.
+- `node scripts/verify-tiled.mjs` and `node scripts/verify-godot.mjs` check a three-plane scene: a sky at 0, hills at 0.5 standing 0.6 into the haze, and the ground at 1. Tiled must read each layer's parallax and draw the hills from their hazed tileset. Its layers, rendered by `tmxrasterizer` and scrolled by those factors, must draw what Pixelbolt draws with the camera at its start, halfway and its end. Godot must put every plane there too, and with `--render` it draws the same pixels in a window.
+
 ### Poke the pixels: a live fluid toy
 
 - The playground gains **Poke the pixels** (`playground/fluids/`): a campfire, honey, slime, a waterfall, a potion, a magic swirl and steam run live in the browser with the released engine's `createLiveFluid`. Drag to push the fluid with the pointer's speed; hold to pour a liquid or add heat and smoke to a gas; arrow keys and Space do the same from the keyboard. **Save GIF** saves the last four seconds at about 320 pixels on the long side, blended onto the stage colour. **Copy link** makes a link (#v, p and i, all in the fragment) that replays what was done on the same frames, so the person who opens it sees the same pixels; a two-minute busy session fits in about 7,000 characters, and a longer one is cut at a poke to fit. Touching the effect during a replay takes over, and a new link carries both. **Edit the recipe** opens the preset in the playground. The page has a 1200 × 630 link card, drawn by `scripts/fluid-toy-preview.mjs`, and the deploy script lists it in the sitemap and links it from the home page.

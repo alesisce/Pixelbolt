@@ -5,7 +5,7 @@
 import { createLivePowder, applyStroke, packStrokes, unpackStrokes, compilePowder, SANDBOX } from '/powder.js';
 import { renderProject } from '/core.js';
 import { animationGIF } from '/gif.js';
-import { POWDER_SCENES, SANDBOX_SOURCE, POWDER_TOOLS, brushInput, heldTool, callText, inputText, powderCommands, pixelDigest, fitReplayLink, readReplayLink, sceneById, BLAST } from '/powder-controls.js';
+import { POWDER_SCENES, SANDBOX_SOURCE, POWDER_TOOLS, brushInput, heldTool, callText, inputText, clipSteps, powderCommands, pixelDigest, fitReplayLink, checkReplay, readReplayLink, recordedText, replayLeft, sceneById, BLAST, REPLAY_FRAMES, PowderLinkError } from '/powder-controls.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas'), context = canvas.getContext('2d'), overlay = $('overlay'), ink = overlay.getContext('2d');
@@ -15,7 +15,7 @@ const MOST_WAITING = 1024;
 const title = name => name.charAt(0).toUpperCase() + name.slice(1);
 let scene = null, source = null, table = {}, live = null, image = null, zoom = 1;
 let playing = !reducedMotion, clock = null, brush = 'sand', pointer = null, last = null, pressedAt = -1, hover = null, waiting = [];
-let stepMs = 0, drawMs = 0, statusAt = -Infinity, baked = null, version = 0, busy = false, toastTimer;
+let stepMs = 0, drawMs = 0, statusAt = -Infinity, baked = null, version = 0, busy = false, stopping = false, toldFull = false, toastTimer;
 
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4000); }
 function notice(message) { $('notice').textContent = message ?? ''; $('notice').hidden = !message; }
@@ -44,7 +44,9 @@ function showStatus() {
   $('status').textContent = `${cells.toLocaleString('en')} cells of material${burning ? `, ${burning.toLocaleString('en')} burning` : ''} · ${chunks.stepped} of ${chunks.of} chunks awake · step ${stepMs.toFixed(2)} ms, draw ${drawMs.toFixed(2)} ms in this browser`;
   showRecorded();
 }
-const showRecorded = () => { $('recorded').textContent = `${live.strokes.length.toLocaleString('en')} ${live.strokes.length === 1 ? 'stroke' : 'strokes'} recorded`; };
+// The frame of the first stroke the recording left out (it holds 65,536), or null while it has every stroke.
+const recordedUntil = () => live.recordedUntil ?? null;
+const showRecorded = () => { $('recorded').textContent = recordedText(live.strokes.length, recordedUntil()); };
 // Over the grid, in grid cells: the strokes waiting for a step while paused, and the brush under the pointer. The
 // overlay is a canvas of its own, so the grid's canvas holds exactly the pixels the engine drew.
 function drawOverlay() {
@@ -106,11 +108,13 @@ function stroke(at, from) {
   const made = brushInput(brush, at, from, { radius: radius(), spray: spray(), solid: table[brush]?.state === 'solid' });
   if (!made) return;
   if (!playing && waiting.length >= MOST_WAITING) { toast('Step or play to apply the strokes waiting.'); return; }
-  const [action, input] = made, frameMade = live.frame;
+  const [action, input] = made;
   try { live[action](input); } catch (error) { toast(error.message); return; }
   waiting.push({ ...input, colour: colourOf(action === 'paint' ? input.material : brush) });
-  $('stroke').textContent = `${callText(action, input)}\n${inputText(frameMade, action, input)}`;
+  // The input on frame 0 of a fresh run of the source, where every clip's bake shows it (the bake note says so).
+  $('stroke').textContent = `${callText(action, input)}\n${inputText(0, action, input)}`;
   showRecorded();
+  if (recordedUntil() !== null && !toldFull) { toldFull = true; toast(`The recording is full, so a replay link now stops at frame ${recordedUntil().toLocaleString('en')}. Restart to record afresh.`); }
 }
 const cellAt = event => {
   const box = canvas.getBoundingClientRect(), clamp = (value, most) => Math.max(0, Math.min(most - 1, value));
@@ -169,9 +173,11 @@ function choose(id) {
 
 // ---- Scenes and replays ----
 function playState() { $('play').textContent = playing ? 'Ⅱ' : '▶'; $('play').setAttribute('aria-label', playing ? 'Pause simulation' : 'Play simulation'); }
+// While a scene opens, replays or bakes, everything that would change the scene waits; a replay has its own Stop.
 function setBusy(value) {
   busy = value;
   for (const id of ['play', 'step', 'restart', 'link', 'gif', 'recipe', 'powder-source']) $(id).disabled = value;
+  for (const button of $('scenes').querySelectorAll('button')) button.disabled = value;
   if (!value) for (const id of ['gif', 'recipe']) $(id).disabled = !scene?.file;
 }
 function commands() {
@@ -179,10 +185,13 @@ function commands() {
   const { cli, mcp } = powderCommands(scene, zoom);
   $('cli').textContent = cli.join('\n'); $('mcp').textContent = mcp.join('\n');
 }
-async function open(entry, link = null) {
+// Opens a scene and replays a link's strokes on it. `problem` is what was wrong with a link that could not be read; it
+// is shown once the scene is open. The address keeps a link (or a scene name that was not found), so it can be read
+// or tried again; a scene opened from the list writes its own name there.
+async function open(entry, { link = null, problem = null } = {}) {
   const mine = ++version;
-  setBusy(true); notice(null); $('error').hidden = true;
-  $('status').textContent = link ? 'Opening the replay…' : 'Loading…';
+  setBusy(true); notice(null); $('error').hidden = true; $('stop-replay').hidden = true;
+  $('status').textContent = link?.packed ? 'Opening the replay…' : 'Loading…';
   try {
     let loaded = structuredClone(SANDBOX_SOURCE);
     if (entry.file) {
@@ -194,61 +203,110 @@ async function open(entry, link = null) {
     scene = entry; source = loaded; table = materialsOf(source); baked = null;
     live = createLivePowder(source, { record: true }); image = new ImageData(live.width, live.height);
     canvas.width = live.width; canvas.height = live.height;
-    pointer = last = hover = null; waiting = []; clock = null; statusAt = -Infinity;
+    pointer = last = hover = null; waiting = []; clock = null; statusAt = -Infinity; toldFull = false;
     $('name').textContent = entry.title; $('size').textContent = `${live.width} × ${live.height} px`;
     $('kind').textContent = entry.file ? `Falling sand · examples/${entry.file}.powder.json` : 'Falling sand · the starter table';
     for (const button of document.querySelectorAll('#scenes .example')) { const active = button.dataset.scene === entry.id; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); }
+    // A stroke shown above is on frame 0; an input shows in the bake only on a frame before the last step it samples.
+    const steps = clipSteps(source).toLocaleString('en');
     $('bake-note').textContent = entry.file
-      ? 'The scene\'s own clip, compiled here exactly as the command line compiles it. Your strokes are not part of it.'
-      : 'The sandbox has no scripted inputs, so its clip would stand still. Download its source, add inputs (your last stroke above is one) and compile it.';
+      ? `The scene's own clip, compiled here exactly as the command line compiles it. Your strokes are not part of it; to add one, paste it into the source's "inputs" on a frame before ${steps}, the last step the clips sample.`
+      : `The sandbox has no scripted inputs, so its clip would stand still. Download its source, paste your last stroke (above, on frame 0) into its "inputs" and compile it. An input shows in the clip only on a frame before ${steps}, the last step it samples.`;
     $('link-text').value = ''; $('stroke').textContent = 'Paint on the grid to see it here.';
     showBrushes(); fit();
-    if (link?.packed) { if (!await replay(link, mine)) return; }
-    else history.replaceState(null, '', `#${entry.id}`);
+    let trouble = problem;
+    if (link?.packed) {
+      try { if (!await replay(link, mine)) return; }
+      catch (error) {
+        if (mine !== version) return;
+        const why = error instanceof PowderLinkError ? error.message : `This link is damaged: its strokes do not read (${error.message}).`;
+        trouble = new Error(`${why} ${entry.title} opened without replaying it; the link is still in the address bar.`);
+      }
+    } else if (!problem) history.replaceState(null, '', `#${entry.id}`);
     draw(); showStatus();
+    // Shown after the scene has opened, which hides the last error.
+    if (trouble) failed(trouble);
   } catch (error) { if (mine === version) failed(error); }
   finally { if (mine === version) setBusy(false); }
 }
-// Replays a link's strokes, each on its frame, a slice at a time so the page keeps drawing; strokes made after the
-// last step wait for the next one, as they did for the sender. Ends paused, at the frame the link was made.
-async function replay(link, mine) {
-  const { frames, strokes } = unpackStrokes(link.packed);
-  if (strokes.length && strokes.at(-1).f > frames) throw new Error('This link is damaged: a stroke comes after its last frame.');
-  playing = false; playState();
-  let at = 0;
-  while (live.frame < frames) {
-    const until = performance.now() + 30;
-    do { while (at < strokes.length && strokes[at].f === live.frame) applyStroke(live, strokes[at++]); live.step(); } while (live.frame < frames && performance.now() < until);
-    draw();
-    $('status').textContent = `Replaying ${strokes.length.toLocaleString('en')} strokes: frame ${live.frame.toLocaleString('en')} of ${frames.toLocaleString('en')}…`;
-    await new Promise(resolve => setTimeout(resolve, 0));
-    if (mine !== version) return false;
+// Queues a link's strokes made on the frame the replay ended, which wait for the next step as they did for the sender.
+function queueStrokes(strokes, at) {
+  for (; at < strokes.length && strokes[at].f === live.frame; at++) {
+    const s = strokes[at];
+    applyStroke(live, s);
+    waiting.push({ ...s, colour: colourOf(s.op === 0 ? live.materials[s.m - 1] : ['paint', 'erase', 'wall', s.amount < 0 ? 'cool' : 'heat', 'wind', 'blast'][s.op]) });
   }
-  for (; at < strokes.length; at++) { const s = strokes[at]; applyStroke(live, s); waiting.push({ ...s, colour: colourOf(s.op === 0 ? live.materials[s.m - 1] : ['paint', 'erase', 'wall', s.amount < 0 ? 'cool' : 'heat', 'wind', 'blast'][s.op]) }); }
-  const told = `Replayed ${strokes.length.toLocaleString('en')} ${strokes.length === 1 ? 'stroke' : 'strokes'} over ${frames.toLocaleString('en')} frames`;
+  return at;
+}
+// Replays a link's strokes, each on its frame, a slice at a time so the page keeps drawing, with an estimate of the time
+// left and a Stop that keeps the frames replayed so far. Ends paused, at the frame the link was made (or stopped). A
+// link the lab cannot replay is refused before the first step; a stroke that fails on the way stops the replay there.
+async function replay(link, mine) {
+  const { frames, strokes } = checkReplay(unpackStrokes(link.packed));
+  playing = false; playState();
+  stopping = false; $('stop-replay').hidden = false; $('stop-replay').disabled = false;
+  const started = performance.now(), from = live.frame, count = strokes.length.toLocaleString('en');
+  let at = 0, broke = null;
+  try {
+    while (live.frame < frames && !stopping) {
+      const until = performance.now() + 30;
+      do { while (at < strokes.length && strokes[at].f === live.frame) applyStroke(live, strokes[at++]); live.step(); } while (live.frame < frames && performance.now() < until);
+      draw();
+      const left = replayLeft(live.frame - from, frames - live.frame, performance.now() - started);
+      $('status').textContent = `Replaying ${count} strokes: frame ${live.frame.toLocaleString('en')} of ${frames.toLocaleString('en')}${left ? `, ${left}` : ''}…`;
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (mine !== version) return false;
+    }
+    at = queueStrokes(strokes, at);
+  } catch (error) { broke = error; }
+  finally { if (mine === version) $('stop-replay').hidden = true; }
+  const reached = live.frame.toLocaleString('en');
+  if (broke) {
+    failed(new Error(`This link's stroke on frame ${reached} could not be replayed (${broke.message}), so the replay stopped there; the link is still in the address bar.`));
+    return true;
+  }
+  if (live.frame < frames) {
+    notice(`Stopped the replay at frame ${reached} of ${frames.toLocaleString('en')}, after ${at.toLocaleString('en')} of ${count} strokes. Press play to carry on from here, or reload the page to replay the whole link.`);
+    return true;
+  }
+  const told = `Replayed ${count} ${strokes.length === 1 ? 'stroke' : 'strokes'} over ${frames.toLocaleString('en')} frames`;
   if (!link.digest) notice(`${told}. Press play to carry on.`);
   else if (pixelDigest(live.render().rgba) === link.digest) notice(`${told}: the same pixels the sender saw. Press play to carry on.`);
   else notice(`${told}, but the pixels differ from the sender's: the link was probably made with another version of Pixelbolt.`);
   return true;
 }
+// Opens what the address names: a replay link, a scene, or the sandbox. A link that cannot be read opens the scene it
+// names (or the sandbox) and says why, leaving the address as it was.
 async function fromHash() {
-  try {
-    const link = await readReplayLink(location.hash);
-    if (link) return open(sceneById(link.scene), link);
-  } catch (error) { failed(error); }
-  return open(sceneById(location.hash.slice(1)) ?? POWDER_SCENES[0]);
+  const hash = location.hash, text = hash.slice(1);
+  let link;
+  try { link = await readReplayLink(hash); }
+  catch (error) {
+    const named = sceneById(new URLSearchParams(text).get('s')), entry = named ?? POWDER_SCENES[0];
+    return open(entry, { problem: new Error(`${error.message} ${named ? `${entry.title} opened without replaying it` : `${entry.title} opened instead`}; the link is still in the address bar.`) });
+  }
+  if (link) return open(sceneById(link.scene), { link });
+  if (text && !sceneById(text)) {
+    const name = text.length > 40 ? `${text.slice(0, 40)}…` : text;
+    return open(POWDER_SCENES[0], { problem: new Error(`There is no scene called ${name}, so ${POWDER_SCENES[0].title} opened instead.`) });
+  }
+  return open(sceneById(text) ?? POWDER_SCENES[0]);
 }
 
 // ---- Baking ----
+// The open scene's clip, compiled once. The scene and its source are taken before the wait that lets the status draw,
+// so a scene opened meanwhile (from the address bar: the list waits) neither changes nor names what was compiled.
 async function bake() {
-  if (baked?.scene === scene.id) return baked;
-  setBusy(true); $('status').textContent = `Compiling ${scene.title}…`;
+  const entry = scene, from = source, mine = version;
+  if (baked?.entry === entry) return baked;
+  setBusy(true); $('status').textContent = `Compiling ${entry.title}…`;
   await new Promise(resolve => setTimeout(resolve, 30));
   try {
-    const started = performance.now(), { recipe } = compilePowder(source), project = renderProject(recipe);
-    baked = { scene: scene.id, recipe, project, clip: Object.keys(recipe.animations)[0], ms: Math.round(performance.now() - started) };
-    return baked;
-  } finally { setBusy(false); showStatus(); }
+    const started = performance.now(), { recipe } = compilePowder(from), project = renderProject(recipe);
+    const made = { entry, recipe, project, clip: Object.keys(recipe.animations)[0], ms: Math.round(performance.now() - started) };
+    if (mine === version) baked = made;
+    return made;
+  } finally { if (mine === version) { setBusy(false); showStatus(); } }
 }
 
 for (const entry of POWDER_SCENES) {
@@ -269,24 +327,31 @@ $('spray').addEventListener('input', () => { $('spray-out').value = `${$('spray'
 $('link').addEventListener('click', async () => {
   if (!live || busy) return;
   try {
-    const made = await fitReplayLink(`${location.origin}${location.pathname}`, { scene: scene.id, strokes: live.strokes.slice(), frames: live.frame, digest: pixelDigest(live.render().rgba) }, packStrokes);
+    const made = await fitReplayLink(`${location.origin}${location.pathname}`, { scene: scene.id, strokes: live.strokes.slice(), frames: live.frame, digest: pixelDigest(live.render().rgba), recordedUntil: recordedUntil() }, packStrokes);
     $('link-text').value = made.link;
     const copied = await navigator.clipboard.writeText(made.link).then(() => true, () => false);
-    const what = `${made.kept.toLocaleString('en')} ${made.kept === 1 ? 'stroke' : 'strokes'} over ${made.frames.toLocaleString('en')} frames, ${made.link.length.toLocaleString('en')} characters`;
-    notice(`${copied ? 'Copied a link' : 'Made a link (select it to copy it)'} replaying ${what}${made.cut ? `: cut at a stroke to fit, so it stops at frame ${made.frames.toLocaleString('en')}` : ''}.`);
+    const what = `${made.kept.toLocaleString('en')} ${made.kept === 1 ? 'stroke' : 'strokes'} over ${made.frames.toLocaleString('en')} frames, ${made.link.length.toLocaleString('en')} characters`, end = made.frames.toLocaleString('en');
+    const why = {
+      full: `: the recording filled up at frame ${end} (it holds 65,536 strokes), so it stops there`,
+      long: `: a link replays at most ${REPLAY_FRAMES.toLocaleString('en')} frames (two hours), so it stops at frame ${end}`,
+      length: `: cut at a stroke to fit, so it stops at frame ${end}`
+    }[made.cut] ?? '';
+    notice(`${copied ? 'Copied a link' : 'Made a link (select it to copy it)'} replaying ${what}${why}.`);
   } catch (error) { toast(error.message); }
 });
 $('gif').addEventListener('click', async () => {
+  const scale = zoom;
   try {
-    const { project, clip, ms } = await bake(), gif = animationGIF(project, clip, { scale: zoom });
-    download(gif.data, `${scene.file}.gif`, 'image/gif');
-    toast(`Saved ${scene.file}.gif · ${gif.width} × ${gif.height}, ${project.animations[clip].frames.length} frames, ${gif.colors} colours · compiled in ${ms} ms in this browser`);
+    const { entry, project, clip, ms } = await bake(), gif = animationGIF(project, clip, { scale });
+    download(gif.data, `${entry.file}.gif`, 'image/gif');
+    toast(`Saved ${entry.file}.gif · ${gif.width} × ${gif.height}, ${project.animations[clip].frames.length} frames, ${gif.colors} colours · compiled in ${ms} ms in this browser`);
   } catch (error) { toast(error.message); }
 });
 $('recipe').addEventListener('click', async () => {
-  try { const { recipe } = await bake(); download(`${JSON.stringify(recipe)}\n`, `${scene.file}.json`, 'application/json'); }
+  try { const { entry, recipe } = await bake(); download(`${JSON.stringify(recipe)}\n`, `${entry.file}.json`, 'application/json'); }
   catch (error) { toast(error.message); }
 });
+$('stop-replay').addEventListener('click', () => { stopping = true; $('stop-replay').disabled = true; });
 $('powder-source').addEventListener('click', () => { if (source) download(`${JSON.stringify(source, null, 2)}\n`, `${scene.file ?? scene.id}.powder.json`, 'application/json'); });
 window.addEventListener('hashchange', fromHash);
 playState();

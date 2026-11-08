@@ -486,7 +486,9 @@ export function createToolRunner({ directory, root, version }) {
         if (args.export === true) {
           const bundle = await createSceneBundle(document), out = await newFolder(document.name);
           if (frames) { await writeBundle(frames, path.join(out, 'sequence')); summary.sequence = sequenceSummary(frames.info); }
-          Object.assign(summary, { directory: out, ...outputSummary(out, await writeBundle(bundle, out), false), playback: path.join(out, 'preview.html') });
+          // The export's own warnings too (a shade placement left out of the planes, a tile set Godot or Tiled can't
+          // take), each once.
+          Object.assign(summary, { directory: out, ...outputSummary(out, await writeBundle(bundle, out), false), playback: path.join(out, 'preview.html'), warnings: [...new Set([...frame.warnings, ...bundle.warnings])] });
         }
         return { content: [textContent(summary), imageContent(image)], ...(preview && preview({ width: frame.width, height: frame.height, frames: [{ name: document.name, duration: 100, data: sceneImage(frame, { mode: args.view ?? 'color', guides: args.guides }).data }], animations: {} })) };
       } else if (name === 'pixel_import') {

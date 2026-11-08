@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { prepareScene, renderScene, sceneHaze, scenePlanes } from './scene.js';
 import { encodePNG } from './png.js';
 import { buildAtlas } from './core.js';
@@ -93,5 +94,22 @@ export async function createSceneBundle(source) {
   files.set('review.json', Buffer.from(JSON.stringify({ placements: view.placements, warnings: [...view.warnings, ...tileWarnings] }, null, 2) + '\n'));
   for (const file of ['core.js', 'craft.js', 'font.js', 'authoring.js', 'pose-geometry.js', 'motions.js', 'autotile.js', 'terrain.js', 'slopes.js', 'scene.js']) files.set(file, await readFile(new URL(file, import.meta.url)));
   for (const [file, source] of [['preview.html', '../studio/scene.html'], ['scene-player.js', '../studio/scene-player.js'], ['scene.css', '../studio/scene.css']]) files.set(file, await readFile(new URL(source, import.meta.url)));
-  return { files, scene, warnings: [...view.warnings, ...tileWarnings] };
+  // A forced export over an earlier export of a scene removes what that one wrote and this one doesn't: planes, hazed
+  // copies, the files of an asset it no longer has (or of a pass it lost), tileset.tres. Only files the earlier
+  // alignment.json lists go, and only in the folders they are in, so nothing else in the folder is touched.
+  return { files, scene, warnings: [...view.warnings, ...tileWarnings], owns: { marker: 'alignment.json', listed: sceneFiles, folders: listed => [...new Set(listed.map(file => path.posix.dirname(file)))], match: SCENE_FILES } };
+}
+
+// The files a scene export writes only sometimes, by the names it gives them.
+const SCENE_FILES = /^(?:tileset\.tres|planes\/\d+\.png|assets\/\d+\/(?:haze-[^/]+\/)?(?:[\w-]+\.png|atlas\.json|sprite_frames\.tres|canvas_texture\.tres|tileset\.tsx))$/;
+// The files an earlier scene export's alignment.json says it wrote, of those it writes only sometimes.
+function sceneFiles(alignment) {
+  if (alignment?.version !== 1 || typeof alignment.coordinates !== 'string' || !alignment.coordinates.startsWith('atlas pixels')) return [];
+  const files = [alignment.tileset?.file, ...(Array.isArray(alignment.planes) ? alignment.planes.map(plane => plane?.image) : [])];
+  for (const entry of Object.values(alignment.assets ?? {})) {
+    if (!entry || typeof entry !== 'object') continue;
+    files.push(entry.metadata, entry.godot, entry.tiled, entry.canvasTexture, ...Object.values(entry.passes ?? {}));
+    for (const copy of Array.isArray(entry.haze) ? entry.haze : []) files.push(copy?.color, copy?.tiled, copy?.godot);
+  }
+  return files.filter(file => typeof file === 'string' && SCENE_FILES.test(file));
 }

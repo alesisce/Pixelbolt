@@ -393,9 +393,10 @@ out.commit();
 // Exports the three-plane scene (scripts/parallax-scene.mjs: a sky at parallax 0, hills at 0.5 hazed 0.6, the ground at
 // 1), has Tiled read scene.tmx, and renders each layer alone with tmxrasterizer. Each layer must carry its plane's
 // parallax as Tiled reads it, and the hills must be drawn from the hazed copy of their tileset. Then, at the camera's
-// start, halfway and its end, the layers are laid on the background in order, each moved left by its parallax factor
-// (the one Tiled read) times the camera, as a game scrolls them, and must draw what Pixelbolt draws there, unlit: every
-// pixel exact, but for a step of one where a partly transparent pixel blends.
+// start, halfway, its end and two places where the hills' share is a whole number and a half, the layers are laid on
+// the background in order, each moved left by its parallax factor (the one Tiled read) times the camera in whole
+// pixels, a half rounded down, as a game scrolls them (Tiled draws no parallax itself), and must draw what Pixelbolt
+// draws there, unlit: every pixel exact, but for a step of one where a partly transparent pixel blends.
 export async function verifyTiledParallax({ tiled = findTiled(), keep = false, log = console.log } = {}) {
   if (!tiled) throw new Error('Tiled was not found: pass --tiled <path> or set TILED');
   const rasterizer = [path.join(path.dirname(tiled), process.platform === 'win32' ? 'tmxrasterizer.exe' : 'tmxrasterizer')].find(existsSync) ?? 'tmxrasterizer';
@@ -444,7 +445,7 @@ export async function verifyTiledParallax({ tiled = findTiled(), keep = false, l
       for (let y = 0; y < scene.height; y++) for (let x = 0; x < scene.width; x++) {
         const got = [...background];
         for (const { parallax, image } of layers) {
-          const mx = x + Math.round(parallax[0] * camera[0]) + left, my = y + Math.round(parallax[1] * camera[1]) + top;
+          const mx = x + Math.ceil(parallax[0] * camera[0] - 0.5) + left, my = y + Math.ceil(parallax[1] * camera[1] - 0.5) + top;
           if (mx < 0 || my < 0 || mx >= image.width || my >= image.height) continue;
           const at = (my * image.width + mx) * 4, alpha = image.data[at + 3] / 255;
           for (let k = 0; k < 3; k++) got[k] = image.data[at + k] * alpha + got[k] * (1 - alpha);

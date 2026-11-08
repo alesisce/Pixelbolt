@@ -55,7 +55,7 @@ async function fixture(t, { broken = true, workerCode = '', workerInit = '', cor
   os.availableParallelism = () => cores;
   syncBuiltinESMExports();
   t.after(() => { os.availableParallelism = original; syncBuiltinESMExports(); });
-  await Promise.all(['src', 'package.json', 'studio/effects-controls.js', 'studio/fluid-controls.js'].map(part => cp(path.join(root, part), path.join(dir, part), { recursive: true })));
+  await Promise.all(['src', 'package.json', 'studio/effects-controls.js', 'studio/fluid-controls.js', 'studio/powder-controls.js'].map(part => cp(path.join(root, part), path.join(dir, part), { recursive: true })));
   const entries = (await presetEntries()).filter(entry => small.includes(entry.name));
   assert.deepEqual(new Set(entries.map(entry => entry.kind)), new Set(['recipe', 'wave', 'fluid', 'poses', 'fx']));
   for (const entry of entries) for (const file of [`examples/${entry.file}`, ...(await loadPreset(entry)).inlined]) {

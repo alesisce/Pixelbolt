@@ -2,12 +2,14 @@
 // tests: a sky with a sun and clouds that stays on screen (parallax 0), green hills halfway (0.5) and 0.6 into a haze
 // of the sky's colour, and the ground (1) with the forest spirit on it, under a camera that pans 96 pixels right. The
 // hills and the ground are one autotile set, the hills recoloured green by an asset palette, so the far tiles are the
-// near ones' shapes, paler. Both maps start a cell left of the view, so no map edge shows as the camera pans. Every plane's share of the camera is a whole number of pixels at 0, 48 and 96, so an
-// engine's parallax lands exactly where Pixelbolt's does there.
+// near ones' shapes, paler. Both maps start a cell left of the view, so no map edge shows as the camera pans.
+// The checks put the camera at its start, halfway and its end, where every plane's share of it is a whole number of
+// pixels, and at [47, 3] and [49, 0], where the hills' share is a whole number and a half ([23.5, 1.5] and [24.5, 0]):
+// Pixelbolt rounds such a share down, as Godot draws it with Snap 2D Transforms to Pixel on.
 import { readFile } from 'node:fs/promises';
 import { compileAutotile } from '../src/authoring.js';
 
-export const PARALLAX_CAMERAS = [[0, 0], [48, 0], [96, 0]];
+export const PARALLAX_CAMERAS = [[0, 0], [47, 3], [48, 0], [49, 0], [96, 0]];
 
 const sky = { version: 1, name: 'sky', width: 32, height: 16, palette: { s: '#fff4c8', S: '#ffe08a', w: '#ffffff', c: '#e4f2fa', C: '#c6e2f2' },
   frames: [

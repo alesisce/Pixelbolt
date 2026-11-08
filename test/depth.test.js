@@ -281,9 +281,10 @@ test('a camera pans the view, and each plane follows its parallax share of it in
   const scene = prepareScene(pan()), at = time => renderScene(scene, { time });
   const start = at(0), middle = at(500), end = at(1000);
   for (const name of ['sky', 'far', 'scene', 'near']) assert.deepEqual(where(start, name), scene.instances.find(i => i.name === name).at, `${name} starts where it is written`);
-  // Halfway the camera is at [10, 5]: the far plane moves [5, 2.5], rounded to [5, 3]; the near plane 15 across only.
+  // Halfway the camera is at [10, 5]: the far plane moves [5, 2.5], rounded to [5, 2] (a half rounds down, as Godot
+  // draws it with snapping on); the near plane 15 across only.
   assert.deepEqual(middle.camera, [10, 5]);
-  assert.deepEqual(['sky', 'far', 'scene', 'near'].map(name => where(middle, name)), [[2, 2], [5, 2], [20, 15], [21, 25]]);
+  assert.deepEqual(['sky', 'far', 'scene', 'near'].map(name => where(middle, name)), [[2, 2], [5, 3], [20, 15], [21, 25]]);
   assert.deepEqual(['sky', 'far', 'scene', 'near'].map(name => where(end, name)), [[2, 2], [0, 0], [10, 10], [6, 25]]);
   assert.deepEqual(colour(end, 10, 10), [0, 0, 255, 255]);
   assert.deepEqual(colour(end, 0, 0), [0, 255, 0, 255]);

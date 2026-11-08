@@ -41,6 +41,21 @@ test('the same source and the same inputs draw the same pixels; another seed dif
   assert.notEqual(run(3), run(4));
 });
 
+test('a recording past 65,536 strokes stops, and recordedUntil says how many frames a replay is exact for', () => {
+  const source = sandboxSource(16, 16, [{ material: 'stone', rect: [0, 12, 16, 4] }]);
+  const live = createLivePowder(source, { record: true }), heat = () => live.heat({ x: 8, y: 13, radius: 0.5, amount: 1 });
+  for (let f = 0; f < 16; f++) { for (let k = 0; k < 4096; k++) heat(); live.step(); }
+  assert.equal(live.recordedUntil, null, 'every stroke so far is recorded');
+  const at16 = Int32Array.from(live.cells.temp);
+  heat();
+  assert.equal(live.recordedUntil, 16, 'the first stroke left out was on frame 16');
+  live.step().wall({ x: 4, y: 4, radius: 2 }).step();
+  assert.equal(live.strokes.length, 65536);
+  assert.equal(live.recordedUntil, 16, 'and nothing more is recorded');
+  assert.deepEqual(replayStrokes(createLivePowder(source), live.strokes, live.recordedUntil).cells.temp, at16, 'a replay is exact up to recordedUntil');
+  assert.equal(createLivePowder(source).recordedUntil, null, 'without a recording it stays null');
+});
+
 test('recorded strokes replay exactly through the packed form', () => {
   const source = sandboxSource(64, 48, [{ material: 'stone', rect: [0, 44, 64, 4] }, { material: 'wood', rect: [40, 30, 10, 14] }]);
   const live = createLivePowder(source, { record: true });
@@ -255,6 +270,44 @@ test('settled regions: a quiet scene stops costing steps, a poke wakes what it r
   assert.ok(slab.at(34, 8).temperature > 20 && slab.at(30, 30).temperature > 20, 'two chunks away warmed');
 });
 
+test('settled regions: a cell that stops without moving still sinks or drifts, held back by drag or landing on a pool', () => {
+  // A grain dropped into a deep still pool reaches the floor: each failed chance to sink through the water keeps its
+  // chunk awake, and so does a fall that ends without a move.
+  for (const seed of [1, 2, 3]) {
+    const live = createLivePowder(sandboxSource(64, 64, [{ material: 'stone', rect: [0, 60, 64, 4] }, { material: 'water', rect: [0, 16, 64, 44] }], seed));
+    live.step(5).paint({ material: 'sand', x: 32.5, y: 4.5, radius: 0.5 }).step(400);
+    const [grain] = cellsOf(live, 'sand');
+    assert.equal(Math.floor(grain / 64), 59, `seed ${seed}: the grain sank to the floor (row ${Math.floor(grain / 64)})`);
+  }
+  // A drop landing on a still pool drifts along its surface as a lone cell does, rather than freezing where it landed.
+  for (const seed of [1, 2, 3]) {
+    const live = createLivePowder(sandboxSource(64, 48, [{ material: 'stone', rect: [0, 44, 64, 4] }, { material: 'water', rect: [0, 30, 64, 14] }], seed));
+    live.step(5).paint({ material: 'water', x: 20.5 + seed, y: 27.5, radius: 0.5 }).step(400);
+    const above = cellsOf(live, 'water').filter(c => c < 64 * 30).map(c => c % 64);
+    assert.ok(above.every(x => x === 0 || x === 63), `seed ${seed}: the drop drifted to the side (x ${above.join(', ')})`);
+  }
+});
+
+test('settled regions: a liquid that sees a drop up to FAR along its row wakes when one opens in a sleeping chunk', () => {
+  const live = createLivePowder(sandboxSource(64, 32, [{ material: 'stone', rect: [0, 20, 64, 2] }, { material: 'water', rect: [2, 19, 1, 1] }]));
+  live.step(30);
+  assert.equal(live.measure().chunks.stepped, 0);
+  assert.deepEqual(cellsOf(live, 'water'), [19 * 64 + 2], 'the drop rests on the shelf');
+  // A hole 33 pixels away, two chunks over: the drop runs to it and falls in.
+  live.erase({ x: 35.5, y: 20.5, radius: 0.5 }).step(60);
+  assert.deepEqual(cellsOf(live, 'water'), [20 * 64 + 35], 'the drop drained into the hole');
+});
+
+test('settled regions: pools of viscous liquids come to rest', () => {
+  for (const liquid of ['oil', 'lava']) {
+    const source = sandboxSource(64, 40, [{ material: 'stone', rect: [0, 36, 64, 4] }, { material: 'stone', rect: [0, 0, 2, 40] }, { material: 'stone', rect: [62, 0, 2, 40] }, { material: liquid, rect: [2, 8, 60, 10] }]);
+    // Lava kept molten: no cooling into stone, as hot as the air.
+    if (liquid === 'lava') { delete source.materials.lava.below; delete source.materials.stone.above; source.ambient = 1200; }
+    const live = createLivePowder(source).step(300);
+    assert.equal(live.measure().chunks.stepped, 0, `the ${liquid} pool sleeps`);
+  }
+});
+
 test('moving air: heat lifts it, the wind carries smoke and ash, a push stirs it and gases leave through the open top', () => {
   const windy = wind => { const source = sandboxSource(96, 64, [{ material: 'stone', rect: [0, 60, 96, 4] }, { material: 'smoke', rect: [20, 30, 8, 8] }]); source.air.flow.wind = wind; return createLivePowder(source); };
   const meanX = live => { const xs = cellsOf(live, 'smoke').map(c => c % 96); return xs.reduce((a, b) => a + b, 0) / xs.length; };
@@ -342,6 +395,39 @@ test('compile mistakes are named by path', () => {
   bad({ inputs: [{ frame: 1, paint: { material: 'gold', x: 1, y: 1 } }] }, 'powder.inputs[0].paint.material', /no material named "gold"/);
   bad({ air: { flow: false }, inputs: [{ frame: 1, push: { x: 1, y: 1, vx: 1 } }] }, 'powder.inputs[0].push', /no moving air/);
   assert.throws(() => compilePowder({ ...tiny(), width: 256, height: 256, clips: { long: { frames: 2, every: 60 }, longer: { start: 3000, frames: 2, every: 60 } } }), /million cell steps/);
+});
+
+test('the work limit counts scripted inputs and tumbling pieces, refused up front by path', () => {
+  const late = { clips: { late: { start: 19940, frames: 2, every: 60 } } };
+  // A burst over the whole grid every step costs far more than the grid's own 31 million cell steps.
+  const inputs = [{ frames: [0, 40], paint: { material: 'sand', x: 20, y: 2 } }, { frames: [0, 20000], erase: { x: 24, y: 16, radius: 64 } }, { frames: [0, 20000], burst: { x: 24, y: 16, radius: 64, strength: 0 } }];
+  assert.throws(() => compilePowder(tiny({ inputs, ...late })), error => error.path === 'powder.inputs[2]' && /scripted inputs need about .* million cell steps .* fewer steps \(frames, every\) or over fewer cells/.test(error.message));
+  assert.throws(() => compilePowder(tiny({ inputs: inputs.slice(0, 2), ...late, pieces: 'tumble', scene: [{ material: 'stone', rect: [0, 28, 48, 4] }, { material: 'wood', rect: [4, 4, 40, 24] }] })),
+    error => error.path === 'powder.clips' && /pieces "tumble" \(solids that fall fill 63% of the grid\) weigh as about .* or pieces "drop"/.test(error.message));
+  // Painted solids that fall count toward the share, and weigh a tumbling grid more.
+  assert.throws(() => compilePowder(tiny({ ...late, clips: { c: { start: 11940, frames: 2, every: 60 } }, pieces: 'tumble', inputs: [{ frame: 0, paint: { material: 'wood', x: 24, y: 12, radius: 16 } }] })), /solids that fall fill 62% of the grid/);
+  assert.doesNotThrow(() => compilePowder(tiny({ inputs: inputs.slice(0, 1), clips: { c: { start: 1940, frames: 2, every: 60 } }, pieces: 'tumble', scene: [{ material: 'stone', rect: [0, 28, 48, 4] }, { material: 'wood', rect: [4, 24, 4, 4] }] })), 'a lightly tumbling grid compiles');
+});
+
+test('errors an agent meets name what to do, and a late scripted input is warned of', () => {
+  const bad = (source, where, pattern) => assert.throws(() => compilePowder(source), error => error.path === where && pattern.test(error.message), `${where} ${pattern}`);
+  const colours = n => Object.fromEntries(Array.from({ length: n }, (_, k) => [`m${k}`, { state: 'powder', colors: Array.from({ length: 8 }, (_, j) => `#${(k * 8 + j).toString(16).padStart(2, '0')}2040`) }]));
+  bad(tiny({ materials: colours(2) }), 'powder.materials', /92 different colours in all: the sandbox base uses 76 and this source adds 16, and a grid draws at most 89; share colours .* or replace base materials/);
+  bad({ ...tiny({ materials: colours(12) }), base: undefined }, 'powder.materials', /^powder\.materials: 97 different colours in all, and a grid draws at most 89; share colours between materials$/);
+  bad(tiny({ width: 300 }), 'powder.width', /at most 256 pixels a side; use a smaller grid, or run a larger one live .*createLivePowder/);
+  bad(tiny({ scene: [{ rows: ['ss'], at: [1.5, 2], legend: { s: 'stone' } }] }), 'powder.scene[0].at', /expected 2 whole numbers/);
+  bad(tiny({ scene: [{ rows: ['ss'], at: [1], legend: { s: 'stone' } }] }), 'powder.scene[0].at', /expected 2 whole numbers/);
+  bad(tiny({ scene: [{ rows: ['ss'], at: ['x', 'y'], legend: { s: 'stone' } }] }), 'powder.scene[0].at', /expected 2 whole numbers/);
+  bad(tiny({ scene: [{ rows: ['ss'], at: [1, 1], legend: { ss: 'stone' } }] }), 'powder.scene[0].legend.ss', /single characters/);
+  bad(tiny({ inputs: [{ frame: 1, paint: { material: 'empty', x: 1, y: 1 } }] }), 'powder.inputs[0].paint.material', /erase clears cells/);
+  assert.throws(() => createLivePowder(sandboxSource(16, 16)).paint({ material: 'empty', x: 1, y: 1 }), /paint\.material: "empty" is not a material to paint; erase/);
+  assert.equal(compilePowder(sandboxSource(16, 16)).recipe.name, 'sandbox', 'sandboxSource is a whole source');
+  const { warnings } = compilePowder(tiny({ clips: { a: { frames: 10 } }, inputs: [{ frame: 17, heat: { x: 1, y: 1 } }, { frame: 9000, heat: { x: 1, y: 1 } }, { frames: [18, 400], heat: { x: 1, y: 1 } }] }));
+  assert.deepEqual(warnings, [
+    'powder.inputs[1] is played on step 9000, so it first shows on step 9001, after the last step a clip samples (18): no frame shows it; play it earlier, or sample later (a clip\'s start, frames and every)',
+    'powder.inputs[2] is played from step 18, so it first shows on step 19, after the last step a clip samples (18): no frame shows it; play it earlier, or sample later (a clip\'s start, frames and every)'
+  ]);
+  assert.equal(compilePowder(tiny({ clips: { a: { frames: 10 } } })).warnings, undefined, 'warnings only when there are any');
 });
 
 test('the powder schema lists exactly the fields the reader takes, and the package ships it', async () => {
@@ -492,6 +578,33 @@ test('tumbling: held where nailed to a wall or hung, moss clings, and a piece st
   const clinging = sandboxSource(16, 16);
   clinging.materials.stone.clings = true;
   assert.throws(() => createLivePowder(clinging), /stone\.clings: only a solid that falls clings/);
+});
+
+test('tumbling: a piece thrown out of the top keeps its cells and comes back down', () => {
+  const materials = { sand: { state: 'powder', density: 16, colors: ['#d8b06a'] }, water: { state: 'liquid', density: 10, spread: 6, colors: ['#2e6db0'] }, wood: { state: 'solid', falls: true, density: 6, colors: ['#6a3f23'] } };
+  const live = createLivePowder({ format: 'pixelforge-powder', width: 48, height: 40, seed: 2, materials, pieces: 'tumble', inputs: [{ frame: 3, burst: { x: 16, y: 9, radius: 6, strength: 8 } }],
+    scene: [{ material: 'sand', rect: [0, 14, 48, 26] }, { material: 'water', rect: [0, 10, 48, 4] }, { material: 'wood', rect: [12, 4, 10, 3] }] });
+  let above = 0;
+  for (let f = 0; f < 300; f++) { live.step(); if (!live.measure().counts.wood) above++; }
+  assert.ok(above > 16, `the plank flew wholly above the grid for ${above} frames`);
+  assert.equal(live.measure().counts.wood, 30, 'and landed again with every cell');
+  assert.deepEqual(live.measure().pieces, { moving: 0, resting: 1 });
+});
+
+test('tumbling: at most 128 pieces have bodies; past that, cut parts drop straight as blocks', () => {
+  const rows = ['w'.repeat(320), ...Array.from({ length: 3 }, () => 'w.'.repeat(160))];
+  const live = createLivePowder({ ...sandboxSource(340, 24, [{ rows, at: [10, 4], legend: { w: 'wood' } }, { material: 'wall', rect: [0, 20, 340, 4] }]), pieces: 'tumble' }).step(2);
+  assert.deepEqual(live.measure().pieces, { moving: 1, resting: 0 }, 'the comb falls as one piece');
+  // Cutting its back leaves 160 teeth.
+  live.erase({ x: 10, y: 4.5, x2: 330, y2: 4.5, radius: 0.5 }).step();
+  let most = 0;
+  for (let f = 0; f < 80; f++) {
+    const { pieces, counts } = live.step().measure();
+    most = Math.max(most, pieces.moving + pieces.resting);
+    assert.equal(counts.wood, 480, `frame ${f}: every tooth keeps its cells`);
+  }
+  assert.equal(most, 128);
+  assert.ok(cellsOf(live, 'wood').every(c => Math.floor(c / 340) >= 17), 'every tooth fell to the floor');
 });
 
 test('tumbling: a piece carries its burning and its heat, a blast throws it, and runs replay exactly', () => {

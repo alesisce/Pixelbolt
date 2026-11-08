@@ -21,11 +21,12 @@ import { compilePowder } from './powder.js';
 import { compileBodies } from './bodies.js';
 import { EFFECT_PRESETS } from '../studio/effects-controls.js';
 import { FLUID_PRESETS } from '../studio/fluid-controls.js';
+import { POWDER_PRESETS } from '../studio/powder-controls.js';
 
 export const PRESET_FOLDER = fileURLToPath(new URL('../examples/', import.meta.url));
 const SOURCE = /^(.+)\.(fluid|fx|wave|crystal|powder|bodies|poses)\.json$/;
 const COMPILERS = { 'pixelforge-fluid': compileFluid, 'pixelforge-fx': compileEffects, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-powder': compilePowder, 'pixelforge-bodies': compileBodies, 'pixelforge-poses': compilePoses };
-const TITLES = new Map([...FLUID_PRESETS.map(entry => [`fluid:${entry.file}`, entry]), ...EFFECT_PRESETS.map(entry => [`fx:${entry.file}`, entry])]);
+const TITLES = new Map([...FLUID_PRESETS.map(entry => [`fluid:${entry.file}`, entry]), ...EFFECT_PRESETS.map(entry => [`fx:${entry.file}`, entry]), ...POWDER_PRESETS.map(entry => [`powder:${entry.file}`, entry])]);
 
 // How to use the listing, and the one way to get fewer frames: a source's own `frames` is its simulation or timeline
 // length, so lowering it cuts the effect off before it ends instead of sampling it.
@@ -109,7 +110,7 @@ function about(entry, source, animations) {
     const kind = liquid ? 'A simulated liquid, not a character.' : 'A simulated gas.';
     return titled ? `${titleLine(titled)}${liquid ? ' A liquid, not a character.' : ''}` : kind;
   }
-  if (titled) return titleLine(titled);
+  if (titled && entry.kind !== 'powder') return titleLine(titled);
   if (entry.kind === 'poses') {
     const templates = [...new Set(Object.values(source.motions ?? {}).map(motion => motion?.template).filter(Boolean))];
     // A grid part attached to the last bone of a rig arm in the rest pose is held: a figure with a sword lists as one.
@@ -130,9 +131,10 @@ function about(entry, source, animations) {
     return `Crystals that grow and come to rest: ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? 'none'}.`;
   }
   if (entry.kind === 'powder') {
-    // What the sandbox holds, from its scene and its base table.
+    // What happens (the Powder lab's title and note), then what the sandbox holds, from its scene.
     const named = [...new Set((source.scene ?? []).flatMap(fill => (fill?.legend ? Object.values(fill.legend) : [fill?.material])).filter(name => typeof name === 'string' && name !== 'empty'))];
-    return `A falling-sand sandbox${named.length ? ` of ${listNames(named)}` : ''}.`;
+    const of = named.length ? ` of ${listNames(named)}` : '';
+    return titled ? `${titleLine({ ...titled, note: titled.note.replace(/:\s*/g, ', ') })} Falling sand${of}.` : `A falling-sand sandbox${of}.`;
   }
   if (entry.kind === 'bodies') {
     // What falls, bounces and topples: each shape counted with its copies on a ring or a grid.
@@ -183,7 +185,7 @@ export function measurePreset(entry, source) {
 // change, released or not. It is hashed when this module loads, which is when the running code was read, and again for
 // each listing: if the files changed since (an update under a running server), this process runs the old code, so it
 // neither reads nor writes the cache. Null when the files can't be read, which turns the cache off.
-const ENGINE_FILES = [new URL('../package.json', import.meta.url), new URL('../studio/effects-controls.js', import.meta.url), new URL('../studio/fluid-controls.js', import.meta.url)];
+const ENGINE_FILES = [new URL('../package.json', import.meta.url), new URL('../studio/effects-controls.js', import.meta.url), new URL('../studio/fluid-controls.js', import.meta.url), new URL('../studio/powder-controls.js', import.meta.url)];
 async function engineFingerprint() {
   try {
     const src = fileURLToPath(new URL('./', import.meta.url)), files = (await readdir(src)).filter(name => name.endsWith('.js')).sort().map(name => path.join(src, name));

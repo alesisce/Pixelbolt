@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readZip } from './build-studio.mjs';
 import { FLUID_PRESETS } from '../studio/fluid-controls.js';
 import { EFFECT_PRESETS } from '../studio/effects-controls.js';
-import { POWDER_SCENES, POWDER_TOOLS, SANDBOX_SOURCE, pixelDigest, readReplayLink } from '../studio/powder-controls.js';
+import { POWDER_SCENES, POWDER_TOOLS, SANDBOX_SOURCE, pixelDigest, readReplayLink, replayLink } from '../studio/powder-controls.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const options = { app: root, 'browser-arg': [] };
@@ -927,6 +927,34 @@ try {
     assert.notEqual(await text('recorded'), '0 strokes recorded');
     await click('#restart'); await until(`document.getElementById('recorded').textContent === '0 strokes recorded'`, 'the restart'); await running();
     return `GIF with ${decoded} frames, ${gif.length} bytes`;
+  });
+  await check('a link the lab cannot replay opens its scene and says why; a long replay estimates and stops on request', async () => {
+    // Each address is a new page load (a query differs). The address keeps the link, so it can be read or tried again.
+    await studio.goto(`${origin}/powder.html?damaged#s=hut-fire&i=@@@`); await running();
+    assert.deepEqual([await text('name'), await evaluate('location.hash'), await evaluate(`document.getElementById('error').hidden`)], ['Hut fire', '#s=hut-fire&i=@@@', false]);
+    assert.equal(await text('error'), 'This link is damaged: its strokes are not base64url. Hut fire opened without replaying it; the link is still in the address bar.');
+    const { packStrokes } = await import(pathToFileURL(path.join(path.resolve(options.app), 'src', 'powder.js')));
+    const linkTo = async (query, scene, frames) => (await replayLink(`${origin}/powder.html`, { scene, packed: packStrokes([], frames) })).replace('#', `?${query}#`);
+    // 67 characters asking for 24 hours of frames are refused before the first step.
+    await studio.goto(await linkTo('day', 'stilt-hut', 216000 * 24)); await running();
+    assert.match(await text('error'), /^This link asks for 5,184,000 frames; the lab replays at most 432,000 .*Stilt hut opened without replaying it/);
+    // An hour's link opens; while it replays only Stop is offered, then the lab carries on from the frame reached.
+    await studio.goto(await linkTo('hour', 'stilt-hut', 216000));
+    await until(`/ left…$/.test(document.getElementById('status').textContent)`, 'an estimate of the time left');
+    const controls = `['stop-replay', 'play', 'link', 'restart'].map(id => document.getElementById(id)).map(button => button.hidden ? 'hidden' : button.disabled ? 'off' : 'on').concat(document.querySelector('#scenes button').disabled ? 'scenes off' : 'scenes on')`;
+    assert.deepEqual(await evaluate(controls), ['on', 'off', 'off', 'off', 'scenes off']);
+    const estimate = await text('status');
+    await click('#stop-replay');
+    await until(`document.getElementById('notice').textContent.startsWith('Stopped the replay')`, 'the replay to stop'); await running();
+    const stopped = await frameNumber();
+    assert.ok(stopped > 0 && stopped < 216000, `stopped at frame ${stopped}`);
+    assert.match(await text('notice'), new RegExp(`^Stopped the replay at frame ${stopped.toLocaleString('en')} of 216,000, after 0 of 0 strokes\\.`));
+    assert.deepEqual(await evaluate(controls), ['hidden', 'on', 'on', 'on', 'scenes on']);
+    // A grid shown larger than the stage scrolls to its left edge, which the stage used to hide.
+    await choose('scale', '8');
+    const edges = await evaluate(`(() => { const preview = document.getElementById('preview'), box = preview.getBoundingClientRect(); preview.scrollLeft = 0; return [document.getElementById('canvas').getBoundingClientRect().left - box.left, preview.scrollWidth > preview.clientWidth]; })()`);
+    assert.ok(edges[0] >= 0 && edges[1], `at Display 8 the grid starts ${edges[0]} px from the stage's left edge`);
+    return `${estimate.replace(/^.*?: /, '')}; stopped at frame ${stopped}`;
   });
   await check('the powder lab fits a phone-sized window without scrolling sideways', async () => {
     // A query makes this a new page load rather than a change of fragment on the open one.

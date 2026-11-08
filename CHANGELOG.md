@@ -4,6 +4,41 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Fixes from a review before release
+
+- **Falling sand, motion:**
+  - A falling cell that lands without moving keeps its part of the grid awake. Before, a sand grain could stop for good partway down through water, and a drop landing slowly on a pool froze on the surface instead of drifting along it.
+  - A resting liquid wakes when something changes up to 40 pixels along its row, as far as it looks for a way down, so digging a hole beside a still puddle makes it flow.
+  - Pools of thick liquids (oil, lava) come to rest and stop costing time.
+  - A tumbling piece thrown more than 16 pixels above the top comes back down; before, it vanished with every cell in it.
+  - Cutting one piece into many (erasing a comb's bar) keeps to the 128 pieces that tumble; the rest drop as blocks, as new pieces past the cap already did.
+- **Falling sand, limits and messages:**
+  - The compile's work limit counts scripted inputs (a patterned paint or a burst over the whole grid every frame could run for hours from the command line) and `pieces: "tumble"`, weighed by how much of the grid is solids that fall. A source past it is refused at once, naming the input or setting to shrink.
+  - A scripted input played after the last step any clip samples is warned about; it used to compile into a clip identical to one without it.
+  - `live.recordedUntil` is the frame of the first input a recording left out once it holds 65,536, so a replay is known to be exact up to there.
+  - The colour error says how many of the 89 colours the base uses and how many the source adds. The size error no longer suggests `pixelbolt sequence`, which fails the same way. A `rows` fill's `at` must be two whole numbers and its legend keys one character each. Painting `"empty"` points to `erase`. `sandboxSource()` gives a source that compiles.
+  - The schema allows names up to 60 characters, as the compiler does, and no longer says `"empty"` is a material where it isn't one.
+  - The preset listing says what each powder preset shows ("Rain on fire: wind, then rain on a campfire"), from the Powder lab's titles.
+- **Powder lab:**
+  - A damaged or unknown replay link opens the scene it names (or the sandbox), says what is wrong and keeps its address; it used to open the sandbox silently and erase the link.
+  - A full recording is said to be full, and its link stops where the recording did, without claiming the pixels match.
+  - A stroke's scripted input is shown on frame 0, with the frame it must come before to show in the scene's clip, so pasting it into the downloaded source changes the bake.
+  - A link may ask for at most two hours of frames, the status estimates the time left, and **Stop replay** keeps the frame reached.
+  - A GIF or recipe started just before switching scenes is named after the scene it shows, and the scene buttons wait while it is made.
+  - A large Display scale no longer hides the left of the grid where it can't be scrolled to (the Fluid and Effects labs share the fix).
+  - `test/studio-modules.test.js` checks that every module a studio page reaches is served, so a missing allowlist entry fails in Node, not only in the browser walk.
+- **Scene export:**
+  - A plane's share of the camera rounds half a pixel down, as Godot's pixel snapping does, so with the camera on whole pixels every plane of `scene.tscn` is where Pixelbolt draws it. Before, a plane whose share was exactly half a pixel landed a pixel apart. `docs/game-integration.md` says where Godot and Pixelbolt agree to the pixel.
+  - Re-exporting a scene with `--force` removes the planes and hazed copies the earlier export wrote and this one doesn't.
+  - MCP `pixel_scene` with `export: true` replies with the export's warnings too.
+  - Haze amounts are kept to six decimals, so 0.3 and 0.1 + 0.2 share one hazed copy.
+  - The game-integration guide says `tileset.tres` holds only unhazed sheets.
+
+### Fixes since 0.13.0
+
+- A bodies match written as video frames (`pixelbolt sequence`, `pixel_compile` with `sequence`) draws every frame, shown or not, so its bodies are where `compileBodies` draws them when the video samples below the match's rate, and an effect name of 60 characters works past frame 999.
+- A Tiled map keeps tiles drawn above or to the left of the map: a rule offset a row up at the scene's origin stopped the scene export with a TypeError, and one a column left lost the tile. A tile set named with 56 to 64 characters draws its test map, so `pixel_compile` no longer fails on it.
+
 ### Falling sand
 
 - A new source format, `pixelforge-powder` (`src/powder.js`, `powder.schema.json`, `pixel_help` topic `powder`, `pixelbolt/powder`): a falling-sand material grid where every pixel holds one material from a table: powders, liquids, gases, fire, fixed solids and solids that fall. It runs live in a game (`createLivePowder`: step it every frame, paint, erase, wall, heat, push and burst with the pointer, and render) and compiles with `pixel_compile` and `pixelbolt compile` into one-shot clips of palette grids sampled from one run. The same source and inputs draw the same pixels everywhere, and recorded strokes pack into a few bytes and replay exactly.

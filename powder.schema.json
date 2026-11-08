@@ -16,7 +16,8 @@
     "name": {
       "type": "string",
       "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
-      "description": "The recipe's name, and its clip's when there are no clips."
+      "description": "The recipe's name, and its clip's when there are no clips.",
+      "maxLength": 60
     },
     "base": {
       "enum": [
@@ -151,7 +152,7 @@
       "propertyNames": {
         "type": "string",
         "pattern": "^[a-z][a-z0-9-]{0,23}$",
-        "description": "A material: lower-case letters, digits and hyphens, starting with a letter; \"empty\" is empty air."
+        "description": "A material: lower-case letters, digits and hyphens, starting with a letter (to clear cells, erase)."
       },
       "additionalProperties": {
         "type": "object",
@@ -450,7 +451,7 @@
                     "material": {
                       "type": "string",
                       "pattern": "^[a-z][a-z0-9-]{0,23}$",
-                      "description": "A material: lower-case letters, digits and hyphens, starting with a letter; \"empty\" is empty air."
+                      "description": "A material: lower-case letters, digits and hyphens, starting with a letter (to clear cells, erase)."
                     },
                     "chance": {
                       "type": "number",
@@ -504,7 +505,7 @@
                 "material": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,23}$",
-                  "description": "A material: lower-case letters, digits and hyphens, starting with a letter; \"empty\" is empty air."
+                  "description": "A material: lower-case letters, digits and hyphens, starting with a letter (to clear cells, erase)."
                 },
                 "chance": {
                   "type": "number",
@@ -529,7 +530,7 @@
         ],
         "additionalProperties": false
       },
-      "description": "Materials by name; at most 89 different colours in all."
+      "description": "Materials by name; at most 89 different colours in all, the base's included (base sandbox uses 76): share colours between materials, or replace base materials you do not use with one colour each."
     },
     "reactions": {
       "type": "array",
@@ -539,7 +540,7 @@
           "a": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{0,23}$",
-            "description": "A material: lower-case letters, digits and hyphens, starting with a letter; \"empty\" is empty air."
+            "description": "A material: lower-case letters, digits and hyphens, starting with a letter (to clear cells, erase)."
           },
           "b": {
             "type": "string",
@@ -718,7 +719,7 @@
               "material": {
                 "type": "string",
                 "pattern": "^[a-z][a-z0-9-]{0,23}$",
-                "description": "A material: lower-case letters, digits and hyphens, starting with a letter; \"empty\" is empty air."
+                "description": "A material: lower-case letters, digits and hyphens, starting with a letter (to clear cells, erase)."
               },
               "x": {
                 "type": "number",
@@ -1016,7 +1017,7 @@
         "required": [],
         "additionalProperties": false
       },
-      "description": "One-shot animations sampled from the one run; default one clip named after the source. At most 256 frames and 4,194,304 pixels in all, and 200 million cell steps."
+      "description": "One-shot animations sampled from the one run; default one clip named after the source. At most 256 frames and 4,194,304 pixels in all, and about 200 million cell steps, scripted inputs and tumbling pieces counted in."
     }
   },
   "required": [

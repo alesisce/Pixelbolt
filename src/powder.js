@@ -49,6 +49,16 @@ const SUB = 256, TOP = 6 * SUB, SPLASH = 2 * SUB;
 // How far a resting liquid looks along its row for somewhere lower, or for more of its kind to join.
 const FAR = 40;
 const LIMITS = { side: 1024, materials: 200, reactions: 256, colors: 8, emits: 2, scene: 512, strokes: 65536, inputs: 512, clips: 16, frames: 256, steps: 20000, work: 200e6 };
+// The work a compile may do (LIMITS.work) is counted in cell steps, a busy grid's step of one cell (about 60 ns). A
+// scripted input costs, each time it runs, these many for each cell of the box round its stroke (or each face of the
+// moving air): `plain` to erase, heat or paint speckled cells, `patterned` to paint blotch or grain (value noise per
+// cell), `thrown` for a burst (each loose cell sorted and thrown); measured, and rounded up. With pieces "tumble" every
+// cell step counts TUMBLE_WORK times, plus TUMBLE_SHARE times the share of the grid that solids that fall fill (at the
+// start, and where scripted inputs paint them): reading pieces back, cutting them and moving their bodies costs from
+// 2.5 to 10 times a grid's step, the more the more of it falls (posts or a lattice of wood burning down).
+const INPUT_WORK = { plain: 0.5, patterned: 4, thrown: 10, face: 0.25 }, TUMBLE_WORK = 5, TUMBLE_SHARE = 12;
+// What compilePowder reads of a live grid before it runs it: its scripted inputs and, tumbling, the share that falls.
+const PLANS = new WeakMap();
 // Tumbling pieces (pieces: "tumble"): at most MOST_PIECES bodies (further loose pieces drop straight), SEARCH cells
 // searched for room for what a piece moves into, SIDE columns beside a piece searched for the liquid it is in, REACH
 // pixels round the moving pieces whose obstacles they meet. In a liquid a piece is dragged LIQUID_DRAG a frame (times the
@@ -132,14 +142,11 @@ function readPowder(given) {
     return id.get(value);
   };
 
-  // Palette: every colour once, each with a key.
+  // Palette: every colour once, each with a key (at most KEY_CHARS.length of them, counted once all are read).
   const colours = [], keyOf = new Map();
   const colour = rgba => {
     const text = rgba.join(',');
-    if (!keyOf.has(text)) {
-      if (colours.length >= KEY_CHARS.length) fail('powder.materials', `more than ${KEY_CHARS.length} different colours in all`);
-      keyOf.set(text, colours.length); colours.push(rgba);
-    }
+    if (!keyOf.has(text)) { keyOf.set(text, colours.length); colours.push(rgba); }
     return keyOf.get(text);
   };
 
@@ -327,6 +334,20 @@ function readPowder(given) {
     }
     if (!t.burnRamp[m]) t.burnRamp[m] = [];
   });
+  if (colours.length > KEY_CHARS.length) {
+    // Say how many a base takes up: the colours of its materials the source keeps, and its background.
+    let from = '';
+    if (given.base !== undefined) {
+      const kept = new Set(given.background === undefined ? t.ramps[0] : []);
+      names.forEach((name, n) => {
+        if (!Object.hasOwn(SANDBOX.materials, name) || (isObject(given.materials) && Object.hasOwn(given.materials, name))) return;
+        const m = n + 1;
+        for (const k of [...t.ramps[m], t.top[m], t.streak[m], ...t.hotRamp[m], ...t.burnRamp[m]]) if (k >= 0) kept.add(k);
+      });
+      from = `: the ${given.base} base uses ${kept.size} and this source adds ${colours.length - kept.size}`;
+    }
+    fail('powder.materials', `${colours.length} different colours in all${from}, and a grid draws at most ${KEY_CHARS.length}; share colours between materials${given.base !== undefined ? ', or replace base materials the source does not use with ones of fewer colours (a material named again replaces the base\'s)' : ''}`);
+  }
   for (const resolve of lateRefs) resolve();
   // A burning material with no colours of its own flickers through the colours of the fire it gives off.
   for (let m = 1; m < M; m++) {
@@ -385,6 +406,11 @@ const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 const pack = ([r, g, b, a]) => (LITTLE ? ((a << 24) | (b << 16) | (g << 8) | r) : ((r << 24) | (g << 16) | (b << 8) | a)) >>> 0;
 const QUEUED = 4096;
 
+// A live grid of a source: step(n), the inputs (paint, erase, wall, heat, push, burst, queued for the next step), at(x, y),
+// measure(), render(). With { record: true }, `strokes` keeps every input as a stroke to replay (replayStrokes) or pack
+// into a link (packStrokes), up to LIMITS.strokes (65,536) of them. `recordedUntil` is null while every stroke so far is
+// recorded; once one is left out it is that stroke's frame, and nothing more is recorded: a replay is exact for that many
+// frames (replayStrokes(fresh, strokes, recordedUntil)), so cut a replay link there. Without a recording it stays null.
 export function createLivePowder(source, options = {}) {
   known(options, ['record'], 'live');
   const T = readPowder(source), { width: W, height: H, M, seed, ambient, gravity: G, clings } = T, N = W * H, TUMBLE = T.tumble && T.anyFalls;
@@ -410,6 +436,20 @@ export function createLivePowder(source, options = {}) {
     edges[c] = ((x & 15) === 0 && x > 0 ? 1 : 0) | ((x & 15) === 15 && x < W - 1 ? 2 : 0) | ((y & 15) === 0 && y > 0 ? 4 : 0) | ((y & 15) === 15 && y < H - 1 ? 8 : 0);
   }
   const keep = c => { next[chunkOf[c]] = 1; };
+  // A resting liquid looks FAR along its row for a drop or for more of its kind, further than the chunks a change wakes.
+  // So a chunk where such a liquid had room beside it when last stepped is `watching`, and a change anywhere in a chunk
+  // (`ripple`: 1, and 2 when on its top row, whose changes the row above sees as drops) wakes the watching chunks within
+  // FAR of it on its chunk row (and the one above) for the next frame: a hole dug 30 pixels from a sleeping puddle drains it.
+  const SPAN = (FAR + 15) >> 4, ripple = new Uint8Array(CW * CH), watching = new Uint8Array(CW * CH);
+  const widen = () => {
+    for (let k = 0; k < ripple.length; k++) {
+      const bits = ripple[k];
+      if (!bits) continue;
+      ripple[k] = 0;
+      const j = (k / CW) | 0, i = k - j * CW, i0 = i > SPAN ? i - SPAN : 0, i1 = i + SPAN < CW ? i + SPAN : CW - 1;
+      for (let row = bits & 2 && j > 0 ? j - 1 : j; row <= j; row++) for (let n = row * CW + i0, end = row * CW + i1; n <= end; n++) if (watching[n]) next[n] = 1;
+    }
+  };
 
   // ---- Air ----
   // Velocities on the faces of a coarse grid (u across vertical faces, v across horizontal ones, in pixels a frame),
@@ -576,7 +616,7 @@ export function createLivePowder(source, options = {}) {
   };
   const touch = c => {
     const k = chunkOf[c], e = edges[c];
-    next[k] = 1;
+    next[k] = 1; ripple[k] |= e & 4 ? 2 : 1;
     if (!e) return;
     if (e & 1) next[k - 1] = 1;
     if (e & 2) next[k + 1] = 1;
@@ -676,9 +716,13 @@ export function createLivePowder(source, options = {}) {
   // A powder or liquid cell in the air: gravity, then this frame's whole pixels one cell at a time, more vertically or
   // sideways as its velocity leans, sliding off what it falls onto as a resting cell would, and landing where it can
   // go no lower. `first` says the cell below is already known to be free (it was just checked, with its draw).
+  // A cell that was moving keeps its chunk awake for a frame after it stops, even where it stopped without moving (on a
+  // pool's surface, or held back by a liquid's drag), so it can still sink, slide or drift as a resting cell does.
   let landU = 0, landV = 0;
   const fly = (c, x, y, m, s, first) => {
     let v = vy[c] + G, u = vx[c];
+    const moving = vy[c] !== 0 || u !== 0;
+    chancy = false;
     // Through moving air it is carried toward the air's speed (at its coarse cell's centre), the more the lighter it
     // is (`carry` for a cell of density 1): ash drifts, sand barely leans.
     if (F && F.carry && stirred) {
@@ -729,7 +773,7 @@ export function createLivePowder(source, options = {}) {
       }
     }
     vy[at] = v; vx[at] = u;
-    if (v || u) keep(at);
+    if (v || u || moving || chancy) keep(at);
   };
   // Where a falling cell lands, its velocity becomes landV and landU. Onto a cell still falling, it keeps that cell's
   // speed, so a falling mass falls together. A fast landing (SPLASH or more) throws a share of cells back up as spray
@@ -797,8 +841,10 @@ export function createLivePowder(source, options = {}) {
     script.forEach((entry, n) => { if (t >= entry.from && t <= entry.to && (t - entry.from) % entry.every === 0) { reseed(SALT.script, t, n); entry.run(); } });
     queue.forEach((input, n) => { reseed(SALT.input, t, n); input(); });
     queue = [];
+    widen();
     const was = awake;
     awake = next; next = was; next.fill(0);
+    for (let k = 0; k < awake.length; k++) if (awake[k]) watching[k] = 0;
     if (F) airStep();
     reseed(SALT.step, t);
     for (let y = H - 1; y >= 0; y--) {
@@ -846,14 +892,15 @@ export function createLivePowder(source, options = {}) {
             // In the air (moving, or with nothing under it): it flies.
             if (vy[c]) { fly(c, x, y, m, s, false); continue; }
             chancy = false;
+            // A viscous liquid falls freely but is slow to slide and spread: once it has somewhere to go, it waits this
+            // frame with the chance its viscosity gives. Rolled only then, so a pool with nowhere to go comes to rest.
+            const thick = s === LIQUID ? still[m] : 0;
             if (y < H - 1) {
               const d = c + W;
               if (sinks(m, d)) { fly(c, x, y, m, s, true); continue; }
-              // A viscous liquid falls freely but is slow to slide and spread.
-              if (s === LIQUID && still[m] && rand() < still[m]) { keep(c); continue; }
               const side = rand() >>> 31 ? 1 : -1;
-              if (x + side >= 0 && x + side < W && sinks(m, d + side)) { swap(c, d + side); continue; }
-              if (x - side >= 0 && x - side < W && sinks(m, d - side)) { swap(c, d - side); continue; }
+              const to = x + side >= 0 && x + side < W && sinks(m, d + side) ? d + side : x - side >= 0 && x - side < W && sinks(m, d - side) ? d - side : -1;
+              if (to >= 0) { if (thick && rand() < thick) keep(c); else swap(c, to); continue; }
             }
             if (chancy) keep(c);
             if (s === LIQUID) {
@@ -863,7 +910,7 @@ export function createLivePowder(source, options = {}) {
                 // frame, until it meets a wall or a drop.
                 const reach = u < 0 ? -u >> 8 : u >> 8, to = run(c, x, u < 0 ? -1 : 1, reach > spread[m] ? reach : spread[m], ahead, true);
                 if (to < 0) vx[c] = 0;
-                else { swap(c, to); const left = u - (u >> 2); vx[to] = left > -SUB && left < SUB ? 0 : left; }
+                else if (!thick || rand() >= thick) { swap(c, to); const left = u - (u >> 2); vx[to] = left > -SUB && left < SUB ? 0 : left; }
                 keep(c);
               } else if (spread[m]) {
                 // Downhill first: the nearer place within FAR either way where it could fall, approached at most its
@@ -885,7 +932,9 @@ export function createLivePowder(source, options = {}) {
                     if ((way > 0 ? rb : lb) === m || (lone && ahead && state[mat[c + W]] === LIQUID)) to = c + way * (dist < reach ? dist : reach);
                   }
                 }
-                if (to >= 0) swap(c, to);
+                // With room beside it, it watches its row FAR either way: a change there wakes its chunk (see ripple).
+                if (r >= 0 || l >= 0) watching[chunkOf[c]] = 1;
+                if (to >= 0) { if (thick && rand() < thick) keep(c); else swap(c, to); }
               }
             } else if (vx[c]) vx[c] = 0;
           } else if (s === GAS || s === FIRE) {
@@ -1098,8 +1147,15 @@ export function createLivePowder(source, options = {}) {
       }
       groups.push(list.sort((a, c) => a - c));
     }
-    // The largest part keeps the piece (its id and its body); the rest are new.
+    // The largest part keeps the piece (its id and its body); the rest are new, up to MOST_PIECES in all. Past that, a part
+    // lying wholly in the grid is let go as plain cells, which drop straight as one block as loose pieces past the cap
+    // do (and become a piece of their own once there is room); one with cells above the grid stays with the largest.
     groups.sort((a, c) => c.length - a.length || a[0] - c[0]);
+    const room = 1 + Math.max(0, MOST_PIECES - rigid.length);
+    for (const list of groups.splice(room)) {
+      if (list.every(k => p.gx[k] >= 0 && p.gy[k] >= 0 && p.gx[k] < W && p.gy[k] < H)) { for (const k of list) owner[p.gy[k] * W + p.gx[k]] = 0; loose = true; }
+      else groups[0] = groups[0].concat(list).sort((a, c) => a - c);
+    }
     // The pivot's place in the world now, and the picture before it was cut.
     const px = b.x - (b.c * p.mx - b.s * p.my), py = b.y - (b.s * p.mx + b.c * p.my), was = { ...p, hold: { ...p.hold } };
     groups.forEach((list, g) => {
@@ -1445,8 +1501,10 @@ export function createLivePowder(source, options = {}) {
         world.retraceCells(x0, y0, x1 - x0 + 1, y1 - y0 + 1, obstacle);
       } else world.retraceCells(0, 0, 0, 0, obstacle);
       world.advance(++worldFrame);
+      // The top is open, and bodies.js counts a body far past an edge as escaped and gone: a piece thrown high keeps its
+      // cells (above the grid, where they are not drawn) and comes back down. Only recut and letGo end a piece.
+      if (world.stats.escaped.length) { for (const p of rigid) if (p.n) p.body.gone = false; world.stats.escaped.length = 0; }
       for (const p of moving) {
-        if (p.body.gone) { letGo(p); continue; }
         carry(p);
         // A piece still moving keeps the chunks it lies in awake, so a grid isn't settled while a piece drifts.
         if (!p.body.asleep) {
@@ -1534,11 +1592,14 @@ export function createLivePowder(source, options = {}) {
 
   // ---- Inputs ----
   let queue = [];
+  // A recording keeps at most LIMITS.strokes strokes. The first one left out stops it for good, and its frame is
+  // `recordedUntil`: a replay of the recording is exact for that many frames, not after.
   const strokes = options.record ? [] : null;
+  let recordedUntil = null;
   const enqueue = (input, stroke) => {
     if (queue.length >= QUEUED) queue.shift();
     queue.push(input);
-    if (strokes && strokes.length < LIMITS.strokes) strokes.push({ f: t, ...stroke });
+    if (strokes && recordedUntil === null) { if (strokes.length < LIMITS.strokes) strokes.push({ f: t, ...stroke }); else recordedUntil = t; }
   };
   // The cells whose centres lie within `radius` of the segment from (x, y) to (x2, y2).
   const capsule = (x, y, x2, y2, radius, visit) => {
@@ -1654,6 +1715,7 @@ export function createLivePowder(source, options = {}) {
     // of them filled (a spray), `replace` paints over what is there.
     paint(input, path) {
       const at = spot(input, path, POWDER_INPUTS.paint);
+      if (input.material === 'empty') fail(`${path}.material`, '"empty" is not a material to paint; erase clears cells to empty air');
       const m = T.ref(input.material, `${path}.material`, false), fill = Math.round(number(input.fill ?? 1, `${path}.fill`, 0, 1) * 100) / 100, replace = !!input.replace;
       return [paintInput(m, at, fill, replace), { op: 0, m, ...at, fill, replace }];
     },
@@ -1703,8 +1765,17 @@ export function createLivePowder(source, options = {}) {
       if (!Array.isArray(entry.frames) || entry.frames.length !== 2) fail(`${path}.frames`, 'expected [first, last] frames');
       from = integer(entry.frames[0], `${path}.frames[0]`, 0, LIMITS.steps); to = integer(entry.frames[1], `${path}.frames[1]`, from, LIMITS.steps);
     }
-    const every = integer(entry.every ?? 1, `${path}.every`, 1, LIMITS.steps), [run] = make[actions[0]](entry[actions[0]], `${path}.${actions[0]}`);
-    return { from, to, every, run };
+    const action = actions[0], every = integer(entry.every ?? 1, `${path}.every`, 1, LIMITS.steps), [run, stroke] = make[action](entry[action], `${path}.${action}`);
+    // Its work each time it runs, in cell steps (see INPUT_WORK): the cells of the box round its stroke, and the air's faces.
+    const r = stroke.radius, x2 = stroke.x2 ?? stroke.x, y2 = stroke.y2 ?? stroke.y;
+    const i0 = Math.max(0, Math.floor(Math.min(stroke.x, x2) - r)), i1 = Math.min(W - 1, Math.ceil(Math.max(stroke.x, x2) + r));
+    const j0 = Math.max(0, Math.floor(Math.min(stroke.y, y2) - r)), j1 = Math.min(H - 1, Math.ceil(Math.max(stroke.y, y2) + r));
+    const area = i1 < i0 || j1 < j0 ? 0 : (i1 - i0 + 1) * (j1 - j0 + 1), faces = F ? (GW + 1) * GH + GW * (GH + 1) : 0, painted = action === 'paint' ? stroke.m : action === 'wall' ? T.wall : 0;
+    const patterned = painted && T.pattern[painted], cells = area.toLocaleString('en');
+    const cost = action === 'push' ? faces * INPUT_WORK.face : action === 'burst' ? area * INPUT_WORK.thrown + faces * INPUT_WORK.face : area * (patterned ? INPUT_WORK.patterned : INPUT_WORK.plain);
+    // What its work is over, for the compiler's message.
+    const over = action === 'push' ? `the moving air's ${faces.toLocaleString('en')} faces` : action === 'burst' ? `${cells} cells of what is loose${F ? ', and the moving air' : ''}` : `${cells} cells${patterned ? ` of ${T.pattern[painted] === 1 ? 'blotch' : 'grain'}` : ''}`;
+    return { from, to, every, run, path, cost, area, over, push: action === 'push', falls: !!falls[painted] };
   });
 
   const live = {
@@ -1714,6 +1785,7 @@ export function createLivePowder(source, options = {}) {
     backgroundKey: KEY_CHARS[0],
     backgroundColor: T.background[3] ? `#${T.background.slice(0, T.background[3] === 255 ? 3 : 4).map(v => v.toString(16).padStart(2, '0')).join('')}` : null,
     get frame() { return t; },
+    get recordedUntil() { return recordedUntil; },
     step(n = 1) {
       integer(n, 'step', 0, 100000);
       for (let k = 0; k < n; k++) advance();
@@ -1887,11 +1959,13 @@ export function createLivePowder(source, options = {}) {
       place(c, m, warm);
       if (op.burning && m && igniteAt[m] !== NEVER_ABOVE) light(c);
     };
+    const ints = (value, count, label) => { if (!Array.isArray(value) || value.length !== count || value.some(v => !Number.isInteger(v) || Math.abs(v) > 4096)) fail(`${path}.${label}`, `expected ${count} whole numbers`); return value; };
     if (shape === 'rows') {
       if (!Array.isArray(op.rows) || op.rows.some(row => typeof row !== 'string')) fail(`${path}.rows`, 'expected rows of characters');
       if (!isObject(op.legend)) fail(`${path}.legend`, 'expected { character: material }');
+      for (const key of Object.keys(op.legend)) if ([...key].length !== 1) fail(`${path}.legend.${key}`, 'legend keys are single characters, one per pixel of the rows');
       const legend = new Map(Object.entries(op.legend).map(([key, name]) => [key, T.ref(name, `${path}.legend.${key}`)]));
-      const [ax, ay] = Array.isArray(op.at) ? op.at : fail(`${path}.at`, 'expected [x, y]');
+      const [ax, ay] = ints(op.at, 2, 'at');
       op.rows.forEach((row, j) => [...row].forEach((ch, i) => {
         if (!legend.has(ch)) return;
         const x = ax + i, y = ay + j;
@@ -1901,7 +1975,6 @@ export function createLivePowder(source, options = {}) {
     }
     if (op.material === undefined) fail(`${path}.material`, 'expected a material name');
     const m = T.ref(op.material, `${path}.material`);
-    const ints = (value, count, label) => { if (!Array.isArray(value) || value.length !== count || value.some(v => !Number.isInteger(v) || Math.abs(v) > 4096)) fail(`${path}.${label}`, `expected ${count} whole numbers`); return value; };
     if (shape === 'rect') {
       const [x, y, w, h] = ints(op.rect, 4, 'rect');
       for (let j = Math.max(0, y); j < Math.min(H, y + h); j++) for (let i = Math.max(0, x); i < Math.min(W, x + w); i++) put(j * W + i, m);
@@ -1910,6 +1983,10 @@ export function createLivePowder(source, options = {}) {
       capsule(x, y, x, y, radius, c => put(c, m));
     }
   });
+  PLANS.set(live, {
+    script, tumble: TUMBLE,
+    falling: () => { let n = 0; for (let c = 0; c < N; c++) if (falls[mat[c]]) n++; for (const entry of script) if (entry.falls) n += entry.area; return n < N ? n / N : 1; }
+  });
   return live;
 }
 
@@ -1917,13 +1994,14 @@ export function createLivePowder(source, options = {}) {
 // Bakes a source into an ordinary recipe: the grid runs from its scene, playing its scripted inputs, and each clip
 // samples it every `every` steps from `start` (60 steps a second), drawn exactly as render() draws it. Pixels that never
 // change in any sampled frame are drawn once, as the symbol `still`, stamped under every frame; each frame draws the
-// rest as one palette grid per 16-row band, cropped to where anything changes.
+// rest as one palette grid per 16-row band, cropped to where anything changes. Returns { recipe, metadata, warnings? }:
+// warnings (only when there are any) name scripted inputs played after the last step a clip samples.
 export function compilePowder(source) {
   if (!isObject(source)) fail('powder', 'expected a pixelforge-powder source object');
   if (source.version !== 1) fail('powder.version', 'expected 1');
   const name = recipeName(source.name, 'powder.name');
   const live = createLivePowder(source), { width: W, height: H } = live;
-  if (W > CANVAS_SIDE || H > CANVAS_SIDE) fail(W > CANVAS_SIDE ? 'powder.width' : 'powder.height', `a compiled powder grid is an animation, at most ${CANVAS_SIDE} pixels a side; run a larger one live (createLivePowder) or as video frames (pixelbolt sequence)`);
+  if (W > CANVAS_SIDE || H > CANVAS_SIDE) fail(W > CANVAS_SIDE ? 'powder.width' : 'powder.height', `a compiled powder grid is an animation, at most ${CANVAS_SIDE} pixels a side; use a smaller grid, or run a larger one live in a page or game (createLivePowder)`);
   // Clips: each a one-shot animation.
   const given = source.clips ?? { [name]: {} };
   if (!isObject(given) || !Object.keys(given).length || Object.keys(given).length > LIMITS.clips) fail('powder.clips', `expected 1 to ${LIMITS.clips} named clips: { start, frames, every, duration }`);
@@ -1941,7 +2019,23 @@ export function compilePowder(source) {
   if (total > LIMITS.frames) fail('powder.clips', `${total} frames in all; a recipe holds at most ${LIMITS.frames}`);
   if (W * H * total > FRAME_AREA) fail('powder.clips', `${total} frames of ${W}×${H} are ${(W * H * total).toLocaleString('en')} pixels; a recipe holds at most 4,194,304 (fewer frames, or a smaller grid)`);
   if (steps > LIMITS.steps) fail('powder.clips', `the clips need ${steps} steps; at most ${LIMITS.steps}`);
-  if (W * H * steps > LIMITS.work) fail('powder.clips', `the clips need about ${Math.round(W * H * steps / 1e6)} million cell steps, more than ${LIMITS.work / 1e6} million; fewer steps or a smaller grid`);
+  // The work, in cell steps (see INPUT_WORK): the grid's, weighed for tumbling pieces, and each scripted input's on the
+  // steps it runs before the last one sampled (the step from `steps` on is never run).
+  const plan = PLANS.get(live), millions = n => (n < 1e7 ? (Math.round(n / 1e5) / 10).toString() : Math.round(n / 1e6).toLocaleString('en')), most = `${LIMITS.work / 1e6} million`;
+  const share = plan.tumble ? plan.falling() : 0, weight = plan.tumble ? TUMBLE_WORK + TUMBLE_SHARE * share : 1, grid = W * H * steps * weight;
+  if (grid > LIMITS.work) {
+    fail('powder.clips', plan.tumble
+      ? `the clips need ${millions(W * H * steps)} million cell steps, which with pieces "tumble" (solids that fall fill ${Math.round(share * 100)}% of the grid) weigh as about ${millions(grid)} million, more than ${most}; fewer steps, a smaller grid, fewer solids that fall, or pieces "drop"`
+      : `the clips need about ${millions(grid)} million cell steps, more than ${most}; fewer steps or a smaller grid`);
+  }
+  const runs = entry => (entry.from < steps ? Math.floor(((entry.to < steps - 1 ? entry.to : steps - 1) - entry.from) / entry.every) + 1 : 0);
+  const work = plan.script.map(entry => runs(entry) * entry.cost), inputs = work.reduce((sum, w) => sum + w, 0);
+  if (grid + inputs > LIMITS.work) {
+    const n = work.indexOf(Math.max(...work)), entry = plan.script[n];
+    fail(entry.path, `the scripted inputs need about ${millions(inputs)} million cell steps of work (this one ${millions(work[n])} million: ${runs(entry).toLocaleString('en')} times, over ${entry.over} each), and with the grid's ${millions(grid)} million that is more than ${most}; play it on fewer steps (frames, every)${entry.push ? ', or make the air coarser (air.flow.cell)' : ' or over fewer cells (radius, x2, y2)'}`);
+  }
+  // A scripted input played only after the last step a clip samples changes no frame.
+  const warnings = plan.script.filter(entry => entry.from >= steps).map(entry => `${entry.path} is played ${entry.from === entry.to ? 'on' : 'from'} step ${entry.from}, so it first shows on step ${entry.from + 1}, after the last step a clip samples (${steps}): no frame shows it; play it earlier, or sample later (a clip's start, frames and every)`);
 
   // Every sampled moment, in time order, then each clip's frames from them.
   const times = [...new Set(clips.flatMap(c => Array.from({ length: c.frames }, (_, k) => c.start + k * c.every)))].sort((a, b) => a - b);
@@ -1988,7 +2082,7 @@ export function compilePowder(source) {
   const background = live.backgroundColor;
   const recipe = { version: 1, name, width: W, height: H, ...(background && { background }), palette, ...(anyStill && { symbols: { still } }), frames, animations };
   renderProject(recipe);
-  return JSON.parse(JSON.stringify({ recipe, metadata: { format: 'pixelforge-powder-metadata', version: 1, steps, clips: summaries } }));
+  return JSON.parse(JSON.stringify({ recipe, metadata: { format: 'pixelforge-powder-metadata', version: 1, steps, clips: summaries }, ...(warnings.length && { warnings }) }));
 }
 
 // ---- Recorded strokes ---------------------------------------------------------------------------------------------
@@ -2129,4 +2223,4 @@ export const SANDBOX = {
     { a: 'lava', b: 'ice', into: ['stone', 'water'], chance: 0.2 }
   ]
 };
-export const sandboxSource = (width, height, scene = [], seed = 1) => ({ format: 'pixelforge-powder', width, height, seed, ...structuredClone(SANDBOX), scene });
+export const sandboxSource = (width, height, scene = [], seed = 1) => ({ format: 'pixelforge-powder', version: 1, name: 'sandbox', width, height, seed, ...structuredClone(SANDBOX), scene });

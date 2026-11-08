@@ -24,7 +24,7 @@ const SMALL = ['bouncing-pixel', 'coin', 'holy-spells', 'interference', 'smoke-p
 const smallPackage = async dir => {
   const pkg = path.join(dir, 'pkg'), entries = await presetEntries(), picked = entries.filter(entry => SMALL.includes(entry.name));
   for (const kind of new Set(entries.map(entry => entry.kind))) if (!picked.some(entry => entry.kind === kind)) picked.push(entries.find(entry => entry.kind === kind));
-  for (const part of ['src', 'package.json', 'studio/effects-controls.js', 'studio/fluid-controls.js']) await cp(path.join(root, part), path.join(pkg, part), { recursive: true });
+  for (const part of ['src', 'package.json', 'studio/effects-controls.js', 'studio/fluid-controls.js', 'studio/powder-controls.js']) await cp(path.join(root, part), path.join(pkg, part), { recursive: true });
   for (const entry of picked) for (const file of [`examples/${entry.file}`, ...(await loadPreset(entry)).inlined]) await cp(path.join(root, file), path.join(pkg, file));
   return { pkg, ...await import(pathToFileURL(path.join(pkg, 'src', 'presets.js')).href) };
 };

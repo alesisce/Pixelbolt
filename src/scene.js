@@ -225,10 +225,12 @@ export function prepareScene(source) {
       if (instance.attach !== undefined) fail(`${path}.parallax`, 'an attached placement moves with its target');
       parallax = Array.isArray(instance.parallax) && instance.parallax.length === 2 ? instance.parallax.map((v, axis) => num(v, 0, 4, `${path}.parallax[${axis}]`)) : [num(instance.parallax, 0, 4, `${path}.parallax`), instance.parallax];
     }
-    // How far into the haze a placement stands: 0 is none, 1 is the haze colour itself.
+    // How far into the haze a placement stands: 0 is none, 1 is the haze colour itself. Kept to six decimals, as the
+    // exports write it, so 0.3 and 0.1 + 0.2 are one amount: one hazed copy of a sheet, drawn alike.
+    let fade = {};
     if (instance.haze !== undefined) {
       if (!haze) fail(`${path}.haze`, 'set scene.haze first: the colour far planes fade toward');
-      num(instance.haze, 0, 1, `${path}.haze`);
+      fade = { haze: Number(num(instance.haze, 0, 1, `${path}.haze`).toFixed(6)) };
       if (instance.shade !== undefined) fail(`${path}.haze`, 'a shade placement draws no colours of its own to haze');
     }
     // A shadow is cast by the scene's lights, which are read after the placements.
@@ -244,7 +246,7 @@ export function prepareScene(source) {
       count += tilemap.cells.length; work += tilemap.cells.length * project.width * project.height * scale ** 2;
       if (count > MAX_DRAWS || work > MAX_WORK) fail(path, 'scene exceeds 4,096 draws or 4,194,304 drawing pixels');
       if (scale !== 1) warnings.push(`${instance.name ?? i}: ${scale}× pixels; compare density against neighboring 1× assets.`);
-      return { ...instance, at, anchor, scale, shade, tilemap, parallax };
+      return { ...instance, ...fade, at, anchor, scale, shade, tilemap, parallax };
     }
     const repeat = point(instance.repeat ?? [1, 1], `${path}.repeat`, 32);
     if (repeat.some(n => n < 1)) fail(`${path}.repeat`, 'repeat counts must be positive');
@@ -323,7 +325,7 @@ export function prepareScene(source) {
       if (anchor === 'frame' && project.frames.some(frame => !(frame.anchor?.[1] > 0))) warnings.push(`${label}: shadow, but its anchor is on its top row, so it casts nothing; anchor ${instance.asset}'s frames at their feet.`);
     }
     if (scale !== 1) warnings.push(`${instance.name ?? i}: ${scale}× pixels; compare density against neighboring 1× assets.`);
-    return { ...instance, at, anchor, scale, repeat, step, shade, attach, lift, parallax, ...(instance.sequence && { sequence }), ...(trajectory && { trajectory }) };
+    return { ...instance, ...fade, at, anchor, scale, repeat, step, shade, attach, lift, parallax, ...(instance.sequence && { sequence }), ...(trajectory && { trajectory }) };
   });
   let lighting = null;
   if (source.lighting !== undefined) {
@@ -442,6 +444,11 @@ export function sceneHaze(scene) {
 }
 // How much of the camera's movement a placement follows: its own parallax, or its target's when it is attached.
 export const parallaxOf = (scene, i) => scene.instances[scene.instances[i].attach?.index ?? i].parallax;
+// A plane's share of the camera (parallax × camera) in whole pixels: the nearest, a half rounded down, so a plane whose
+// share is 23.5 moves 23. Godot with Snap 2D Transforms to Pixel rounds a Parallax2D's place on screen to the nearest
+// pixel, a half up, which is its share rounded a half down, so with the camera on whole pixels it draws every plane
+// where Pixelbolt does (scripts/verify-godot.mjs). The + 0 keeps a share of nothing 0, not -0.
+const wholeShare = share => Math.ceil(share - 0.5) + 0;
 
 // The scene's planes, for engines that scroll images: renderScene's `draws` (lit: false) cut into runs of draws that
 // follow the camera alike, in drawing order, each run one image of what it draws at scene positions, hazed as the scene
@@ -499,7 +506,7 @@ export function renderScene(scene, { time = 0, lit = true, density = false, dept
   const shiftOf = i => {
     if (!camera) return [0, 0];
     const factor = i < 0 ? [1, 1] : parallaxOf(scene, i);
-    return [Math.round(camera[0] * factor[0]), Math.round(camera[1] * factor[1])];
+    return [wholeShare(camera[0] * factor[0]), wholeShare(camera[1] * factor[1])];
   };
   for (let at = 0; at < data.length; at += 4) data.set(background, at);
   const clipped = new Map();

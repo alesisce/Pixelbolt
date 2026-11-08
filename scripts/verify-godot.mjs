@@ -4,7 +4,8 @@
 // exported TileSets and paints maps with Godot's terrain painter, which must choose the tiles Pixelbolt would.
 // Independent developer check: Pixelbolt never needs Godot.
 //   node scripts/verify-godot.mjs [--godot <path to the Godot 4 executable>] [--keep] [--render]
-// --render also lights a sprite in a Godot window (Godot can't render headless), so run it where a window may open.
+// --render also lights a sprite and draws a parallax scene in Godot windows (Godot can't render headless), so run it
+// where a window may open.
 // Without --godot it uses $GODOT, then godot4 or godot on PATH, then a winget install of GodotEngine.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -702,10 +703,11 @@ func _process(_delta: float) -> bool:
 	return false
 `;
 
-// Runs in Godot with a window the scene's size (it renders): the scene at each camera position, saved as PNGs.
-const parallaxRender = cameras => `extends SceneTree
+// Runs in Godot with a window the scene's size (it renders): the scene at each step's camera position, with the
+// window's Snap 2D Transforms to Pixel on or off as the step says ([x, y, snap]), saved as PNGs.
+const parallaxRender = steps => `extends SceneTree
 
-const CAMERAS = ${JSON.stringify(cameras)}
+const STEPS = ${JSON.stringify(steps)}
 var camera: Camera2D
 var step := 0
 var wait := 0
@@ -716,12 +718,13 @@ func _initialize():
 	camera = scene.get_node("Camera2D")
 
 func _process(_delta: float) -> bool:
-	if step >= CAMERAS.size():
+	if step >= STEPS.size():
 		print("PIXELBOLT " + JSON.stringify({"size": [root.size.x, root.size.y]}))
 		quit()
 		return true
 	if wait == 0:
-		camera.position = Vector2(CAMERAS[step][0], CAMERAS[step][1])
+		root.snap_2d_transforms_to_pixel = STEPS[step][2]
+		camera.position = Vector2(STEPS[step][0], STEPS[step][1])
 	wait += 1
 	if wait < 5:
 		return false
@@ -737,10 +740,13 @@ func _process(_delta: float) -> bool:
 // at 1) and loads its scene.tscn in a real Godot 4: a Camera2D at the camera's start anchored at its top-left, the
 // background on a Parallax2D that stays on screen, and a Parallax2D per plane with the plane's parallax as its scroll
 // scale over a Sprite2D of the plane's image, imported pixel for pixel. Godot then places each plane as the camera
-// moves to the start, halfway and the end: it must be at its scene position less its parallax times the camera, where
-// Pixelbolt draws it, and the planes laid there must draw Pixelbolt's unlit view (exactly, but for a step of one where a
-// partly transparent pixel blends). Godot can't render headless; with render (a window opens) Godot draws the scene in
-// a window the scene's size at each position too, which must be that view.
+// moves to the start, halfway, the end and two places where the hills' share of it is a whole number and a half: it
+// must be at its scene position less its parallax times the camera. Snap 2D Transforms to Pixel rounds that place to
+// the nearest pixel, halves up, which is Pixelbolt's share rounded halves down, and the planes laid there must draw
+// Pixelbolt's unlit view (exactly, but for a step of one where a partly transparent pixel blends). Godot can't render
+// headless; with render (a window opens) Godot draws the scene in a window the scene's size at each position with
+// snapping on, and with it off where every share is whole (without it, a plane half a pixel off lands on texel edges,
+// which a GPU may round either way), and each must be that view.
 export async function verifyGodotParallax({ godot = findGodot(), keep = false, log = console.log, render = false } = {}) {
   if (!godot) throw new Error('Godot 4 was not found: pass --godot <path> or set GODOT');
   const version = godotRun(godot, ['--version']).output.trim().split('\n')[0];
@@ -754,7 +760,10 @@ export async function verifyGodotParallax({ godot = findGodot(), keep = false, l
       await writeFile(path.join(dir, 'parallax', file), bytes);
     }
     await writeFile(path.join(dir, 'parallaxcheck.gd'), parallaxCheck(PARALLAX_CAMERAS));
-    await writeFile(path.join(dir, 'parallaxrender.gd'), parallaxRender(PARALLAX_CAMERAS));
+    // Snapping on at every camera, as docs/game-integration.md advises, and off too where every plane's share is whole.
+    const whole = camera => alignment.planes.every(plane => plane.parallax.every((p, axis) => Number.isInteger(p * camera[axis])));
+    const steps = PARALLAX_CAMERAS.flatMap(camera => [[...camera, true], ...(whole(camera) ? [[...camera, false]] : [])]);
+    await writeFile(path.join(dir, 'parallaxrender.gd'), parallaxRender(steps));
     const imported = godotRun(godot, ['--path', dir, '--import']);
     const problems = imported.output.split('\n').filter(line => /ERROR|WARNING/.test(line) && /parallax\//.test(line));
     assert.deepEqual(problems, [], `Godot reported problems while importing:\n${imported.output}`);
@@ -790,7 +799,8 @@ export async function verifyGodotParallax({ godot = findGodot(), keep = false, l
       compare(camera, (x, y) => {
         const pixel = [r, g, b];
         images.forEach((image, k) => {
-          const ix = x - Math.round(at[k + 1][1]), iy = y - Math.round(at[k + 1][2]);
+          // Where snapping draws it: its place rounded as renderer_canvas_cull.cpp rounds it, floor(v + 0.5).
+          const ix = x - Math.floor(at[k + 1][1] + 0.5), iy = y - Math.floor(at[k + 1][2] + 0.5);
           if (ix < 0 || iy < 0 || ix >= image.width || iy >= image.height) return;
           const p = (iy * image.width + ix) * 4, alpha = image.data[p + 3] / 255;
           for (let c = 0; c < 3; c++) pixel[c] = image.data[p + c] * alpha + pixel[c] * (1 - alpha);
@@ -801,13 +811,13 @@ export async function verifyGodotParallax({ godot = findGodot(), keep = false, l
     if (render) {
       const shown = godotReport(godotRun(godot, ['--path', dir, '--rendering-method', 'gl_compatibility', '--audio-driver', 'Dummy', '--resolution', `${scene.width}x${scene.height}`, '--script', 'res://parallaxrender.gd'], { headless: false }));
       assert.deepEqual(shown.size, [scene.width, scene.height], 'the window is the scene\'s size');
-      for (const [step, camera] of PARALLAX_CAMERAS.entries()) {
+      for (const [step, [cx, cy, snap]] of steps.entries()) {
         const image = decodePNG(await readFile(path.join(dir, `render-${step}.png`)));
-        compare(camera, (x, y) => [...image.data.subarray((y * image.width + x) * 4, (y * image.width + x) * 4 + 3)], 'Godot\'s render');
+        compare([cx, cy], (x, y) => [...image.data.subarray((y * image.width + x) * 4, (y * image.width + x) * 4 + 3)], `Godot's render${snap ? '' : ' without snapping'}`);
       }
-      drawn = ' Godot drew the scene in a window at each position as Pixelbolt does.';
+      drawn = ` Godot drew the scene in a window as Pixelbolt does at each position with Snap 2D Transforms to Pixel on, and with it off at ${steps.filter(step => !step[2]).map(step => `[${step.slice(0, 2)}]`).join(', ')}, where every share is whole.`;
     }
-    log(`${version}: scene.tscn holds a top-left Camera2D at the camera's start, the background and ${planes.length} Parallax2D planes (scroll scale ${planes.map(plane => plane.parallax[0]).join(', ')}) whose images Godot imported pixel for pixel; with the camera at ${PARALLAX_CAMERAS.map(c => `[${c}]`).join(', ')}, Godot put every plane where Pixelbolt draws it, and the planes there draw the unlit scene exactly in ${exact} pixels and within one step in ${near}, where partly transparent pixels blend.${drawn}`);
+    log(`${version}: scene.tscn holds a top-left Camera2D at the camera's start, the background and ${planes.length} Parallax2D planes (scroll scale ${planes.map(plane => plane.parallax[0]).join(', ')}) whose images Godot imported pixel for pixel; with the camera at ${PARALLAX_CAMERAS.map(c => `[${c}]`).join(', ')}, Godot put every plane where Pixelbolt draws it, rounded as snapping rounds it, and the planes there draw the unlit scene exactly in ${exact} pixels and within one step in ${near}, where partly transparent pixels blend.${drawn}`);
     return { version, report, dir: keep ? dir : null };
   } finally {
     if (!keep) await rm(dir, { recursive: true, force: true });

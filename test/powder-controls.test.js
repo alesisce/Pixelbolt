@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createLivePowder, compilePowder, packStrokes, unpackStrokes, replayStrokes, applyStroke } from '../src/powder.js';
+import { createLivePowder, compilePowder, packStrokes, unpackStrokes, replayStrokes, applyStroke, sandboxSource } from '../src/powder.js';
 import {
-  POWDER_SCENES, POWDER_PRESETS, SANDBOX_SOURCE, POWDER_TOOLS, TOOL_IDS, brushInput, heldTool, callText, inputText, powderCommands,
-  pixelDigest, replayLink, fitReplayLink, readReplayLink, toBase64url, PowderLinkError, LINK_LIMIT
+  POWDER_SCENES, POWDER_PRESETS, SANDBOX_SOURCE, POWDER_TOOLS, TOOL_IDS, brushInput, heldTool, callText, inputText, clipSteps, powderCommands,
+  pixelDigest, replayLink, fitReplayLink, checkReplay, readReplayLink, recordedText, replayLeft, toBase64url, PowderLinkError, LINK_LIMIT, REPLAY_FRAMES
 } from '../studio/powder-controls.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -116,7 +116,7 @@ test('a recording too long for a link is cut at a stroke, and replays up to it',
     from = at; live.step();
   }
   const made = await fitReplayLink(BASE, { scene: 'sandbox', strokes, frames: live.frame, digest: 'deadbeef' }, packStrokes, limit);
-  assert.equal(made.cut, true); assert.ok(made.link.length <= limit, `${made.link.length} characters`);
+  assert.equal(made.cut, 'length'); assert.ok(made.link.length <= limit, `${made.link.length} characters`);
   assert.ok(made.kept > 0 && made.kept < strokes.length); assert.equal(made.frames, strokes[made.kept].f);
   // One more stroke would not have fitted.
   assert.ok((await replayLink(BASE, { scene: 'sandbox', packed: packStrokes(strokes.slice(0, made.kept + 1), strokes[made.kept + 1]?.f ?? live.frame) })).length > limit);
@@ -143,4 +143,61 @@ test('links that name only a scene, or are damaged, are read or refused with a m
   await refused('#s=sandbox&i=AAAA&h=xyz', /pixel digest/);
   await assert.rejects(replayLink(BASE, { scene: 'volcano', packed: new Uint8Array(1) }), /no scene called volcano/);
   assert.equal(pixelDigest(new Uint8Array(0)), '811c9dc5');
+});
+
+test('a full recording makes a link that stops where the first stroke was left out, without the digest', async () => {
+  // The live grid records at most 65,536 strokes, and its `recordedUntil` is the frame of the first one it left out,
+  // which the page passes on. Here the session's strokes stand in for a recording that filled up partway: at a stroke
+  // mid-session, and at the stroke still waiting for the next step.
+  const live = session(), all = live.strokes, digest = pixelDigest(live.render().rgba);
+  for (const left of [all.findIndex(s => s.f === 60), all.length - 1]) {
+    const recordedUntil = all[left].f, strokes = all.slice(0, left);
+    const made = await fitReplayLink(BASE, { scene: 'sandbox', strokes, frames: live.frame, digest, recordedUntil }, packStrokes);
+    assert.deepEqual([made.cut, made.frames, made.kept], ['full', recordedUntil, strokes.length]);
+    const read = await readReplayLink(made.link);
+    assert.equal(read.digest, null, 'the end\'s digest would make the replay blame another version');
+    // The replay is the session up to that frame, with the strokes recorded on it waiting for the next step.
+    const original = createLivePowder(SANDBOX_SOURCE, { record: true });
+    replayStrokes(original, strokes, recordedUntil);
+    for (const stroke of strokes.filter(s => s.f === recordedUntil)) applyStroke(original, stroke);
+    const again = replayed(read.packed);
+    assert.equal(again.frame, recordedUntil);
+    original.step(); again.step();
+    assert.equal(pixelDigest(again.render().rgba), pixelDigest(original.render().rgba));
+  }
+  // While every stroke is recorded (null, or an engine without the field), nothing is cut.
+  assert.equal((await fitReplayLink(BASE, { scene: 'sandbox', strokes: all, frames: live.frame, digest, recordedUntil: null }, packStrokes)).cut, false);
+  assert.deepEqual([recordedText(1), recordedText(2048, null), recordedText(65536, 1234)], ['1 stroke recorded', '2,048 strokes recorded', 'Recording full: 65,536 strokes, up to frame 1,234']);
+});
+
+test('a link replays at most two hours: the lab cuts a longer session, and refuses a longer link before a step', async () => {
+  const strokes = [{ f: 10, op: 1, x: 5.5, y: 5.5, radius: 2 }, { f: REPLAY_FRAMES + 5, op: 1, x: 6.5, y: 5.5, radius: 2 }];
+  const made = await fitReplayLink(BASE, { scene: 'sandbox', strokes, frames: REPLAY_FRAMES + 60, digest: 'deadbeef' }, packStrokes);
+  assert.deepEqual([made.cut, made.frames, made.kept], ['long', REPLAY_FRAMES, 1]);
+  const read = await readReplayLink(made.link);
+  assert.equal(read.digest, null);
+  assert.equal(checkReplay(unpackStrokes(read.packed)).frames, REPLAY_FRAMES);
+  // A one-hour session (216,000 frames at 60 a second) opens; the reviewer's 67-character link asking for 5,184,000
+  // frames, or a stroke after the last frame, is refused.
+  assert.equal(REPLAY_FRAMES >= 216000, true);
+  assert.equal(checkReplay(unpackStrokes(packStrokes([], 216000))).frames, 216000);
+  assert.throws(() => checkReplay(unpackStrokes(packStrokes([], 216000 * 24))), error => error instanceof PowderLinkError && /asks for 5,184,000 frames; the lab replays at most 432,000/.test(error.message));
+  assert.throws(() => checkReplay({ frames: 5, strokes: [{ f: 6 }] }), error => error instanceof PowderLinkError && /a stroke comes after its last frame/.test(error.message));
+  // The replay's estimate: none in its first second, then from how fast it has gone.
+  assert.deepEqual([replayLeft(100, 100, 500), replayLeft(0, 100, 5000), replayLeft(1000, 3000, 2000), replayLeft(1000, 200000, 2000), replayLeft(10, 432000, 2000)],
+    [null, null, 'about 6 s left', 'about 7 min left', 'about 24 h left']);
+});
+
+test('the stroke shown as a scripted input is in the bake when pasted, as is any frame before the last clipped step', () => {
+  // clipSteps is the compiler's own count (metadata.steps), for the default clip and for clips of a source's own.
+  const tiny = { ...sandboxSource(16, 16), version: 1, name: 'tiny', clips: { a: { start: 5, frames: 3, every: 4 }, b: { frames: 10 } } };
+  assert.equal(clipSteps(tiny), compilePowder(tiny).metadata.steps);
+  const none = compilePowder(SANDBOX_SOURCE), steps = clipSteps(SANDBOX_SOURCE), still = JSON.stringify(none.recipe.frames);
+  assert.equal(steps, none.metadata.steps);
+  // The page shows the input on frame 0 (the bake note gives the bound); the live frame it was made on is often past it.
+  const [action, input] = brushInput('sand', { x: 120.5, y: 20.5 }, { x: 118.5, y: 20.5 }, { radius: 4, spray: 0.35, solid: false });
+  const baked = frame => JSON.stringify(compilePowder({ ...SANDBOX_SOURCE, inputs: [JSON.parse(inputText(frame, action, input))] }).recipe.frames);
+  assert.notEqual(baked(0), still, 'the input shown is not in the clip');
+  assert.notEqual(baked(steps - 1), still, `an input on frame ${steps - 1} is not in the clip`);
+  assert.equal(baked(steps), still, `an input on frame ${steps} lands after the clip's last frame`);
 });

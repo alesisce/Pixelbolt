@@ -37,7 +37,7 @@ export async function assembleMcpb({ base = root } = {}) {
     'package.json', 'bin/pixelbolt.js', 'bin/pixelforge.js', 'LICENSE', 'README.md', 'schema.json',
     'docs/agent-quick-start.md', 'docs/agent-guide.md', 'docs/art-workflow.md',
     ...(await readdir(path.join(base, 'examples'), { withFileTypes: true })).filter(entry => entry.isFile() && entry.name.endsWith('.json')).map(entry => `examples/${entry.name}`),
-    'studio/scene.html', 'studio/scene-player.js', 'studio/scene.css', 'studio/effects-controls.js', 'studio/fluid-controls.js',
+    'studio/scene.html', 'studio/scene-player.js', 'studio/scene.css', 'studio/effects-controls.js', 'studio/fluid-controls.js', 'studio/powder-controls.js',
     ...(await readdir(base)).filter(file => file.endsWith('.schema.json')),
     ...(await readdir(path.join(base, 'src'))).filter(file => file.endsWith('.js') && file !== 'server.js').map(file => `src/${file}`)
   ];

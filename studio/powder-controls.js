@@ -70,10 +70,18 @@ export function brushInput(tool, at, from, { radius, spray, solid }) {
 // Held down, every tool but the blast works on every step; the blast goes off once a click.
 export const heldTool = tool => tool !== 'blast';
 
-// A stroke as the live call that makes it, and as a scripted input for a source (`inputs`).
+// A stroke as the live call that makes it, and as a scripted input for a source (`inputs`). The page shows the input on
+// frame 0 of a fresh run (its live frame means nothing to a fresh run, and a later one may fall past the clip).
 const plain = value => (typeof value === 'string' ? `'${value}'` : String(value));
 export const callText = (action, input) => `live.${action}({ ${Object.entries(input).map(([key, value]) => `${key}: ${plain(value)}`).join(', ')} })`;
 export const inputText = (frame, action, input) => `{ "frame": ${frame}, "${action}": { ${Object.entries(input).map(([key, value]) => `"${key}": ${JSON.stringify(value)}`).join(', ')} } }`;
+// The step a source's last clip frame is sampled at, as compilePowder counts it (its metadata's `steps`), with the
+// compiler's default clip (60 frames, every 2nd step from 0) when the source has none. A scripted input shows in the bake
+// only on an earlier frame: one on this frame or later lands after the last frame is drawn.
+export function clipSteps(source) {
+  const clips = Object.values(source.clips ?? { clip: {} });
+  return Math.max(...clips.map(({ start = 0, frames = 60, every = 2 }) => start + (frames - 1) * every));
+}
 
 // What the downloads match from the command line and through MCP. A preset compiles by name; the sandbox from its file.
 export function powderCommands(scene, scale) {
@@ -145,18 +153,46 @@ export async function replayLink(base, { scene, packed, digest = null }) {
   if (digest) params.push(`h=${digest}`);
   return `${base}#${params.join('&')}`;
 }
-// The longest recording that still fits `limit`: every stroke, or the strokes before the first one left out, replayed
-// up to that stroke's frame (the digest then no longer describes the end, so it is dropped). `pack` is packStrokes.
-export async function fitReplayLink(base, { scene, strokes, frames, digest = null }, pack, limit = LINK_LIMIT) {
-  const link = await replayLink(base, { scene, packed: pack(strokes, frames), digest });
-  if (link.length <= limit || !strokes.length) return { link, frames, kept: strokes.length, cut: false };
-  const cutAt = async count => replayLink(base, { scene, packed: pack(strokes.slice(0, count), strokes[count].f) });
-  let low = 0, high = strokes.length - 1;
+// The most frames a link replays: two hours at 60 steps a second. A link asking for more is refused, and the lab makes
+// none longer. The replay steps as fast as the browser can, which for a busy scene is a few minutes an hour.
+export const REPLAY_FRAMES = 432000;
+// The longest recording that still fits `limit`, as { link, frames, kept, cut }. It stops early (`cut`) at the first
+// of: the frame of the first stroke the recording left out (`recordedUntil`, the live grid's; 'full'), the most frames
+// a link replays ('long'), or a stroke, when every stroke is too long a link ('length'). It then replays up to that
+// frame, strokes made on it left waiting, and the digest, which describes the end, is dropped. `pack` is packStrokes.
+export async function fitReplayLink(base, { scene, strokes, frames, digest = null, recordedUntil = null }, pack, limit = LINK_LIMIT) {
+  let end = frames, cut = false;
+  if (recordedUntil !== null) { end = Math.min(end, recordedUntil); cut = 'full'; }
+  if (end > REPLAY_FRAMES) { end = REPLAY_FRAMES; cut = 'long'; }
+  const kept = cut ? strokes.filter(s => s.f <= end) : strokes;
+  const link = await replayLink(base, { scene, packed: pack(kept, end), digest: cut ? null : digest });
+  if (link.length <= limit || !kept.length) return { link, frames: end, kept: kept.length, cut };
+  const cutAt = async count => replayLink(base, { scene, packed: pack(kept.slice(0, count), kept[count].f) });
+  let low = 0, high = kept.length - 1;
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
     if ((await cutAt(middle)).length <= limit) low = middle; else high = middle - 1;
   }
-  return { link: await cutAt(low), frames: strokes[low].f, kept: low, cut: true };
+  return { link: await cutAt(low), frames: kept[low].f, kept: low, cut: 'length' };
+}
+// A link's unpacked strokes ({ frames, strokes }, from unpackStrokes), refused before any step when the replay could
+// not end where the link says or would run longer than a link may.
+export function checkReplay(unpacked) {
+  const { frames, strokes } = unpacked;
+  if (frames > REPLAY_FRAMES) fail(`This link asks for ${frames.toLocaleString('en')} frames; the lab replays at most ${REPLAY_FRAMES.toLocaleString('en')} (two hours at 60 a second).`);
+  if (strokes.length && strokes.at(-1).f > frames) fail('This link is damaged: a stroke comes after its last frame.');
+  return unpacked;
+}
+// The share heading's count. `recordedUntil` is the live grid's: null while every stroke is recorded, else the frame
+// of the first stroke the recording left out, where a link made now stops.
+export const recordedText = (count, recordedUntil = null) => (recordedUntil === null
+  ? `${count.toLocaleString('en')} ${count === 1 ? 'stroke' : 'strokes'} recorded`
+  : `Recording full: ${count.toLocaleString('en')} strokes, up to frame ${recordedUntil.toLocaleString('en')}`);
+// Roughly how long the rest of a replay takes, from how fast it has gone so far; null until it has run for a second.
+export function replayLeft(done, left, ms) {
+  if (ms < 1000 || done <= 0) return null;
+  const seconds = Math.ceil(left * ms / done / 1000);
+  return seconds < 90 ? `about ${seconds} s left` : seconds < 5400 ? `about ${Math.round(seconds / 60)} min left` : `about ${Math.round(seconds / 360) / 10} h left`;
 }
 // Reads a link or its fragment: { scene, packed (bytes for unpackStrokes, or null), digest }, or null when it names a
 // scene only (#hut-fire) or nothing.

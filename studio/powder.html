@@ -30,6 +30,7 @@
       <div class="fluid-playback">
         <button id="play" class="play-button" aria-label="Pause simulation">Ⅱ</button>
         <button id="step" class="button quiet powder-small" aria-label="Step one frame">Step</button>
+        <button id="stop-replay" class="button quiet powder-small" hidden>Stop replay</button>
         <span id="frame" class="timing">Frame 0</span>
         <label>Display <select id="scale"><option value="fit" selected>Fit</option><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select></label>
         <button id="restart" class="text-button">Restart</button>
@@ -49,7 +50,7 @@
         <label><span>Brush size</span><output id="radius-out" for="radius">4</output><input id="radius" type="range" min="1" max="16" step="1" value="4"></label>
         <label><span>Spray (powders, liquids and gases)</span><output id="spray-out" for="spray">35%</output><input id="spray" type="range" min="5" max="100" step="5" value="35"></label>
       </div>
-      <p class="frames-call-label">Your last stroke, as a live call (<code>createLivePowder</code>) and as a scripted input in a source:</p>
+      <p class="frames-call-label">Your last stroke, as a live call (<code>createLivePowder</code>) and as a scripted input for a source's <code>inputs</code>, on frame 0 of a fresh run:</p>
       <pre id="stroke">Paint on the grid to see it here.</pre>
 
       <div class="section-heading powder-section"><h2>Share</h2><span id="recorded"></span></div>

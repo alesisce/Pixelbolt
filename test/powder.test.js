@@ -34,6 +34,8 @@ test('recorded strokes replay exactly through the packed form', () => {
     if (f === 40) live.heat({ x: 45, y: 40, radius: 3, amount: 700 });
     if (f === 60) live.erase({ x: 20.5, y: 32, radius: 3 });
     if (f === 70) live.paint({ material: 'lava', x: 50, y: 5, radius: 3, replace: true });
+    if (f === 75) live.push({ x: 30, y: 20, x2: 40, y2: 18, radius: 6, vx: 1.5, vy: -0.75 });
+    if (f === 80) live.burst({ x: 15, y: 40, radius: 5, strength: 2.5 });
     live.step();
   }
   const bytes = packStrokes(live.strokes, live.frame), { frames, strokes } = unpackStrokes(bytes);
@@ -113,6 +115,10 @@ test('mistakes in the table are named by path', () => {
   bad(s => { s.materials.smoke.haze = '#000000'; }, /smoke\.haze: a gas drawn by density makes its own haze/);
   bad(s => { s.materials.stone.streak = '#ffffff'; }, /stone\.streak: a streak trails falling powders and liquids/);
   bad(s => { s.gravity = 2; }, /powder\.gravity: expected a number from 0\.02 to 1/);
+  bad(s => { s.air.flow.cell = 1; }, /powder\.air\.flow\.cell: expected a whole number from 2 to 16/);
+  bad(s => { s.air.flow.wind = [3, 0]; }, /powder\.air\.flow\.wind\[0\]: expected a number from -2 to 2/);
+  bad(s => { s.air.flow.gusts = 1; }, /powder\.air\.flow\.gusts: unknown field/);
+  assert.throws(() => createLivePowder({ ...sandboxSource(16, 16), air: {} }).push({ x: 4, y: 4, vx: 1 }), /push: the source has no moving air; set air\.flow/);
   bad(s => { s.reactions.push({ a: 'lava', b: 'water' }); }, /lava and water already react/);
   bad(s => { s.materials.sand.colors = ['#ff000080']; }, /sand\.colors\[0\]: materials are drawn opaque/);
 });
@@ -230,4 +236,42 @@ test('settled regions: a quiet scene stops costing steps, a poke wakes what it r
   slab.step(400);
   assert.equal(total(), start);
   assert.ok(slab.at(34, 8).temperature > 20 && slab.at(30, 30).temperature > 20, 'two chunks away warmed');
+});
+
+test('moving air: heat lifts it, the wind carries smoke and ash, a push stirs it and gases leave through the open top', () => {
+  const windy = wind => { const source = sandboxSource(96, 64, [{ material: 'stone', rect: [0, 60, 96, 4] }, { material: 'smoke', rect: [20, 30, 8, 8] }]); source.air.flow.wind = wind; return createLivePowder(source); };
+  const meanX = live => { const xs = cellsOf(live, 'smoke').map(c => c % 96); return xs.reduce((a, b) => a + b, 0) / xs.length; };
+  const calm = windy([0, 0]), breezy = windy([1, 0]);
+  calm.step(40); breezy.step(40);
+  assert.ok(meanX(breezy) > meanX(calm) + 12, `the wind carried the smoke (${meanX(calm).toFixed(1)} still, ${meanX(breezy).toFixed(1)} in the wind)`);
+  // A fire under open air makes an updraft above it, and none inside the stone floor.
+  const fire = createLivePowder(sandboxSource(64, 64, [{ material: 'stone', rect: [0, 56, 64, 8] }, { material: 'wood', rect: [24, 48, 16, 8], burning: true }]));
+  fire.step(60);
+  assert.ok(fire.at(32, 36).air[1] < -0.2, `air above the fire rises (${fire.at(32, 36).air[1].toFixed(2)} pixels a frame)`);
+  assert.deepEqual(fire.at(10, 61).air, [0, 0], 'no air moves inside the floor');
+  // A push sweeps smoke along.
+  const pushed = windy([0, 0]), before = meanX(pushed);
+  for (let f = 0; f < 10; f++) pushed.push({ x: 24, y: 34, radius: 10, vx: 2, vy: 0 }).step();
+  assert.ok(meanX(pushed) > before + 6, 'the push moved the smoke');
+  // Smoke that reaches the open top leaves.
+  const rising = createLivePowder(sandboxSource(32, 24, [{ material: 'smoke', rect: [8, 2, 16, 4] }]));
+  rising.step(60);
+  assert.ok((rising.measure().counts.smoke ?? 0) < 20, 'the smoke rose out of the top');
+});
+
+test('a burst blows loose powders and liquids outward and leaves solids where they are', () => {
+  const live = createLivePowder(sandboxSource(96, 64, [{ material: 'stone', rect: [0, 56, 96, 8] }, { material: 'sand', rect: [36, 44, 24, 12] }, { material: 'stone', rect: [46, 40, 4, 4] }]));
+  const sand = () => cellsOf(live, 'sand').map(c => c % 96);
+  const before = sand(), spread = xs => Math.max(...xs) - Math.min(...xs);
+  live.burst({ x: 48, y: 52, radius: 10, strength: 4 }).step(40);
+  assert.ok(spread(sand()) > spread(before) + 16, `the heap was thrown wider (${spread(before)} to ${spread(sand())} pixels)`);
+  assert.equal(live.at(47, 41).material, 'stone');
+});
+
+test('air sealed in a pocket of stone stays still and finite', () => {
+  const live = createLivePowder(sandboxSource(48, 48, [{ material: 'stone', rect: [0, 0, 48, 48] }, { material: 'smoke', rect: [20, 20, 4, 4] }, { material: 'fire', rect: [24, 20, 2, 2] }]));
+  live.step(30);
+  for (const value of live.at(22, 22).air ?? [0, 0]) assert.ok(Number.isFinite(value));
+  live.erase({ x: 22, y: 22, radius: 10 }).step(30);
+  for (const value of live.at(22, 22).air) assert.ok(Number.isFinite(value));
 });

@@ -122,8 +122,25 @@ function readPowder(source) {
     colours, keyOf
   };
   const air = source.air ?? {};
-  if (!isObject(air)) fail('powder.air', 'expected { conduct, cool }');
-  known(air, ['conduct', 'cool'], 'powder.air');
+  if (!isObject(air)) fail('powder.air', 'expected { conduct, cool, flow }');
+  known(air, ['conduct', 'cool', 'flow'], 'powder.air');
+  // Moving air: a coarse velocity field (one cell per `cell` × `cell` pixels) that carries gases and flames, leans
+  // them in the wind, lifts them over heat and curls them (`swirl`), and pushes what falls through it.
+  if (air.flow !== undefined && air.flow !== false) {
+    const flow = air.flow === true ? {} : air.flow, label = 'powder.air.flow';
+    if (!isObject(flow)) fail(label, 'expected true or { cell, wind, rise, swirl, calm, carry }');
+    known(flow, ['cell', 'wind', 'rise', 'swirl', 'calm', 'carry'], label);
+    const wind = flow.wind ?? [0, 0];
+    if (!Array.isArray(wind) || wind.length !== 2) fail(`${label}.wind`, 'expected [x, y] in pixels a frame');
+    t.flow = {
+      cell: integer(flow.cell ?? 4, `${label}.cell`, 2, 16),
+      wind: wind.map((value, k) => number(value, `${label}.wind[${k}]`, -2, 2)),
+      rise: number(flow.rise ?? 0.25, `${label}.rise`, 0, 4),
+      swirl: number(flow.swirl ?? 0.3, `${label}.swirl`, 0, 2),
+      calm: number(flow.calm ?? 0.02, `${label}.calm`, 0, 1),
+      carry: number(flow.carry ?? 0.3, `${label}.carry`, 0, 1)
+    };
+  } else t.flow = null;
   t.state[0] = EMPTY; t.density[0] = AIR;
   t.conduct[0] = Math.round(number(air.conduct ?? 0.01, 'powder.air.conduct', 0, 1) * MOST_CONDUCT);
   t.cool[0] = Math.round(number(air.cool ?? 0.03, 'powder.air.cool', 0, 1) * SCALE);
@@ -339,6 +356,170 @@ export function createLivePowder(source, options = {}) {
     edges[c] = ((x & 15) === 0 && x > 0 ? 1 : 0) | ((x & 15) === 15 && x < W - 1 ? 2 : 0) | ((y & 15) === 0 && y > 0 ? 4 : 0) | ((y & 15) === 15 && y < H - 1 ? 8 : 0);
   }
   const keep = c => { next[chunkOf[c]] = 1; };
+
+  // ---- Air ----
+  // Velocities on the faces of a coarse grid (u across vertical faces, v across horizontal ones, in pixels a frame),
+  // stepped as stable fluids: heat lifts it, swirl curls it, it settles toward the wind at `calm` a frame, it is
+  // carried along itself and made divergence-free with a fixed number of over-relaxed red-black Gauss-Seidel sweeps
+  // (warm-started from the last frame's pressure). A coarse cell
+  // more than half full of solids, powders or liquids is a wall; the grid's bottom edge is a wall and the others are
+  // open, so wind blows through and gases that ride out are gone. Plain arithmetic and sqrt only, in a fixed order, so
+  // it is the same in every engine.
+  const F = T.flow, S = F ? F.cell : 1, GW = F ? Math.ceil(W / S) : 0, GH = F ? Math.ceil(H / S) : 0, G2 = GW * GH;
+  const u = new Float64Array(F ? (GW + 1) * GH : 0), v = new Float64Array(F ? GW * (GH + 1) : 0), u2 = new Float64Array(u.length), v2 = new Float64Array(v.length);
+  const q = new Float64Array(G2), div = new Float64Array(G2), wall = new Uint8Array(G2), warm = new Float64Array(G2), curl = new Float64Array(G2);
+  // Each cell's coarse cell, and the air at the centre of each coarse cell (in 256ths of a pixel a frame), for what
+  // falls through it.
+  const coarseOf = new Int32Array(F ? N : 0), centreU = new Float64Array(G2), centreV = new Float64Array(G2);
+  for (let c = 0; c < coarseOf.length; c++) { const x = c % W; coarseOf[c] = Math.floor((c - x) / W / S) * GW + Math.floor(x / S); }
+  const [windU, windV] = F ? F.wind : [0, 0], SWEEPS = 14, RELAX = 1.6, FASTEST = 4;
+  // The air starts out blowing with the wind.
+  u.fill(windU); v.fill(windV);
+  let stirred = !!F;
+  const sampleU = (px, py) => {
+    let gx = px / S, gy = py / S - 0.5;
+    gx = gx < 0 ? 0 : gx > GW ? GW : gx; gy = gy < 0 ? 0 : gy > GH - 1 ? GH - 1 : gy;
+    const i = Math.floor(gx), j = Math.floor(gy), i1 = i < GW ? i + 1 : GW, j1 = j < GH - 1 ? j + 1 : GH - 1, a = gx - i, b = gy - j, r0 = j * (GW + 1), r1 = j1 * (GW + 1);
+    return (u[r0 + i] * (1 - a) + u[r0 + i1] * a) * (1 - b) + (u[r1 + i] * (1 - a) + u[r1 + i1] * a) * b;
+  };
+  const sampleV = (px, py) => {
+    let gx = px / S - 0.5, gy = py / S;
+    gx = gx < 0 ? 0 : gx > GW - 1 ? GW - 1 : gx; gy = gy < 0 ? 0 : gy > GH ? GH : gy;
+    const i = Math.floor(gx), j = Math.floor(gy), i1 = i < GW - 1 ? i + 1 : GW - 1, j1 = j < GH ? j + 1 : GH, a = gx - i, b = gy - j;
+    return (v[j * GW + i] * (1 - a) + v[j * GW + i1] * a) * (1 - b) + (v[j1 * GW + i] * (1 - a) + v[j1 * GW + i1] * a) * b;
+  };
+  const uWall = (i, j) => (i > 0 && wall[j * GW + i - 1]) || (i < GW && wall[j * GW + i]);
+  const vWall = (i, j) => j === GH || (j > 0 && wall[(j - 1) * GW + i]) || wall[j * GW + i];
+  // One frame of air, before the cells move.
+  const airStep = () => {
+    // Walls and warmth from the cells: the share of each coarse cell that blocks air, and its mean heat above ambient.
+    let hot = false;
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+      const y0 = j * S, y1 = y0 + S < H ? y0 + S : H, x0 = i * S, x1 = x0 + S < W ? x0 + S : W;
+      let full = 0, sum = 0;
+      for (let y = y0; y < y1; y++) for (let c = y * W + x0, end = y * W + x1; c < end; c++) {
+        const st = state[mat[c]];
+        if (st !== EMPTY && st !== GAS && st !== FIRE) full++;
+        sum += temp[c] - ambient;
+      }
+      const n = (y1 - y0) * (x1 - x0), k = j * GW + i;
+      wall[k] = full * 2 > n ? 1 : 0;
+      warm[k] = sum > 0 ? sum / (n * SIXTEENTHS) : 0;
+      if (warm[k] > 1) hot = true;
+    }
+    if (!stirred && !hot && !windU && !windV) return;
+    // Heat lifts the air: `rise` pixels a frame², a frame, for a coarse cell a thousand degrees above ambient.
+    if (hot && F.rise) for (let j = 1; j < GH; j++) for (let i = 0; i < GW; i++) {
+      const a = warm[(j - 1) * GW + i], b = warm[j * GW + i], e = (a + b) / 2;
+      v[j * GW + i] -= F.rise * (e < 1000 ? e : 1000) / 1000;
+    }
+    // Swirl: vorticity confinement, pushing round the curls the flow already has.
+    if (F.swirl) {
+      // The curl at each cell centre, from the centre velocities (the mean of each cell's two faces) around it.
+      const U1 = GW + 1;
+      for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+        const il = i > 0 ? i - 1 : i, ir = i < GW - 1 ? i + 1 : i, ju = j > 0 ? j - 1 : j, jd = j < GH - 1 ? j + 1 : j;
+        const right = v[j * GW + ir] + v[(j + 1) * GW + ir], left = v[j * GW + il] + v[(j + 1) * GW + il];
+        const down = u[jd * U1 + i] + u[jd * U1 + i + 1], up = u[ju * U1 + i] + u[ju * U1 + i + 1];
+        curl[j * GW + i] = (right - left - down + up) / 4;
+      }
+      const abs = k => (curl[k] < 0 ? -curl[k] : curl[k]);
+      for (let j = 1; j < GH - 1; j++) for (let i = 1; i < GW - 1; i++) {
+        const k = j * GW + i;
+        if (wall[k]) continue;
+        const nx = (abs(k + 1) - abs(k - 1)) / 2, ny = (abs(k + GW) - abs(k - GW)) / 2, length = Math.sqrt(nx * nx + ny * ny) + 1e-9;
+        const fx = F.swirl * (ny / length) * curl[k], fy = -F.swirl * (nx / length) * curl[k];
+        u[j * (GW + 1) + i] += fx / 2; u[j * (GW + 1) + i + 1] += fx / 2;
+        v[j * GW + i] += fy / 2; v[(j + 1) * GW + i] += fy / 2;
+      }
+    }
+    // Settling toward the wind.
+    if (F.calm) {
+      for (let k = 0; k < u.length; k++) u[k] += (windU - u[k]) * F.calm;
+      for (let k = 0; k < v.length; k++) v[k] += (windV - v[k]) * F.calm;
+    }
+    // Carried along itself, from where each face's air was a frame ago.
+    for (let j = 0; j < GH; j++) for (let i = 0; i <= GW; i++) {
+      const k = j * (GW + 1) + i, px = i * S, py = (j + 0.5) * S;
+      u2[k] = uWall(i, j) ? 0 : sampleU(px - u[k], py - sampleV(px, py));
+    }
+    for (let j = 0; j <= GH; j++) for (let i = 0; i < GW; i++) {
+      const k = j * GW + i, px = (i + 0.5) * S, py = j * S;
+      v2[k] = vWall(i, j) ? 0 : sampleV(px - sampleU(px, py), py - v[k]);
+    }
+    u.set(u2); v.set(v2);
+    // Made divergence-free: q is the pressure (in pixels a frame), open above the top edge.
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+      const k = j * GW + i;
+      div[k] = wall[k] ? 0 : u[j * (GW + 1) + i + 1] - u[j * (GW + 1) + i] + v[(j + 1) * GW + i] - v[j * GW + i];
+    }
+    for (let sweep = 0; sweep < SWEEPS; sweep++) for (let colour = 0; colour < 2; colour++) for (let j = 0; j < GH; j++) for (let i = (j + colour) & 1; i < GW; i += 2) {
+      const k = j * GW + i;
+      if (wall[k]) continue;
+      let sum = 0, n = 0;
+      if (i === 0) n++; else if (!wall[k - 1]) { sum += q[k - 1]; n++; }
+      if (i === GW - 1) n++; else if (!wall[k + 1]) { sum += q[k + 1]; n++; }
+      if (j === 0) n++; else if (!wall[k - GW]) { sum += q[k - GW]; n++; }
+      if (j < GH - 1 && !wall[k + GW]) { sum += q[k + GW]; n++; }
+      q[k] = n ? q[k] + RELAX * ((sum - div[k]) / n - q[k]) : 0;
+    }
+    let fastest = 0;
+    for (let j = 0; j < GH; j++) for (let i = 0; i <= GW; i++) {
+      const k = j * (GW + 1) + i;
+      if (uWall(i, j)) { u[k] = 0; continue; }
+      u[k] -= (i < GW ? q[j * GW + i] : 0) - (i > 0 ? q[j * GW + i - 1] : 0);
+      u[k] = u[k] > FASTEST ? FASTEST : u[k] < -FASTEST ? -FASTEST : u[k];
+      if (u[k] > fastest) fastest = u[k]; else if (-u[k] > fastest) fastest = -u[k];
+    }
+    for (let j = 0; j <= GH; j++) for (let i = 0; i < GW; i++) {
+      const k = j * GW + i;
+      if (vWall(i, j)) { v[k] = 0; continue; }
+      v[k] -= q[j * GW + i] - (j > 0 ? q[(j - 1) * GW + i] : 0);
+      v[k] = v[k] > FASTEST ? FASTEST : v[k] < -FASTEST ? -FASTEST : v[k];
+      if (v[k] > fastest) fastest = v[k]; else if (-v[k] > fastest) fastest = -v[k];
+    }
+    // Still air with nothing stirring it is left alone until something does.
+    stirred = fastest > 0.001 || hot || !!windU || !!windV;
+    if (!stirred) { u.fill(0); v.fill(0); }
+    for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+      const k = j * GW + i;
+      centreU[k] = (u[j * (GW + 1) + i] + u[j * (GW + 1) + i + 1]) * SUB / 2;
+      centreV[k] = (v[k] + v[k + GW]) * SUB / 2;
+    }
+  };
+  // A gas or flame cell rides the air, plus its own rise (`speed`, up if lighter than air), plus a little wander so a
+  // plume frays; it keeps the fraction of a pixel it has moved in fx and fy.
+  const WANDER = [0, 0, 0, 0.35, 0, 0.2];
+  const ride = (c, x, y, m, s) => {
+    const up = density[m] < AIR, own = speed[m] / ONE, px = x + 0.5, py = y + 0.5;
+    const tu = sampleU(px, py) + ((rand() & 255) - 128) * WANDER[s] / 128, tv = sampleV(px, py) + (up ? -own : own);
+    const ax = fx[c] + Math.round(tu * SUB), ay = fy[c] + Math.round(tv * SUB);
+    let nx = ax >> 8, ny = ay >> 8;
+    fx[c] = ax & 255; fy[c] = ay & 255;
+    const sx = nx < 0 ? -1 : 1, sy = ny < 0 ? -1 : 1;
+    nx = nx < 0 ? -nx : nx; ny = ny < 0 ? -ny : ny;
+    if (nx > 6) nx = 6;
+    if (ny > 6) ny = 6;
+    let at = c, xs = 0, ys = 0;
+    while (xs < nx || ys < ny) {
+      if (ys < ny && (xs >= nx || ys * nx <= xs * ny)) {
+        ys++;
+        const yy = y + sy;
+        // Its own way up or down it bubbles through liquids and sorts among gases; against it, only into air. Off the
+        // top edge (open), it is gone.
+        if (yy < 0) { become(at, 0); return true; }
+        if (yy < H && (sy === (up ? -1 : 1) ? drifts(m, at + sy * W, up) : mat[at + sy * W] === 0)) { swap(at, at + sy * W); at += sy * W; y = yy; continue; }
+        ny = ys;
+      } else {
+        xs++;
+        const xx = x + sx;
+        if (xx < 0 || xx >= W) { become(at, 0); return true; }
+        if (mat[at + sx] === 0) { swap(at, at + sx); at += sx; x = xx; continue; }
+        nx = xs;
+      }
+    }
+    return at !== c;
+  };
   const touch = c => {
     const k = chunkOf[c], e = edges[c];
     next[k] = 1;
@@ -435,6 +616,13 @@ export function createLivePowder(source, options = {}) {
   let landU = 0, landV = 0;
   const fly = (c, x, y, m, s, first) => {
     let v = vy[c] + G, u = vx[c];
+    // Through moving air it is carried toward the air's speed (at its coarse cell's centre), the more the lighter it
+    // is (`carry` for a cell of density 1): ash drifts, sand barely leans.
+    if (F && F.carry && stirred) {
+      const k = F.carry * AIR / density[m], g = coarseOf[c];
+      u += Math.round((centreU[g] - u) * k);
+      v += Math.round((centreV[g] - v) * k);
+    }
     if (v > TOP) v = TOP;
     // Falling, it moves at least a pixel a frame, as a cell that starts to fall always has; gravity adds the rest.
     if (v >= 0 && v < SUB) v = SUB;
@@ -547,6 +735,7 @@ export function createLivePowder(source, options = {}) {
     queue = [];
     const was = awake;
     awake = next; next = was; next.fill(0);
+    if (F) airStep();
     reseed(SALT.step, t);
     for (let y = H - 1; y >= 0; y--) {
       const row = y * W, forward = ((y + t) & 1) === 0, band = (y >> 4) * CW;
@@ -637,6 +826,14 @@ export function createLivePowder(source, options = {}) {
             } else if (vx[c]) vx[c] = 0;
           } else if (s === GAS || s === FIRE) {
             keep(c);
+            if (F) {
+              if (ride(c, x, y, m, s) || !spread[m]) continue;
+              const up = density[m] < AIR, ahead = up ? (y > 0 ? -W : 0) : (y < H - 1 ? W : 0), side = rand() >>> 31 ? 1 : -1;
+              let to = run(c, x, side, spread[m], ahead, false);
+              if (to < 0) to = run(c, x, -side, spread[m], ahead, false);
+              if (to >= 0) swap(c, to);
+              continue;
+            }
             if (speed[m] < ONE && rand() >= speed[m]) continue;
             const up = density[m] < AIR, dy = up ? -1 : 1, yy = y + dy, roll = rand();
             // Mostly straight on; a gas wanders sideways one frame in four, fire one in eight.
@@ -828,6 +1025,45 @@ export function createLivePowder(source, options = {}) {
     const x = quarter(input.x, `${path}.x`), y = quarter(input.y, `${path}.y`);
     return { x, y, x2: input.x2 === undefined ? x : quarter(input.x2, `${path}.x2`), y2: input.y2 === undefined ? y : quarter(input.y2, `${path}.y2`), radius: Math.round(number(input.radius ?? 3, `${path}.radius`, 0.5, 64) * 4) / 4 };
   };
+  // A soft disc: 1 at its centre, falling to 0 at its rim.
+  const soft = (dx, dy, radius) => { const k = (dx * dx + dy * dy) / (radius * radius); return k >= 1 ? 0 : (1 - k) * (1 - k); };
+  // How far (0 to 1, from its start) along the segment from (x, y) to (x2, y2) the point nearest (px, py) lies.
+  const along = (at, px, py) => { const dx = at.x2 - at.x, dy = at.y2 - at.y, l = dx * dx + dy * dy, k = l ? ((px - at.x) * dx + (py - at.y) * dy) / l : 0; return k < 0 ? 0 : k > 1 ? 1 : k; };
+  const pushAir = (at, pvx, pvy) => {
+    const reach = at.radius + S;
+    for (let j = 0; j < GH; j++) for (let i = 0; i <= GW; i++) {
+      const px = i * S, py = (j + 0.5) * S, k = along(at, px, py), w = soft(px - at.x - k * (at.x2 - at.x), py - at.y - k * (at.y2 - at.y), reach);
+      if (w && !uWall(i, j)) u[j * (GW + 1) + i] += pvx * w;
+    }
+    for (let j = 0; j <= GH; j++) for (let i = 0; i < GW; i++) {
+      const px = (i + 0.5) * S, py = j * S, k = along(at, px, py), w = soft(px - at.x - k * (at.x2 - at.x), py - at.y - k * (at.y2 - at.y), reach);
+      if (w && !vWall(i, j)) v[j * GW + i] += pvy * w;
+    }
+    stirred = true;
+  };
+  const blast = (at, strength) => {
+    if (F) {
+      const reach = at.radius + S;
+      for (let j = 0; j < GH; j++) for (let i = 0; i <= GW; i++) {
+        const dx = i * S - at.x, dy = (j + 0.5) * S - at.y, d = Math.sqrt(dx * dx + dy * dy), w = soft(dx, dy, reach);
+        if (w && d > 0 && !uWall(i, j)) u[j * (GW + 1) + i] += strength * w * dx / d;
+      }
+      for (let j = 0; j <= GH; j++) for (let i = 0; i < GW; i++) {
+        const dx = (i + 0.5) * S - at.x, dy = j * S - at.y, d = Math.sqrt(dx * dx + dy * dy), w = soft(dx, dy, reach);
+        if (w && d > 0 && !vWall(i, j)) v[j * GW + i] += strength * w * dy / d;
+      }
+      stirred = true;
+    }
+    capsule(at.x, at.y, at.x, at.y, at.radius, c => {
+      const st = state[mat[c]];
+      if (st !== POWDER && st !== LIQUID) return;
+      const x = c % W, dx = x + 0.5 - at.x, dy = (c - x) / W + 0.5 - at.y, d = Math.sqrt(dx * dx + dy * dy) || 1, w = 1 - d / (at.radius + 0.5);
+      let kx = vx[c] + Math.round(strength * w * dx / d * SUB), ky = vy[c] + Math.round(strength * w * (dy / d - 0.5) * SUB);
+      kx = kx > TOP ? TOP : kx < -TOP ? -TOP : kx; ky = ky > TOP ? TOP : ky < -TOP ? -TOP : ky;
+      vx[c] = kx; vy[c] = ky === 0 ? -1 : ky;
+      touch(c);
+    });
+  };
   const paintInput = (m, at, fill, replace, temperature) => () => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => {
     if (fill < 1 && rand() >= fill * ONE) return;
     if (!replace && mat[c] !== 0) return;
@@ -871,10 +1107,27 @@ export function createLivePowder(source, options = {}) {
       enqueue(() => capsule(at.x, at.y, at.x2, at.y2, at.radius, c => { temp[c] = clampT(temp[c] + amount * SIXTEENTHS); touch(c); }), { op: 3, ...at, amount });
       return live;
     },
+    // Drags the air within `radius` of (x, y), or of the segment to (x2, y2), by (vx, vy) pixels a frame, softly to the
+    // rim, as a pointer sweeping through smoke does. Needs moving air (`air.flow`).
+    push(input) {
+      if (!F) fail('push', 'the source has no moving air; set air.flow');
+      const at = spot(input, 'push', ['x', 'y', 'x2', 'y2', 'radius', 'vx', 'vy']);
+      const pv = [Math.round(number(input.vx ?? 0, 'push.vx', -8, 8) * 16) / 16, Math.round(number(input.vy ?? 0, 'push.vy', -8, 8) * 16) / 16];
+      enqueue(() => pushAir(at, pv[0], pv[1]), { op: 4, ...at, vx: pv[0], vy: pv[1] });
+      return live;
+    },
+    // A blast at (x, y): air pushed out from it, and loose powders and liquids within `radius` thrown outward at up to
+    // `strength` pixels a frame (and a little up), the nearer the harder.
+    burst(input) {
+      const at = spot(input, 'burst', ['x', 'y', 'radius', 'strength']);
+      const strength = Math.round(number(input.strength ?? 3, 'burst.strength', 0, 8) * 16) / 16;
+      enqueue(() => blast(at, strength), { op: 5, x: at.x, y: at.y, radius: at.radius, strength });
+      return live;
+    },
     // What is at a pixel now.
     at(x, y) {
       const c = integer(y, 'at.y', 0, H - 1) * W + integer(x, 'at.x', 0, W - 1);
-      return { material: T.names[mat[c]], temperature: temp[c] / SIXTEENTHS, life: life[c], burning: !!(flag[c] & BURNING), velocity: [vx[c] / SUB, vy[c] / SUB] };
+      return { material: T.names[mat[c]], temperature: temp[c] / SIXTEENTHS, life: life[c], burning: !!(flag[c] & BURNING), velocity: [vx[c] / SUB, vy[c] / SUB], ...(F && { air: [sampleU(x + 0.5, y + 0.5), sampleV(x + 0.5, y + 0.5)] }) };
     },
     // How many cells of each material there are, and how many burn.
     measure() {
@@ -1073,12 +1326,14 @@ export function applyStroke(live, s) {
   if (s.op === 0) live.paint({ material: live.materials[s.m - 1], ...at, fill: s.fill, replace: s.replace });
   else if (s.op === 1) live.erase(at);
   else if (s.op === 2) live.wall(at);
-  else live.heat({ ...at, amount: s.amount });
+  else if (s.op === 3) live.heat({ ...at, amount: s.amount });
+  else if (s.op === 4) live.push({ ...at, vx: s.vx, vy: s.vy });
+  else live.burst({ x: s.x, y: s.y, radius: s.radius, strength: s.strength });
   return live;
 }
 // The binary form, as the fluid toy's links pack pokes: a format byte, the frames, the stroke count, then per stroke
 // the frames since the last, its op (and material), its start as a step from the last in quarter pixels, its end as a
-// step from its start, its radius and its amount. Deflate it and base64url it for a link.
+// step from its start, its radius, and its amount, push or strength. Deflate it and base64url it for a link.
 const FORMAT = 1;
 const varint = (out, value) => { for (;;) { if (value < 128) { out.push(value); return; } out.push((value & 127) | 128); value = Math.floor(value / 128); } };
 const zigzag = value => (value < 0 ? -2 * value - 1 : 2 * value);
@@ -1087,11 +1342,14 @@ export function packStrokes(strokes, frames) {
   varint(out, frames); varint(out, strokes.length);
   let f = 0, x = 0, y = 0;
   for (const s of strokes) {
-    const qx = Math.round(s.x * 4), qy = Math.round(s.y * 4);
-    varint(out, s.f - f); out.push(s.op | (s.op === 0 && s.replace ? 4 : 0)); if (s.op === 0) out.push(s.m);
+    const qx = Math.round(s.x * 4), qy = Math.round(s.y * 4), qx2 = Math.round((s.x2 ?? s.x) * 4), qy2 = Math.round((s.y2 ?? s.y) * 4);
+    varint(out, s.f - f); out.push(s.op | (s.op === 0 && s.replace ? 8 : 0)); if (s.op === 0) out.push(s.m);
     varint(out, zigzag(qx - x)); varint(out, zigzag(qy - y));
-    varint(out, zigzag(Math.round(s.x2 * 4) - qx)); varint(out, zigzag(Math.round(s.y2 * 4) - qy)); varint(out, Math.round(s.radius * 4));
-    if (s.op === 0) out.push(Math.round(s.fill * 100)); else if (s.op === 3) varint(out, zigzag(s.amount));
+    varint(out, zigzag(qx2 - qx)); varint(out, zigzag(qy2 - qy)); varint(out, Math.round(s.radius * 4));
+    if (s.op === 0) out.push(Math.round(s.fill * 100));
+    else if (s.op === 3) varint(out, zigzag(s.amount));
+    else if (s.op === 4) { varint(out, zigzag(Math.round(s.vx * 16))); varint(out, zigzag(Math.round(s.vy * 16))); }
+    else if (s.op === 5) varint(out, Math.round(s.strength * 16));
     f = s.f; x = qx; y = qy;
   }
   return new Uint8Array(out);
@@ -1107,12 +1365,16 @@ export function unpackStrokes(bytes) {
   let f = 0, x = 0, y = 0;
   for (let n = 0; n < count; n++) {
     f += read();
-    const code = byte(), op = code & 3, s = { f, op };
-    if (op === 0) { s.m = byte(); s.replace = !!(code & 4); }
+    const code = byte(), op = code & 7, s = { f, op };
+    if (op > 5) fail('strokes', 'damaged: unknown stroke');
+    if (op === 0) { s.m = byte(); s.replace = !!(code & 8); }
     x += signed(); y += signed();
     const x2 = x + signed(), y2 = y + signed();
     Object.assign(s, { x: x / 4, y: y / 4, x2: x2 / 4, y2: y2 / 4, radius: read() / 4 });
-    if (op === 0) s.fill = byte() / 100; else if (op === 3) s.amount = signed();
+    if (op === 0) s.fill = byte() / 100;
+    else if (op === 3) s.amount = signed();
+    else if (op === 4) { s.vx = signed() / 16; s.vy = signed() / 16; }
+    else if (op === 5) { s.strength = read() / 16; delete s.x2; delete s.y2; }
     strokes.push(s);
   }
   if (at !== bytes.length) fail('strokes', 'damaged: bytes after the strokes');
@@ -1125,7 +1387,7 @@ export function unpackStrokes(bytes) {
 export const SANDBOX = {
   ambient: 20,
   background: '#17161f',
-  air: { conduct: 0.01, cool: 0.03 },
+  air: { conduct: 0.01, cool: 0.03, flow: { cell: 4, rise: 0.25, swirl: 0.3, calm: 0.02, carry: 0.3 } },
   materials: {
     sand: { state: 'powder', density: 16, splash: 0.04, conduct: 0.15, colors: ['#d8b06a', '#cfa45e', '#e2bd7a', '#c69a55', '#d8b06a'] },
     water: {
@@ -1144,7 +1406,7 @@ export const SANDBOX = {
     },
     fire: {
       state: 'fire', density: 0.2, spread: 0, speed: 0.75, conduct: 0.3, temperature: 900, heat: 900,
-      life: { frames: [8, 22], into: 'smoke', chance: 0.3 }, colorBy: 'density', colors: ['#3a1d1c', '#7a2a18', '#c9391e', '#f4672a', '#ffa632', '#ffd84f', '#fff2b0']
+      life: { frames: [6, 14], into: 'smoke', chance: 0.3 }, colorBy: 'density', colors: ['#3a1d1c', '#7a2a18', '#c9391e', '#f4672a', '#ffa632', '#ffd84f', '#fff2b0']
     },
     smoke: {
       state: 'gas', density: 0.7, spread: 1, speed: 0.5, cool: 0.04, life: { frames: [80, 200] }, colorBy: 'density',

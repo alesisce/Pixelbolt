@@ -408,3 +408,110 @@ golden.test('every powder example compiles to its golden recipe, as its preset w
   const { files } = await buildPowderGIFs(recipes);
   for (const [file, bytes] of files) assert.ok(bytes.equals(await readFile(path.join(root, file))), `${file} is stale; run node showcase/powder/build.mjs --force`);
 });
+
+// ---- Tumbling pieces (pieces: "tumble") ----
+// A hut on stilts over a pool, its left stilt burning just above the water.
+const STILT_HUT = ['.......rrrrrrrr.......', '.....rrrrrrrrrrrr.....', '...rrrrrrrrrrrrrrrr...', '.rrrrrrrrrrrrrrrrrrrr.', 'rrrrrrrrrrrrrrrrrrrrrr', '.ww................ww.', '.ww....wwww........ww.', '.ww....w..w........ww.', '.ww....wwww........ww.', '.ww................ww.', 'wwwwwwwwwwwwwwwwwwwwww', 'wwwwwwwwwwwwwwwwwwwwww'];
+const stiltHut = pieces => ({ ...sandboxSource(96, 64, [
+  { material: 'stone', rect: [0, 60, 96, 4] }, { material: 'stone', rect: [0, 38, 4, 22] }, { material: 'stone', rect: [92, 38, 4, 22] },
+  { material: 'water', rect: [4, 44, 88, 16] },
+  { rows: STILT_HUT, at: [36, 18], legend: { r: 'wood', w: 'wood' } },
+  { material: 'wood', rect: [37, 30, 2, 30] }, { material: 'wood', rect: [55, 30, 2, 30] },
+  { material: 'wood', rect: [37, 38, 2, 6], burning: true }
+], 4), ...(pieces && { pieces }) });
+const topOf = (live, name) => { for (let y = 0; y < live.height; y++) for (let x = 0; x < live.width; x++) if (live.at(x, y).material === name) return y; return -1; };
+const countIn = (live, name, x0, y0, x1, y1) => { let n = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (live.at(x, y).material === name) n++; return n; };
+// The angle of the piece with the most cells.
+const mainAngle = live => {
+  const cells = new Map();
+  let best = null;
+  for (let y = 0; y < live.height; y++) for (let x = 0; x < live.width; x++) {
+    const { piece } = live.at(x, y);
+    if (!piece) continue;
+    cells.set(piece.id, (cells.get(piece.id) ?? 0) + 1);
+    if (!best || cells.get(piece.id) > best.n) best = { n: cells.get(piece.id), angle: piece.angle };
+  }
+  return best && best.angle;
+};
+
+test('tumbling: a hut on stilts topples into its pool when one side\'s stilts burn', () => {
+  // Dropping straight, the burnt stilt changes nothing: the other stilt stands on the stone and holds the hut up.
+  const drop = createLivePowder(stiltHut());
+  drop.step(400);
+  assert.equal(topOf(drop, 'wood'), 18, 'dropping straight, the hut stays up on one stilt');
+  const live = createLivePowder(stiltHut('tumble'));
+  const wet = countIn(live, 'wood', 4, 44, 92, 60);
+  live.step(150);
+  assert.equal(topOf(live, 'wood'), 18, 'it stands while the stilt burns');
+  assert.ok(live.measure().pieces.resting >= 1, 'standing on its stilts, the hut is a piece at rest');
+  live.step(250);
+  const angle = mainAngle(live);
+  assert.ok(topOf(live, 'wood') >= 26, `the roof fell (top row ${topOf(live, 'wood')})`);
+  assert.ok(angle <= -25 && angle >= -80, `it tipped toward the burnt side (${angle}°)`);
+  assert.ok(countIn(live, 'wood', 4, 44, 92, 60) >= wet + 20, 'and lies in the pool');
+});
+
+test('tumbling: pieces turn off ledges and stubs, float, keep every cell and come to rest', () => {
+  const live = createLivePowder({ ...sandboxSource(128, 72, [
+    { material: 'stone', rect: [0, 68, 128, 4] },
+    // A plank lying mostly over a ledge, a box dropped off-centre onto a stub, and a crate dropped into a pool.
+    { material: 'stone', rect: [0, 30, 20, 38] }, { material: 'wood', rect: [10, 28, 26, 2] },
+    { material: 'stone', rect: [60, 58, 3, 10] }, { material: 'wood', rect: [52, 20, 12, 10] },
+    { material: 'stone', rect: [84, 50, 2, 18] }, { material: 'stone', rect: [126, 50, 2, 18] }, { material: 'water', rect: [86, 54, 40, 14] },
+    { material: 'wood', rect: [98, 10, 10, 8] }
+  ], 3), pieces: 'tumble' });
+  const wood = live.measure().counts.wood, water = live.measure().counts.water;
+  let turned = 0;
+  for (let f = 0; f < 300; f++) {
+    live.step();
+    assert.equal(live.measure().counts.wood, wood, `frame ${f}: a moving piece keeps every cell`);
+    for (let x = 0; x < 84; x++) { const { piece } = live.at(x, 60); if (piece && Math.abs(piece.angle) > turned) turned = Math.abs(piece.angle); }
+  }
+  assert.equal(live.measure().counts.water, water, 'what a piece pushes aside is moved, never lost');
+  assert.ok(turned > 20, `pieces turned as they fell (${turned}°)`);
+  assert.ok(countIn(live, 'wood', 0, 30, 20, 68) === 0 && topOf(live, 'wood') >= 50, 'the plank tipped off the ledge and the box off its stub');
+  const crateTop = topOf({ ...live, at: (x, y) => live.at(x + 86, y), width: 40 }, 'wood'), waterTop = topOf({ ...live, at: (x, y) => live.at(x + 87, y), width: 1 }, 'water');
+  assert.ok(crateTop < waterTop && crateTop + 8 > waterTop + 2, `the crate floats, its top out of the water (crate ${crateTop}, water ${waterTop})`);
+  assert.deepEqual(live.measure().chunks, { stepped: 0, of: 40 }, 'and everything has come to rest');
+  assert.equal(live.measure().pieces.moving, 0);
+});
+
+test('tumbling: held where nailed to a wall or hung, moss clings, and a piece standing on stone rests as one', () => {
+  const live = createLivePowder({ ...sandboxSource(64, 40, [
+    { material: 'stone', rect: [0, 36, 64, 4] }, { material: 'stone', rect: [0, 10, 6, 26] }, { material: 'wood', rect: [6, 14, 20, 2] },
+    { material: 'stone', rect: [20, 0, 4, 4] }, { material: 'wood', rect: [18, 4, 8, 2] },
+    { material: 'moss', rect: [30, 34, 10, 2] }, { material: 'wood', rect: [44, 32, 12, 4] }
+  ], 1), pieces: 'tumble' });
+  live.step(60);
+  assert.equal(countIn(live, 'wood', 6, 14, 26, 16), 40, 'a beam nailed into a wall stays');
+  assert.equal(countIn(live, 'wood', 18, 4, 26, 6), 16, 'a board hung from stone stays');
+  assert.equal(countIn(live, 'moss', 30, 34, 40, 36), 20, 'moss holds on to the stone under it');
+  assert.equal(countIn(live, 'wood', 44, 32, 56, 36), 48, 'the block stands where it was');
+  assert.deepEqual(live.measure().pieces, { moving: 0, resting: 1 }, 'standing, the block is a piece at rest; held ones are not pieces');
+  assert.throws(() => createLivePowder({ ...sandboxSource(16, 16), pieces: 'roll' }), /powder\.pieces: expected "drop" .* or "tumble"/);
+  const clinging = sandboxSource(16, 16);
+  clinging.materials.stone.clings = true;
+  assert.throws(() => createLivePowder(clinging), /stone\.clings: only a solid that falls clings/);
+});
+
+test('tumbling: a piece carries its burning and its heat, a blast throws it, and runs replay exactly', () => {
+  const source = { ...sandboxSource(64, 48, [
+    { material: 'stone', rect: [0, 44, 96, 4] }, { material: 'stone', rect: [0, 20, 16, 24] },
+    { material: 'wood', rect: [13, 12, 10, 8] }, { material: 'wood', rect: [13, 12, 4, 3], burning: true, temperature: 600 },
+    { material: 'wood', rect: [64, 36, 8, 8] }
+  ], 1), width: 96, pieces: 'tumble', inputs: [{ frame: 60, burst: { x: 62, y: 43, radius: 8, strength: 4 } }] };
+  const live = createLivePowder(source, { record: true });
+  live.step(30);
+  const burning = [];
+  live.cells.flag.forEach((f, c) => { if (f) burning.push(c); });
+  assert.ok(burning.length >= 10 && topOf(live, 'wood') > 12, `the burning crate tipped off the ledge (${burning.length} burning)`);
+  assert.ok(burning.every(c => live.cells.mat[c] === live.materials.indexOf('wood') + 1 && live.cells.temp[c] >= 600 * 16), 'its burning cells moved with it, hot');
+  const left = () => { let l = 96; for (let y = 0; y < 44; y++) for (let x = 50; x < 96; x++) if (live.at(x, y).material === 'wood') l = Math.min(l, x); return l; };
+  assert.equal(left(), 64);
+  live.step(40);
+  assert.ok(left() > 70, `the blast threw the block (now from x ${left()})`);
+  live.paint({ material: 'wood', x: 30, y: 4, x2: 34, y2: 4, radius: 1 });
+  live.step(60);
+  const again = replayStrokes(createLivePowder(source), live.strokes, live.frame);
+  assert.equal(digest(again), digest(live), 'a tumbling run replays exactly');
+});

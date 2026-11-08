@@ -1,16 +1,20 @@
 // Falling-sand material grid. Every pixel holds one material from a table an agent writes: powders, liquids, gases,
 // solids and fire, the heavier sinking through the lighter, with temperature, phase changes, burning and a table of
 // reactions between neighbours. Powders and liquids carry a velocity, so falls speed up, landings splash and a liquid
-// that lands surges sideways; solids marked `falls` drop as rigid pieces once nothing fixed holds them up.
+// that lands surges sideways; solids marked `falls` drop as rigid pieces once nothing fixed holds them up, straight down,
+// or with pieces "tumble" as rigid bodies (bodies.js) that turn, topple and float.
 // createLivePowder runs it a frame at a time for pages and games; inputs (paint, erase, walls, heat) are queued and
 // applied in order at the start of the next step, so a recorded list of strokes replays exactly.
 //
-// Browser-compatible, no dependencies and deterministic in every engine: cell state is integers in typed arrays,
-// every draw comes from an xorshift stream seeded by craft.js's hash (per frame, and per input) and read in a fixed
-// scan order, and there is no Math.random and no trigonometry. Temperatures are kept in sixteenths of a degree and
+// Browser-compatible, no dependencies outside this package and deterministic in every engine: cell state is integers in
+// typed arrays, every draw comes from an xorshift stream seeded by craft.js's hash (per frame, and per input) and read in
+// a fixed scan order, and there is no Math.random and no trigonometry of its own (tumbling pieces turn by craft.js's
+// polynomial sines and bodies.js's solver, + − × ÷ and sqrt). Temperatures are kept in sixteenths of a degree and
 // velocities in 256ths of a pixel per frame.
 import { PixelError, parseColor, renderProject, CANVAS_SIDE, FRAME_AREA } from './core.js';
-import { hash, ditherThreshold } from './craft.js';
+import { hash, ditherThreshold, sinDeg, cosDeg } from './craft.js';
+import { atan2Deg } from './shapes.js';
+import { createBodyWorld, polygonPart, areaBeyond } from './bodies.js';
 
 const fail = (path, message) => { throw new PixelError(path, message); };
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -45,13 +49,23 @@ const SUB = 256, TOP = 6 * SUB, SPLASH = 2 * SUB;
 // How far a resting liquid looks along its row for somewhere lower, or for more of its kind to join.
 const FAR = 40;
 const LIMITS = { side: 1024, materials: 200, reactions: 256, colors: 8, emits: 2, scene: 512, strokes: 65536, inputs: 512, clips: 16, frames: 256, steps: 20000, work: 200e6 };
+// Tumbling pieces (pieces: "tumble"): at most MOST_PIECES bodies (further loose pieces drop straight), SEARCH cells
+// searched for room for what a piece moves into, SIDE columns beside a piece searched for the liquid it is in, REACH
+// pixels round the moving pieces whose obstacles they meet. In a liquid a piece is dragged LIQUID_DRAG a frame (times the
+// liquid's drag and the share of it under), more the faster it goes (QUADRATIC per pixel a frame), so it plunges, bobs
+// and settles; what it hits, it throws up at SPLASH_UP and out at SPLASH_OUT of its speed. A piece is drawn held as
+// bodies.js draws a body: it steps back only HOLD of a pixel (or TURN_HOLD of a degree) past halfway, and if its cells
+// would land in a solid it tries NUDGES of a pixel.
+const MOST_PIECES = 128, SEARCH = 4096, SIDE = 4, REACH = 10, LIQUID_DRAG = 0.6, QUADRATIC = 1, SPLASH_UP = 0.9, SPLASH_OUT = 0.35, HOLD = 0.3, TURN_HOLD = 0.2;
+const NUDGES = [[0, 0], [0, -1], [-1, 0], [1, 0], [0, 1]];
+const turnBetween = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
 // Single-character palette keys. '.' marks an empty pixel.
 const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#$%&*+-=?@^~!<>/|:;,_()[]{}';
 // Salts that keep the random streams apart.
 const SALT = { step: 1, input: 2, scene: 3, script: 5 };
 
-const MATERIAL_FIELDS = ['state', 'density', 'spread', 'speed', 'expand', 'viscosity', 'drag', 'splash', 'falls', 'colors', 'pattern', 'top', 'streak', 'haze', 'colorBy', 'shimmer', 'hot', 'temperature', 'conduct', 'cool', 'heat', 'life', 'above', 'below', 'burn', 'emit'];
-const SOURCE_FIELDS = ['$schema', 'format', 'version', 'name', 'base', 'width', 'height', 'seed', 'ambient', 'background', 'gravity', 'air', 'wall', 'materials', 'reactions', 'scene', 'inputs', 'clips'];
+const MATERIAL_FIELDS = ['state', 'density', 'spread', 'speed', 'expand', 'viscosity', 'drag', 'splash', 'falls', 'clings', 'colors', 'pattern', 'top', 'streak', 'haze', 'colorBy', 'shimmer', 'hot', 'temperature', 'conduct', 'cool', 'heat', 'life', 'above', 'below', 'burn', 'emit'];
+const SOURCE_FIELDS = ['$schema', 'format', 'version', 'name', 'base', 'width', 'height', 'seed', 'ambient', 'background', 'gravity', 'air', 'wall', 'pieces', 'materials', 'reactions', 'scene', 'inputs', 'clips'];
 // What a scripted input or a live call can do, and the fields each takes.
 export const POWDER_INPUTS = { paint: ['material', 'x', 'y', 'x2', 'y2', 'radius', 'fill', 'replace'], erase: ['x', 'y', 'x2', 'y2', 'radius'], wall: ['x', 'y', 'x2', 'y2', 'radius'], heat: ['x', 'y', 'x2', 'y2', 'radius', 'amount'], push: ['x', 'y', 'x2', 'y2', 'radius', 'vx', 'vy'], burst: ['x', 'y', 'radius', 'strength'] };
 const recipeName = (value, path) => {
@@ -132,7 +146,7 @@ function readPowder(given) {
   const t = {
     names: ['empty', ...names], width, height, seed, ambient, background, gravity, M,
     state: new Uint8Array(M), density: new Int32Array(M), spread: new Uint8Array(M), still: new Float64Array(M), drag: new Float64Array(M),
-    splash: new Float64Array(M), falls: new Uint8Array(M), expand: new Uint8Array(M), streak: new Int16Array(M).fill(-1), dense: new Uint8Array(M),
+    splash: new Float64Array(M), falls: new Uint8Array(M), clings: new Uint8Array(M), expand: new Uint8Array(M), streak: new Int16Array(M).fill(-1), dense: new Uint8Array(M),
     birth: new Int32Array(M), conduct: new Int32Array(M), cool: new Int32Array(M), hold: new Int32Array(M).fill(NEVER_BELOW),
     lifeMin: new Uint16Array(M), lifeMax: new Uint16Array(M), lifeInto: new Uint8Array(M), lifeChance: new Float64Array(M),
     aboveLatent: new Int32Array(M), belowLatent: new Int32Array(M),
@@ -185,6 +199,10 @@ function readPowder(given) {
     // without `falls`) and no floor holds the piece up. Its density says what it sinks through and what it floats on.
     if (def.falls !== undefined && (state !== SOLID || typeof def.falls !== 'boolean')) fail(`${path}.falls`, state === SOLID ? 'expected true or false' : 'only solids fall as pieces; powders and liquids always fall');
     t.falls[m] = def.falls ? 1 : 0;
+    // A solid that falls and clings (moss) holds on to any fixed solid it touches, under it as well, as a plant does:
+    // with pieces "tumble", one that doesn't cling stands on what is under it and topples off it.
+    if (def.clings !== undefined && (!t.falls[m] || typeof def.clings !== 'boolean')) fail(`${path}.clings`, t.falls[m] ? 'expected true or false' : 'only a solid that falls clings; give it falls: true');
+    t.clings[m] = def.clings ? 1 : 0;
     const moves = state !== SOLID || t.falls[m];
     if (def.density !== undefined && !moves) fail(`${path}.density`, 'fixed solids do not move; density is for powders, liquids, gases, fire and solids that fall');
     t.density[m] = Math.round(number(def.density ?? (t.falls[m] ? 50 : DEFAULT_DENSITY[def.state]), `${path}.density`, 0.01, 1000) * 100);
@@ -350,6 +368,9 @@ function readPowder(given) {
   t.wall = source.wall === undefined ? (id.get('wall') ?? 0) : ref(source.wall, 'powder.wall', false);
   if (t.wall && (t.state[t.wall] !== SOLID || t.falls[t.wall])) fail('powder.wall', 'the wall material must be a fixed solid (one that does not fall)');
   t.anyFalls = t.falls.some(f => f);
+  // How a loose piece of solids that fall comes down: straight down as one block, or as a rigid body that turns.
+  if (source.pieces !== undefined && source.pieces !== 'drop' && source.pieces !== 'tumble') fail('powder.pieces', 'expected "drop" (a loose piece falls straight down as one block) or "tumble" (it falls as a rigid body: it turns, tips off ledges and stubs, floats and comes to rest)');
+  t.tumble = source.pieces === 'tumble';
   t.scene = source.scene ?? [];
   if (!Array.isArray(t.scene) || t.scene.length > LIMITS.scene) fail('powder.scene', `expected a list of at most ${LIMITS.scene} fills`);
   t.inputs = source.inputs ?? [];
@@ -366,7 +387,7 @@ const QUEUED = 4096;
 
 export function createLivePowder(source, options = {}) {
   known(options, ['record'], 'live');
-  const T = readPowder(source), { width: W, height: H, M, seed, ambient, gravity: G } = T, N = W * H;
+  const T = readPowder(source), { width: W, height: H, M, seed, ambient, gravity: G, clings } = T, N = W * H, TUMBLE = T.tumble && T.anyFalls;
   const { aboveLatent, belowLatent, state, density, spread, speed, expand, still, drag, splash, falls, birth, conduct, cool, hold, lifeMin, lifeMax, lifeInto, lifeChance, aboveAt, aboveInto, aboveChance, belowAt, belowInto, belowChance, igniteAt, burnMin, burnMax, burnInto, burnChance, burnHeat, emitMat, emitChance, burnEmitMat, burnEmitChance, reactive, pair, reactions } = T;
   // Cells: material, colour shade, flags, frames of life (or of burning) left, the frame last moved, temperature,
   // and a velocity with the fraction of a pixel moved so far along each axis.
@@ -897,7 +918,8 @@ export function createLivePowder(source, options = {}) {
         }
       }
     }
-    if (T.anyFalls && (supportChanged || loose)) structures();
+    if (TUMBLE) { if (supportChanged || loose || rigid.length) tumbles(); }
+    else if (T.anyFalls && (supportChanged || loose)) structures();
     conductHeat();
     t++;
   };
@@ -925,7 +947,9 @@ export function createLivePowder(source, options = {}) {
     let n = 1;
     for (let k = 0; k < n; k++) {
       const count = around(piece[k]);
-      for (let i = 0; i < count; i++) { const d = nb[i]; if (falls[mat[d]] && seen[d] !== mark) { seen[d] = mark; piece[n++] = d; } }
+      // Tumbling, a piece is the cells of no other piece, and a material that clings (moss) makes pieces of its own: moss
+      // round a post's foot holds on to the stone, not the post.
+      for (let i = 0; i < count; i++) { const d = nb[i]; if (falls[mat[d]] && seen[d] !== mark && !(TUMBLE && (owner[d] || clings[mat[d]] !== clings[mat[start]]))) { seen[d] = mark; piece[n++] = d; } }
     }
     return n;
   };
@@ -982,6 +1006,471 @@ export function createLivePowder(source, options = {}) {
       for (let k = 0; k < cells.length; k++) seen[cells[k] += W] = own;
     }
     for (let k = 0; k < cells.length; k++) { vy[cells[k]] = v; fy[cells[k]] = v ? a & 255 : 0; }
+  };
+
+  // ---- Tumbling pieces (pieces: "tumble") ----
+  // A loose piece is handed to a rigid-body world (bodies.js) as one body made of boxes, one for each run of its cells,
+  // weighing what its cells weigh, so it turns as it falls, tips off a ledge or a stub its weight is not over, floats in
+  // a liquid denser than it and comes to rest. Its cells stay in the grid as solids, so fire still burns them, heat still
+  // moves through them and what falls lands on them. Each frame the cells of every moving piece are read back (a cell
+  // that burnt or was erased leaves its piece, which is cut again, and split where it fell apart), the world steps, and
+  // each piece's cells are written where its body is now: its picture turned by three shears (Paeth), which takes each
+  // cell to exactly one cell, so every cell keeps its material, colour, burning, life and heat and none is lost or
+  // doubled, then moved by whole pixels. What it moves into (air, gas, fire, a liquid or loose powder) is pushed to the
+  // nearest free cell, so a piece that lands in a pool raises it and throws it up. A piece is held where a fixed solid is
+  // beside it or over it (nailed to a wall, hung from a ceiling); standing on one, it rests there as a body and topples
+  // once its weight is no longer over what holds it up.
+  const owner = new Int32Array(TUMBLE ? N : 0), claim = new Int32Array(TUMBLE ? N : 0), visited = new Int32Array(TUMBLE ? N : 0), onTop = new Uint8Array(TUMBLE ? N : 0);
+  const rigid = [], queue2 = new Int32Array(TUMBLE ? SEARCH : 0);
+  let world = null, worldFrame = 0, nextId = 1, claimTag = 0, visitTag = 0, toX = new Int32Array(64), toY = new Int32Array(64);
+  const fixedAt = c => state[mat[c]] === SOLID && !falls[mat[c]];
+  // Held where a fixed solid is beside a cell or over it, or under a cell of a material that clings.
+  const glued = (list, n) => {
+    for (let k = 0; k < n; k++) {
+      const c = list[k], x = c % W;
+      if ((x > 0 && fixedAt(c - 1)) || (x < W - 1 && fixedAt(c + 1)) || (c >= W && fixedAt(c - W)) || (T.clings[mat[c]] && c < N - W && fixedAt(c + W))) return true;
+    }
+    return false;
+  };
+  // A piece's body from its picture: boxes over its runs of cells (each row's runs, carried down while the rows below
+  // repeat them), its weight from its cells' densities, its inertia from theirs, about its centre of mass (mx, my).
+  const shapeOf = p => {
+    const rows = new Map(), order = Array.from({ length: p.n }, (_, k) => k).sort((a, b) => p.J[a] - p.J[b] || p.I[a] - p.I[b]);
+    let inertia = 0, i0 = Infinity, i1 = -Infinity, j0 = Infinity, j1 = -Infinity, far = 0;
+    for (const k of order) {
+      const I = p.I[k], J = p.J[k], runs = rows.get(J) ?? rows.set(J, []).get(J), last = runs[runs.length - 1];
+      if (last && last[1] === I - 1) last[1] = I; else runs.push([I, I]);
+      const u = I + p.pu - p.mx, v = J + p.pv - p.my, rho = density[p.mat[k]] / 100;
+      inertia += rho * (u * u + v * v + 1 / 6);
+      if (I < i0) i0 = I; if (I > i1) i1 = I; if (J < j0) j0 = J; if (J > j1) j1 = J;
+    }
+    const used = new Set(), parts = [];
+    for (const [J, runs] of rows) for (const [a, b] of runs) {
+      if (used.has(`${J}:${a}`)) continue;
+      let last = J;
+      while ((rows.get(last + 1) ?? []).some(r => r[0] === a && r[1] === b) && !used.has(`${last + 1}:${a}`)) { last++; used.add(`${last}:${a}`); }
+      const x0 = a + p.pu - 0.5 - p.mx, x1 = b + p.pu + 0.5 - p.mx, y0 = J + p.pv - 0.5 - p.my, y1 = last + p.pv + 0.5 - p.my;
+      parts.push(polygonPart([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]));
+      for (const [x, y] of [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]) { const d = x * x + y * y; if (d > far) far = d; }
+    }
+    return { parts, invMass: 1 / p.mass, invInertia: 1 / inertia, size: [i1 - i0 + 1, j1 - j0 + 1], extent: Math.sqrt(far) };
+  };
+  // A new piece from loose cells: its picture is the cells as they lie, turned about their centre of mass.
+  const makePiece = (list, n) => {
+    if (!world) world = createBodyWorld({ substeps: 8, iterations: 6, gravity: [0, G / SUB], walls: { left: true, right: true, top: false, bottom: true }, obstacles: [], bodies: [] }, { width: W, height: H });
+    let x0 = W, y0 = H, mass = 0, sx = 0, sy = 0;
+    for (let k = 0; k < n; k++) {
+      const c = list[k], x = c % W, y = (c - x) / W, rho = density[mat[c]] / 100;
+      if (x < x0) x0 = x; if (y < y0) y0 = y;
+      mass += rho; sx += rho * (x + 0.5); sy += rho * (y + 0.5);
+    }
+    const cx = sx / mass, cy = sy / mass, id = nextId++;
+    const p = { id, n, mass, pu: x0 + 0.5 - cx, pv: y0 + 0.5 - cy, mx: 0, my: 0, I: new Int32Array(n), J: new Int32Array(n), gx: new Int32Array(n), gy: new Int32Array(n),
+      mat: new Uint8Array(n), shade: new Uint8Array(n), flag: new Uint8Array(n), life: new Uint16Array(n), temp: new Int32Array(n),
+      hold: { q: 0, x: x0, wx: 0, y: y0, wy: 0, d: 0, wd: 0 }, slept: false, ring: '' };
+    for (let k = 0; k < n; k++) {
+      const c = list[k], x = c % W, y = (c - x) / W;
+      p.I[k] = x - x0; p.J[k] = y - y0; p.gx[k] = x; p.gy[k] = y;
+      p.mat[k] = mat[c]; p.shade[k] = shade[c]; p.flag[k] = flag[c]; p.life[k] = life[c]; p.temp[k] = temp[c];
+      owner[c] = id; vx[c] = 0; vy[c] = 0; fx[c] = 0; fy[c] = 0;
+    }
+    p.body = world.add({ ...shapeOf(p), x: cx, y: cy, bounce: 0.05, friction: 0.6 });
+    rigid.push(p);
+    return p;
+  };
+  // The cells of a piece kept (`keep[k]`), cut again: each group of them joined through any neighbour in its picture is
+  // a piece of its own, the largest keeping `p`. Each keeps the picture's pivot and its drawn place and angle, so its cells
+  // stay where they are, and moves as its part of the body moved (velocity and turning).
+  const recut = (p, keep) => {
+    const b = p.body, at = new Map();
+    for (let k = 0; k < p.n; k++) if (keep[k]) at.set(p.J[k] * 4096 + p.I[k], k);
+    const group = new Int32Array(p.n).fill(-1), groups = [];
+    for (let k = 0; k < p.n; k++) {
+      if (!keep[k] || group[k] >= 0) continue;
+      const list = [k];
+      group[k] = groups.length;
+      for (let q = 0; q < list.length; q++) {
+        const e = list[q];
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          const f = at.get((p.J[e] + dj) * 4096 + p.I[e] + di);
+          if (f !== undefined && group[f] < 0) { group[f] = groups.length; list.push(f); }
+        }
+      }
+      groups.push(list.sort((a, c) => a - c));
+    }
+    // The largest part keeps the piece (its id and its body); the rest are new.
+    groups.sort((a, c) => c.length - a.length || a[0] - c[0]);
+    // The pivot's place in the world now, and the picture before it was cut.
+    const px = b.x - (b.c * p.mx - b.s * p.my), py = b.y - (b.s * p.mx + b.c * p.my), was = { ...p, hold: { ...p.hold } };
+    groups.forEach((list, g) => {
+      const q = g === 0 ? p : { ...was, id: nextId++, hold: { ...was.hold }, slept: false, ring: '' };
+      const n = list.length, take = (a, Type) => Type.from(list, k => a[k]);
+      q.n = n; q.I = take(was.I, Int32Array); q.J = take(was.J, Int32Array); q.gx = take(was.gx, Int32Array); q.gy = take(was.gy, Int32Array);
+      q.mat = take(was.mat, Uint8Array); q.shade = take(was.shade, Uint8Array); q.flag = take(was.flag, Uint8Array); q.life = take(was.life, Uint16Array); q.temp = take(was.temp, Int32Array);
+      let mass = 0, sx = 0, sy = 0;
+      for (let k = 0; k < n; k++) { const rho = density[q.mat[k]] / 100; mass += rho; sx += rho * (q.I[k] + q.pu); sy += rho * (q.J[k] + q.pv); }
+      q.mass = mass; q.mx = sx / mass; q.my = sy / mass;
+      const rx = b.c * q.mx - b.s * q.my, ry = b.s * q.mx + b.c * q.my, ox = px + rx - b.x, oy = py + ry - b.y, shape = shapeOf(q);
+      if (g === 0) {
+        Object.assign(b, shape, { x: px + rx, y: py + ry, vx: b.vx - b.w * oy, vy: b.vy + b.w * ox, asleep: false, sleepy: 0 });
+        world.place(b); q.slept = false;
+      } else {
+        q.body = world.add({ ...shape, x: px + rx, y: py + ry, c: b.c, s: b.s, vx: b.vx - b.w * oy, vy: b.vy + b.w * ox, w: b.w, bounce: b.bounce, friction: b.friction });
+        for (let k = 0; k < n; k++) { const x = q.gx[k], y = q.gy[k]; if (x >= 0 && y >= 0 && x < W && y < H) owner[y * W + x] = q.id; }
+        rigid.push(q);
+      }
+    });
+    if (!groups.length) { b.gone = true; p.n = 0; }
+  };
+  // Reads a piece's cells back from the grid: what they hold now (a cell burns, warms, ages), and which are gone.
+  const read = p => {
+    let lost = 0;
+    const keep = new Uint8Array(p.n).fill(1);
+    for (let k = 0; k < p.n; k++) {
+      const x = p.gx[k], y = p.gy[k];
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const c = y * W + x;
+      if (owner[c] === p.id && falls[mat[c]]) { p.mat[k] = mat[c]; p.shade[k] = shade[c]; p.flag[k] = flag[c]; p.life[k] = life[c]; p.temp[k] = temp[c]; continue; }
+      if (owner[c] === p.id) owner[c] = 0;
+      keep[k] = 0; lost++;
+    }
+    if (lost) recut(p, keep);
+  };
+  // The level of the liquid a piece is in and its density: read in the columns just beside it, at its lowest row (up to
+  // SIDE columns further out where those are dry), up to the top of the liquid there; null when there is none.
+  const levelOf = p => {
+    let x0 = W, x1 = -1, low = -1;
+    for (let k = 0; k < p.n; k++) {
+      const x = p.gx[k], y = p.gy[k];
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y > low) low = y;
+    }
+    if (low < 0) return null;
+    let sum = 0, count = 0, rho = 0, thick = 0;
+    for (const [from, step] of [[x0 - 1, -1], [x1 + 1, 1]]) {
+      let x = from;
+      for (let n = 0; n < SIDE && x >= 0 && x < W && state[mat[low * W + x]] !== LIQUID && state[mat[low * W + x]] !== SOLID; n++) x += step;
+      if (x < 0 || x >= W || state[mat[low * W + x]] !== LIQUID) continue;
+      let y = low;
+      while (y > 0 && state[mat[(y - 1) * W + x]] === LIQUID) y--;
+      sum += y; count++; rho += density[mat[low * W + x]]; thick += drag[mat[low * W + x]];
+    }
+    return count ? { level: sum / count, rho: rho / count / 100, drag: thick / count / ONE } : null;
+  };
+  // The liquid's lift on a piece (bodies.js takes the area of its shape under the level at each substep), half the
+  // liquid it is under joining its mass, and the liquid's drag, growing with its speed as real drag does.
+  const buoy = p => {
+    const b = p.body, at = levelOf(p);
+    if (!at) { b.float = null; b.push = null; b.drag = 0; b.spinDrag = 0.02; return; }
+    const [under] = areaBeyond(b, 1, at.level, 1), share = under / p.n, g = G / SUB, added = 0.5 * under * at.rho, inertia = 1 / b.invInertia;
+    b.float = { axis: 1, level: at.level, sign: 1, gx: 0, gy: g * at.rho, mass: p.mass + added, inertia };
+    b.push = [0, -added * g / (p.mass + added), 0];
+    const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy) + Math.abs(b.w) * b.extent;
+    b.drag = LIQUID_DRAG * at.drag * (1 + QUADRATIC * speed) * share;
+    b.spinDrag = 0.02 + 2 * b.drag;
+  };
+  // What a piece's ring of neighbours holds: solids and resting powder beside it, and the level of a liquid it is in.
+  // A sleeping piece whose ring changes wakes.
+  const ringOf = p => {
+    let hard = 0, soft = 0;
+    for (let k = 0; k < p.n; k++) {
+      const x = p.gx[k], y = p.gy[k];
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const c = y * W + x;
+      for (const d of [y > 0 ? c - W : -1, x > 0 ? c - 1 : -1, x < W - 1 ? c + 1 : -1, y < H - 1 ? c + W : -1]) {
+        if (d < 0 || owner[d] === p.id) continue;
+        const s = state[mat[d]];
+        if (s === SOLID) hard++; else if (s === POWDER && !vy[d]) soft++;
+      }
+    }
+    const at = levelOf(p);
+    return `${hard},${soft},${at ? Math.round(at.level) : -1}`;
+  };
+  const wake = p => { p.body.asleep = false; p.body.sleepy = 0; p.slept = false; };
+  // A piece comes to rest where it is: its cells stay as they are, held like any other.
+  const letGo = p => {
+    for (let k = 0; k < p.n; k++) { const x = p.gx[k], y = p.gy[k]; if (x >= 0 && y >= 0 && x < W && y < H && owner[y * W + x] === p.id) owner[y * W + x] = 0; }
+    p.body.gone = true; p.n = 0;
+  };
+  // A cell's contents moved to `to` (`from` is emptied by whoever calls).
+  const moveCell = (to, from) => {
+    mat[to] = mat[from]; shade[to] = shade[from]; flag[to] = flag[from]; life[to] = life[from]; temp[to] = temp[from];
+    vx[to] = vx[from]; vy[to] = vy[from]; fx[to] = 0; fy[to] = 0; stamp[to] = tick;
+    touch(to);
+  };
+  const neighbour = (c, side) => { const x = c % W; return side === 0 ? (c >= W ? c - W : -1) : side === 1 ? (x > 0 ? c - 1 : -1) : side === 2 ? (x < W - 1 ? c + 1 : -1) : (c < N - W ? c + W : -1); };
+  const newVisit = () => { if (visitTag > 2147480000) { visited.fill(0); visitTag = 0; } return ++visitTag; };
+  // The nearest of the cells a piece just left that is still empty, for what finds no room nearer.
+  const nearestSpare = (from, spare) => {
+    const x = from % W, y = (from - x) / W;
+    let best = Infinity, to = -1;
+    for (const c of spare) {
+      if (mat[c] !== 0 || claim[c] === claimTag) continue;
+      const dx = c % W - x, dy = (c - c % W) / W - y, d = dx * dx + dy * dy;
+      if (d < best) { best = d; to = c; }
+    }
+    return to;
+  };
+  // Hit by a piece moving fast enough, what it pushes aside is flung out at the speed it was hit with, up and away from
+  // the piece's middle, so a liquid splashes (and a powder, less): the nearer the piece (`near`, 1 beside it to 0 at the
+  // edge of the splash) the higher, each drop by a seeded share, so the spray breaks up rather than flying as a sheet.
+  const fling = (to, from, b, near = 1) => {
+    const s = state[mat[to]], fx0 = from % W + 0.5 - b.x, fy0 = (from - from % W) / W + 0.5 - b.y, ux = b.vx - b.w * fy0, uy = b.vy + b.w * fx0, speed = Math.sqrt(ux * ux + uy * uy);
+    if (speed < 1 || (s !== LIQUID && s !== POWDER)) return;
+    const away = to % W + 0.5 < b.x ? -1 : 1, k = s === LIQUID ? 1 : 0.5, up = (0.35 + 0.65 * near) * (0.5 + (rand() & 255) / 512), out = 0.5 + (rand() & 255) / 256;
+    vy[to] = -Math.min(TOP, Math.round(speed * SUB * SPLASH_UP * k * up)) || -1; vx[to] = away * Math.min(TOP, Math.round(speed * SUB * SPLASH_OUT * k * out));
+  };
+  // Pushes what is in cell `from` (where a piece now goes: powder, gas or fire) to the nearest empty cell it reaches
+  // through what is not solid, nearest first (up, left, right, down); past SEARCH cells, to the nearest cell the piece left.
+  const shove = (from, spare, b) => {
+    const tag = newVisit();
+    let head = 0, tail = 1, to = -1;
+    queue2[0] = from; visited[from] = tag;
+    search: while (head < tail) {
+      const c = queue2[head++];
+      for (let side = 0; side < 4; side++) {
+        const d = neighbour(c, side);
+        if (d < 0 || visited[d] === tag) continue;
+        visited[d] = tag;
+        if (claim[d] === claimTag) continue;
+        const m = mat[d];
+        if (m === 0) { to = d; break search; }
+        if (state[m] === SOLID || tail >= SEARCH) continue;
+        queue2[tail++] = d;
+      }
+    }
+    if (to < 0) to = nearestSpare(from, spare);
+    if (to < 0) return;
+    moveCell(to, from);
+    fling(to, from, b);
+  };
+  // Liquid in a piece's way goes where the liquid it is in stands lowest: to the empty cells beside that liquid (its
+  // surface, or a pocket of air in it), lowest first and nearest among those. Falling-sand liquids don't level through a
+  // gap under a piece, so pushed to the nearest room, a pool a piece stood in heaped up on one side of it and stayed so.
+  const pour = (list, spare, b) => {
+    const tag = newVisit(), room = [];
+    let head = 0, tail = 0;
+    for (const c of list) { visited[c] = tag; if (tail < SEARCH) queue2[tail++] = c; }
+    while (head < tail) {
+      const c = queue2[head++];
+      for (let side = 0; side < 4; side++) {
+        const d = neighbour(c, side);
+        if (d < 0 || visited[d] === tag) continue;
+        visited[d] = tag;
+        if (claim[d] === claimTag) continue;
+        if (mat[d] === 0) { room.push(d); continue; }
+        if (state[mat[d]] === LIQUID && tail < SEARCH) queue2[tail++] = d;
+      }
+    }
+    // Room within a row of the lowest counts as level, nearest first, so a piece landing on a still pool throws the water
+    // up beside itself; the rest, lowest first.
+    const row = c => (c - c % W) / W, lowest = room.reduce((most, c) => Math.max(most, row(c)), -1), level = c => (row(c) >= lowest - 1 ? lowest : row(c));
+    const order = room.map((c, i) => i).sort((a, z) => level(room[z]) - level(room[a]) || a - z);
+    const reach = 3 + 4 * (Math.sqrt(b.vx * b.vx + b.vy * b.vy) + Math.abs(b.w) * b.extent);
+    list.forEach((from, i) => {
+      let to = i < order.length ? room[order[i]] : -1;
+      if (to < 0 || mat[to] !== 0) to = nearestSpare(from, spare);
+      if (to < 0) return;
+      moveCell(to, from);
+      // Only what comes up near the piece splashes (the faster it hit, the wider); liquid that goes further off rises
+      // there quietly.
+      const x = to % W, y = row(to), [x0, y0, x1, y1] = b.box;
+      const off = Math.max(x0 - x, x - x1, y0 - y, y - y1, 0);
+      if (off <= reach) fling(to, from, b, 1 - off / reach);
+    });
+  };
+  // Fills the empty cells `holes` a piece left under a liquid's surface from the surface cells (air or gas over them)
+  // they reach through the liquid, highest first, and never from below the hole: the level falls where it stands highest.
+  const refill = holes => {
+    const tag = newVisit(), surface = [], isHole = new Set(holes);
+    let head = 0, tail = 0;
+    for (const c of holes) { visited[c] = tag; if (tail < SEARCH) queue2[tail++] = c; }
+    const open = e => e < 0 || (!isHole.has(e) && (state[mat[e]] === EMPTY || state[mat[e]] === GAS || state[mat[e]] === FIRE));
+    while (head < tail) {
+      const c = queue2[head++];
+      for (let side = 0; side < 4; side++) {
+        const d = neighbour(c, side);
+        if (d < 0 || visited[d] === tag) continue;
+        visited[d] = tag;
+        if (state[mat[d]] !== LIQUID) continue;
+        // On a surface, air or gas over it and more over that: a pocket of air in the liquid is not its surface.
+        if (d >= W && open(d - W) && open(d - 2 * W)) surface.push(d);
+        if (tail < SEARCH) queue2[tail++] = d;
+      }
+    }
+    const row = c => (c - c % W) / W, order = surface.map((c, i) => i).sort((a, z) => row(surface[a]) - row(surface[z]) || a - z);
+    let next = 0;
+    for (const hole of holes) {
+      if (next >= order.length) break;
+      const from = surface[order[next]];
+      if (row(from) > row(hole)) continue;
+      next++;
+      moveCell(hole, from);
+      vx[hole] = 0; vy[hole] = 0;
+      mat[from] = 0; shade[from] = 0; flag[from] = 0; life[from] = 0; temp[from] = ambient; vx[from] = 0; vy[from] = 0; fx[from] = 0; fy[from] = 0;
+      touch(from);
+    }
+  };
+  // Draws a piece where its body is: the angle held to the whole degree, the picture turned a quarter at a time and then
+  // by three shears, the place held to the whole pixel, each stepping on at once the way it last moved and back only
+  // past HOLD (TURN_HOLD of a degree), so a piece rocking about a boundary holds still. If its cells would land in a
+  // solid (its picture turned in whole pixels is not quite its exact shape), it tries a pixel up, left, right and down;
+  // if all of those are blocked it stays where it was drawn.
+  const carry = p => {
+    const b = p.body, h = p.hold, n = p.n;
+    if (toX.length < n) { toX = new Int32Array(n * 2); toY = new Int32Array(n * 2); }
+    const exact = atan2Deg(b.s, b.c), d = Math.round(exact);
+    if (d !== h.d) { const way = Math.sign(turnBetween(h.d, d)); if (way === h.wd || Math.abs(turnBetween(h.d, exact)) >= 0.5 + TURN_HOLD) { h.d = d; h.wd = way; } }
+    const quarter = Math.round(h.d / 90), q = ((quarter % 4) + 4) % 4, rest = h.d - 90 * quarter, cr = cosDeg(rest), sr = sinDeg(rest), alpha = -sr / (1 + cr), beta = sr;
+    const ou = q === 0 ? p.pu : q === 1 ? -p.pv : q === 2 ? -p.pu : p.pv, ov = q === 0 ? p.pv : q === 1 ? p.pu : q === 2 ? -p.pv : -p.pu;
+    const px = b.x - (b.c * p.mx - b.s * p.my) + ou, py = b.y - (b.s * p.mx + b.c * p.my) + ov;
+    if (q !== h.q) { h.q = q; h.x = Math.floor(px); h.y = Math.floor(py); h.wx = 0; h.wy = 0; }
+    else {
+      const nx = Math.floor(px), ny = Math.floor(py);
+      if (nx !== h.x) { const way = Math.sign(nx - h.x); if (way === h.wx || Math.abs(px - h.x - 0.5) >= 0.5 + HOLD) { h.x = nx; h.wx = way; } }
+      if (ny !== h.y) { const way = Math.sign(ny - h.y); if (way === h.wy || Math.abs(py - h.y - 0.5) >= 0.5 + HOLD) { h.y = ny; h.wy = way; } }
+    }
+    for (let k = 0; k < n; k++) {
+      let I = p.I[k], J = p.J[k];
+      if (q === 1) { const t = I; I = -J; J = t; } else if (q === 2) { I = -I; J = -J; } else if (q === 3) { const t = I; I = J; J = -t; }
+      I += Math.round(alpha * (J + ov)); J += Math.round(beta * (I + ou)); I += Math.round(alpha * (J + ov));
+      toX[k] = I + h.x; toY[k] = J + h.y;
+    }
+    let same = true;
+    for (let k = 0; k < n && same; k++) same = toX[k] === p.gx[k] && toY[k] === p.gy[k];
+    if (same) return;
+    let shift = -1;
+    for (let s = 0; s < NUDGES.length && shift < 0; s++) {
+      const [dx, dy] = NUDGES[s];
+      let clear = true;
+      for (let k = 0; k < n && clear; k++) {
+        const x = toX[k] + dx, y = toY[k] + dy;
+        if (x < 0 || x >= W || y >= H) clear = false;
+        else if (y >= 0) { const c = y * W + x; clear = !(state[mat[c]] === SOLID && owner[c] !== p.id); }
+      }
+      if (clear) shift = s;
+    }
+    if (shift < 0) return;
+    const [dx, dy] = NUDGES[shift];
+    if (claimTag > 2147480000) { claim.fill(0); claimTag = 0; }
+    claimTag++;
+    for (let k = 0; k < n; k++) { toX[k] += dx; toY[k] += dy; if (toY[k] >= 0) claim[toY[k] * W + toX[k]] = claimTag; }
+    // The cells it leaves, empty air at the ambient temperature; then what is in its way, pushed aside; then its cells.
+    const spare = [];
+    for (let k = 0; k < n; k++) {
+      const x = p.gx[k], y = p.gy[k];
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const c = y * W + x;
+      if (claim[c] === claimTag) continue;
+      mat[c] = 0; shade[c] = 0; flag[c] = 0; life[c] = 0; temp[c] = ambient; owner[c] = 0; vx[c] = 0; vy[c] = 0; fx[c] = 0; fy[c] = 0;
+      touch(c); spare.push(c);
+    }
+    const wet = [];
+    for (let k = 0; k < n; k++) {
+      if (toY[k] < 0) continue;
+      const c = toY[k] * W + toX[k];
+      if (mat[c] === 0 || owner[c] === p.id) continue;
+      if (state[mat[c]] === LIQUID) wet.push(c); else shove(c, spare, b);
+    }
+    if (wet.length) pour(wet, spare, b);
+    for (let k = 0; k < n; k++) {
+      p.gx[k] = toX[k]; p.gy[k] = toY[k];
+      if (toY[k] < 0) continue;
+      const c = toY[k] * W + toX[k];
+      mat[c] = p.mat[k]; shade[c] = p.shade[k]; flag[c] = p.flag[k]; life[c] = p.life[k]; temp[c] = p.temp[k];
+      vx[c] = 0; vy[c] = 0; fx[c] = 0; fy[c] = 0; stamp[c] = tick; owner[c] = p.id;
+      touch(c);
+    }
+    // A cell it left under a liquid's surface (liquid beside it, or a pocket under it with liquid below) fills at once, so a
+    // piece rising in a pool or moving through it leaves no hole of air behind it.
+    const holes = spare.filter(c => {
+      if (mat[c] !== 0) return false;
+      const x = c % W;
+      return (x > 0 && state[mat[c - 1]] === LIQUID) || (x < W - 1 && state[mat[c + 1]] === LIQUID) || (c < N - W && state[mat[c + W]] === LIQUID && (c < W || state[mat[c - W]] === SOLID));
+    });
+    if (holes.length) refill(holes);
+  };
+  // The obstacles the moving pieces meet, in the window round them: fixed solids and resting pieces (hard), and
+  // resting powder (soft) unless it lies on a piece (sand poured on a piece rides it rather than holding it).
+  const obstacle = (x, y) => {
+    const c = y * W + x, s = state[mat[c]];
+    return s === SOLID ? (owner[c] ? 0 : 1) : s === POWDER && !vy[c] && !onTop[c] ? 2 : 0;
+  };
+  // One frame of the pieces, after the cells' pass and before heat.
+  const tumbles = () => {
+    const changed = supportChanged || loose;
+    supportChanged = false; loose = false;
+    // Read back what the pieces' cells hold: every piece when a solid came or went, else the moving ones.
+    for (const p of rigid.slice()) if (p.n && (changed || !p.body.asleep)) read(p);
+    // New pieces: falling solids not part of one, loose (held by no fixed solid beside or over them).
+    if (changed) {
+      if (tag > 2147480000) { seen.fill(0); tag = 0; }
+      const start = tag;
+      for (let c = 0; c < N; c++) {
+        if (!falls[mat[c]] || owner[c] || seen[c] > start) continue;
+        const own = ++tag, n = flood(c, own);
+        if (glued(piece, n)) continue;
+        if (rigid.length >= MOST_PIECES) {
+          let weight = 0;
+          for (let k = 0; k < n; k++) weight += density[mat[piece[k]]];
+          drop(piece.subarray(0, n), own, (weight / n) | 0);
+          continue;
+        }
+        makePiece(piece, n);
+      }
+    }
+    // Sleeping pieces wake when what lies round them changed (only where cells were stepped this frame).
+    for (const p of rigid) {
+      if (!p.n || !p.body.asleep || !p.slept) continue;
+      const [x0, y0, x1, y1] = p.body.box, k0 = Math.max(0, Math.floor(x0 - 2) >> 4), k1 = Math.min(CW - 1, Math.floor(x1 + 2) >> 4);
+      const j0 = Math.max(0, Math.floor(y0 - 2) >> 4), j1 = Math.min(CH - 1, Math.floor(y1 + 2) >> 4);
+      let stirred = false;
+      for (let j = j0; j <= j1 && !stirred; j++) for (let i = k0; i <= k1 && !stirred; i++) stirred = !!(awake[j * CW + i] || next[j * CW + i]);
+      if (stirred && ringOf(p) !== p.ring) wake(p);
+    }
+    const moving = rigid.filter(p => p.n && !p.body.asleep);
+    if (moving.length) {
+      let x0 = W, y0 = H, x1 = 0, y1 = 0;
+      for (const p of moving) {
+        buoy(p);
+        const [a, c, e, f] = p.body.box;
+        x0 = Math.min(x0, Math.floor(a) - REACH); y0 = Math.min(y0, Math.floor(c) - REACH); x1 = Math.max(x1, Math.ceil(e) + REACH); y1 = Math.max(y1, Math.ceil(f) + REACH);
+      }
+      x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(W - 1, x1); y1 = Math.min(H - 1, y1);
+      if (x1 >= x0 && y1 >= y0) {
+        for (let y = y1; y >= y0; y--) for (let x = x0, c = y * W + x0; x <= x1; x++, c++) {
+          const below = y < H - 1 ? c + W : -1;
+          onTop[c] = state[mat[c]] === POWDER && below >= 0 && (owner[below] > 0 || (y < y1 && onTop[below])) ? 1 : 0;
+        }
+        world.retraceCells(x0, y0, x1 - x0 + 1, y1 - y0 + 1, obstacle);
+      } else world.retraceCells(0, 0, 0, 0, obstacle);
+      world.advance(++worldFrame);
+      for (const p of moving) {
+        if (p.body.gone) { letGo(p); continue; }
+        carry(p);
+        // A piece still moving keeps the chunks it lies in awake, so a grid isn't settled while a piece drifts.
+        if (!p.body.asleep) {
+          const [a, c, e, f] = p.body.box;
+          for (let j = Math.max(0, Math.floor(c) >> 4); j <= Math.min(CH - 1, Math.floor(f) >> 4); j++) for (let i = Math.max(0, Math.floor(a) >> 4); i <= Math.min(CW - 1, Math.floor(e) >> 4); i++) next[j * CW + i] = 1;
+        }
+      }
+    }
+    // A piece that has come to rest notes what lies round it; held by a fixed solid beside it or over it, it lets go of
+    // its body and stays as plain cells.
+    for (const p of rigid) {
+      if (!p.n) continue;
+      if (!p.body.asleep) { p.slept = false; continue; }
+      if (p.slept) continue;
+      p.slept = true;
+      const list = [];
+      for (let k = 0; k < p.n; k++) { const x = p.gx[k], y = p.gy[k]; if (x >= 0 && y >= 0 && x < W && y < H) list.push(y * W + x); }
+      if (list.length === p.n && glued(list, list.length)) letGo(p);
+      else p.ring = ringOf(p);
+    }
+    if (rigid.some(p => !p.n)) {
+      for (let k = rigid.length - 1; k >= 0; k--) if (!rigid[k].n) rigid.splice(k, 1);
+      if (world.bodies.length > 2 * rigid.length + 32) world.compact();
+    }
   };
 
   // Heat moves across every edge between neighbours by the smaller conductance of the two, read from this frame's
@@ -1108,6 +1597,25 @@ export function createLivePowder(source, options = {}) {
       }
       stirred = true;
     }
+    // Tumbling pieces within it are thrown as their cells would be, the nearer cells the harder, and spun by the push's
+    // lean about their middles.
+    if (TUMBLE) for (const p of rigid) {
+      const b = p.body;
+      if (!p.n || b.gone) continue;
+      let px = 0, py = 0, turn = 0;
+      for (let k = 0; k < p.n; k++) {
+        const x = p.gx[k] + 0.5, y = p.gy[k] + 0.5, dx = x - at.x, dy = y - at.y, d = Math.sqrt(dx * dx + dy * dy);
+        if (d > at.radius + 0.5 || d === 0) continue;
+        const w = 1 - d / (at.radius + 0.5), speed = strength * (0.35 + 0.65 * w) * density[p.mat[k]] / 100;
+        let ux = dx / d, uy = dy / d - 0.6;
+        const length = Math.sqrt(ux * ux + uy * uy) || 1;
+        ux *= speed / length; uy *= speed / length;
+        px += ux; py += uy; turn += (x - b.x) * uy - (y - b.y) * ux;
+      }
+      if (!px && !py) continue;
+      b.vx += px * b.invMass; b.vy += py * b.invMass; b.w += turn * b.invInertia;
+      b.asleep = false; b.sleepy = 0; p.slept = false;
+    }
     // Loose cells, nearest first, are each thrown out along their line from the blast (tipped upward) to the first free
     // cell on it, before a solid, with that speed: the blast opens a crater and its spray flies from the rim.
     const loose = [];
@@ -1216,7 +1724,10 @@ export function createLivePowder(source, options = {}) {
     // What is at a pixel now.
     at(x, y) {
       const c = integer(y, 'at.y', 0, H - 1) * W + integer(x, 'at.x', 0, W - 1);
-      return { material: T.names[mat[c]], temperature: temp[c] / SIXTEENTHS, life: life[c], burning: !!(flag[c] & BURNING), velocity: [vx[c] / SUB, vy[c] / SUB], ...(F && { air: [sampleU(x + 0.5, y + 0.5), sampleV(x + 0.5, y + 0.5)] }) };
+      // A tumbling piece's cell moves as its body does there (its velocity plus its turning).
+      const p = TUMBLE && owner[c] ? rigid.find(q => q.id === owner[c]) : null, b = p ? p.body : null;
+      const velocity = b ? [b.vx - b.w * (y + 0.5 - b.y), b.vy + b.w * (x + 0.5 - b.x)] : [vx[c] / SUB, vy[c] / SUB];
+      return { material: T.names[mat[c]], temperature: temp[c] / SIXTEENTHS, life: life[c], burning: !!(flag[c] & BURNING), velocity, ...(p && { piece: { id: p.id, moving: !b.asleep, angle: Math.round(turnBetween(0, atan2Deg(b.s, b.c)) * 10) / 10 } }), ...(F && { air: [sampleU(x + 0.5, y + 0.5), sampleV(x + 0.5, y + 0.5)] }) };
     },
     // How many cells of each material there are, and how many burn.
     measure() {
@@ -1225,8 +1736,10 @@ export function createLivePowder(source, options = {}) {
       for (let c = 0; c < N; c++) { counts[mat[c]]++; if (flag[c]) burning++; }
       let stepped = 0;
       for (let k = 0; k < awake.length; k++) stepped += awake[k];
-      // `chunks`: how many of the grid's 16 × 16 chunks the last step visited, of how many.
-      return { counts: Object.fromEntries(T.names.map((name, m) => [name, counts[m]]).filter(([, n]) => n)), burning, chunks: { stepped, of: awake.length } };
+      // `chunks`: how many of the grid's 16 × 16 chunks the last step visited, of how many; with tumbling pieces, how
+      // many of them move and how many rest.
+      const moving = TUMBLE ? rigid.filter(p => p.n && !p.body.asleep).length : 0;
+      return { counts: Object.fromEntries(T.names.map((name, m) => [name, counts[m]]).filter(([, n]) => n)), burning, chunks: { stepped, of: awake.length }, ...(TUMBLE && { pieces: { moving, resting: rigid.filter(p => p.n).length - moving } }) };
     },
     render: target => render(target),
     // The cell arrays, for tests and for hooks that read the grid (temperatures in sixteenths of a degree, velocities in
@@ -1600,7 +2113,7 @@ export const SANDBOX = {
     ash: { state: 'powder', density: 5, conduct: 0.1, colors: ['#8b8884', '#7d7a77', '#99968f'], hot: { from: 250, to: 650, colors: ['#5c2c22', '#9c3b1e', '#e0652c'] } },
     // The interesting one: moss is alive. It drinks water next to it and grows into the space, and burns fast.
     moss: {
-      state: 'solid', falls: true, density: 7, conduct: 0.08, colors: ['#4e8a39', '#5b9a41', '#427a31', '#69ab49'],
+      state: 'solid', falls: true, clings: true, density: 7, conduct: 0.08, colors: ['#4e8a39', '#5b9a41', '#427a31', '#69ab49'],
       burn: { temperature: 150, frames: [14, 30], heat: 500, emit: [{ material: 'fire', chance: 0.5 }, { material: 'smoke', chance: 0.03 }], colors: ['#ffe066', '#ffa632', '#d8521f'] }
     },
     wall: { state: 'solid', conduct: 0.05, pattern: 'blotch', colors: ['#363847', '#3b3d4c', '#414456'] }

@@ -165,11 +165,11 @@ The four presets are in [examples/](examples/) (`*.crystal.json`); agents compil
 
 ## Falling sand
 
-A `pixelforge-powder` source is a falling-sand sandbox: every pixel holds sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss or a material of your own, and the grid steps 60 times a second. Falls speed up and splash, pools level and rest, heat boils, melts and lights things, burnt-through structures collapse, and moving air carries smoke in plumes. The same source runs live in a game with `createLivePowder` (`pixelbolt/powder`, pointer strokes that replay exactly) and compiles to an ordinary recipe of one-shot clips.
+A `pixelforge-powder` source is a falling-sand sandbox: every pixel holds sand, water, stone, wood, fire, smoke, steam, oil, lava, ice, ash, moss or a material of your own, and the grid steps 60 times a second. Falls speed up and splash, pools level and rest, heat boils, melts and lights things, burnt-through structures collapse or, with `pieces: "tumble"`, topple and tumble as rigid bodies, and moving air carries smoke in plumes. The same source runs live in a game with `createLivePowder` (`pixelbolt/powder`, pointer strokes that replay exactly) and compiles to an ordinary recipe of one-shot clips.
 
 ![A hut on a pier burns, drops into its pool and floats there burning while lava pours off the far cliff into the water](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/showcase/powder/hut-fire.gif) ![Lava burns through a moss plug and pours into a pool, crusting to stone in clouds of steam](https://raw.githubusercontent.com/skulitom/Pixelbolt/main/showcase/powder/lava-falls.gif)
 
-The four presets are in [examples/](examples/) (`*.powder.json`); agents compile them with MCP `pixel_compile` and read the format with `pixel_help` topic `powder`. In the studio, **Powder lab** (`/powder.html`) runs the sandbox live in your browser: paint any material, heat, cool, blow and blast with the pointer, and copy a link that replays every stroke to the same pixels. The [falling sand guide](docs/art-workflow.md#falling-sand) covers the starter table, materials, heat, reactions, air, inputs, clips and the live runner.
+The five presets are in [examples/](examples/) (`*.powder.json`); agents compile them with MCP `pixel_compile` and read the format with `pixel_help` topic `powder`. In the studio, **Powder lab** (`/powder.html`) runs the sandbox live in your browser: paint any material, heat, cool, blow and blast with the pointer, and copy a link that replays every stroke to the same pixels. The [falling sand guide](docs/art-workflow.md#falling-sand) covers the starter table, materials, heat, reactions, air, inputs, clips and the live runner.
 
 ## Start
 

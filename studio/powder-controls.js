@@ -15,7 +15,8 @@ export const POWDER_SCENES = [
   { id: 'hut-fire', file: 'hut-fire', title: 'Hut fire', note: 'Burning, collapse, floating' },
   { id: 'lava-falls', file: 'lava-falls', title: 'Lava falls', note: 'Lava, moss and steam' },
   { id: 'quarry-blast', file: 'quarry-blast', title: 'Quarry blast', note: 'A blast throws sand and water' },
-  { id: 'rain-on-fire', file: 'rain-on-fire', title: 'Rain on fire', note: 'Wind, then rain on a campfire' }
+  { id: 'rain-on-fire', file: 'rain-on-fire', title: 'Rain on fire', note: 'Wind, then rain on a campfire' },
+  { id: 'stilt-hut', file: 'stilt-hut', title: 'Stilt hut', note: 'Tumbling pieces: a hut topples' }
 ];
 export const POWDER_PRESETS = POWDER_SCENES.filter(scene => scene.file);
 export const sceneById = id => POWDER_SCENES.find(scene => scene.id === id);

@@ -89,7 +89,9 @@ function convex(points, path) {
   return pts;
 }
 
-function polygonPart(points, radius = 0) {
+/** A convex part from its outline ([x, y] points wound as a box's: top left, top right, bottom right), with its edges'
+ * outward normals; `radius` rounds it (a two-point part is a capsule). */
+export function polygonPart(points, radius = 0) {
   const n = points.length, vx = new Float64Array(n), vy = new Float64Array(n), nx = new Float64Array(n), ny = new Float64Array(n);
   points.forEach(([x, y], i) => { vx[i] = x; vy[i] = y; });
   for (let i = 0; i < n; i++) {
@@ -1184,7 +1186,46 @@ export function createBodyWorld(effect, context) {
     }
     rouse(woken);
   };
-  return { bodies, stats, gravity, advance, turf, retrace };
+  // Obstacles from a grid kept elsewhere (a powder grid's solids), for the canvas pixels from (x, y), w × h of them:
+  // `cell(px, py)` is 0 where a body may go, 1 for a hard pixel and 2 for a soft one (resting powder: it stops a body
+  // sinking in but never shoves one out). Past those pixels the canvas is open, and past the canvas its walls are closed.
+  // Sleeping bodies are not woken: the grid's keeper knows what moved under them.
+  const HARD = { bounce: 0, friction: 0.6 }, SOFT = { bounce: 0, friction: 0.8, soft: true };
+  const retraceCells = (x, y, w, h, cell) => {
+    const { walls } = effect;
+    const at = (i, j) => {
+      const px = x + i, py = y + j;
+      if (px < 0 || py < 0 || px >= width || py >= height) return (px < 0 && walls.left) || (px >= width && walls.right) || (py < 0 && walls.top) || (py >= height && walls.bottom);
+      return i >= 0 && j >= 0 && i < w && j < h && cell(px, py) > 0;
+    };
+    const material = (i, j) => {
+      const px = x + i, py = y + j;
+      return px >= 0 && py >= 0 && px < width && py < height && i >= 0 && j >= 0 && i < w && j < h && cell(px, py) === 2 ? SOFT : HARD;
+    };
+    world = { ...traceGrid(at, material, w, h, 1, x, y, width, height), solid: world.solid, hard: world.hard };
+  };
+  // A body made elsewhere (a powder grid's loose piece) joins the world: `b` gives its parts (its own frame, about its
+  // centre of mass), size, inverse mass and inertia, place, turn (c, s) and velocity; the rest starts as a new body's.
+  const add = b => {
+    const body = {
+      name: null, path: 'piece', shape: 'polygon', fixed: false, angle: 0, spin: 0, vx: 0, vy: 0, w: 0, c: 1, s: 0, bounce: 0.1, friction: 0.6, drag: 0, spinDrag: 0,
+      weightless: false, asleep: false, tireless: false, temperature: null, team: -1, speed: null, fills: null, fillEvery: null, outline: null, symbol: null,
+      trail: null, smear: null, breaks: null, pivot: null, anchor: null, drift: null, ...b,
+      index: bodies.length, gone: false, sleepy: 0, hit: false, struck: false, colour: 0, hits: 0, history: [], poses: []
+    };
+    body.x0 = body.x; body.y0 = body.y; body.angle0 = 0; body.extent ??= Math.max(body.size[0], body.size[1]) / 2;
+    place(body); bodies.push(body);
+    return body;
+  };
+  // Gone bodies are dropped and the rest numbered afresh, so a long live run doesn't carry every body it ever had.
+  const compact = () => {
+    const kept = bodies.filter(b => !b.gone);
+    if (kept.length === bodies.length) return;
+    bodies.length = 0;
+    kept.forEach((b, index) => { b.index = index; bodies.push(b); });
+    warm = new Map();
+  };
+  return { bodies, stats, gravity, advance, turf, retrace, retraceCells, add, place, compact };
 }
 
 // The bodies splits added to a world (the pieces of broken bodies are counted with them, under broken).

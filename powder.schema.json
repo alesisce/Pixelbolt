@@ -138,6 +138,13 @@
       "pattern": "^[a-z][a-z0-9-]{0,23}$",
       "description": "The fixed solid the wall input paints; default the material named \"wall\"."
     },
+    "pieces": {
+      "enum": [
+        "drop",
+        "tumble"
+      ],
+      "description": "How a loose piece of solids that fall comes down. \"drop\" (default): straight down as one block, held while any cell touches a fixed solid or the floor. \"tumble\": as a rigid body that turns, tips off ledges and stubs its weight is not over, floats in denser liquids, pushes what it lands in aside and comes to rest, its cells keeping their material, burning and heat; held only where a fixed solid is beside it or over it (or under a material that clings)."
+    },
     "materials": {
       "type": "object",
       "maxProperties": 200,
@@ -203,7 +210,11 @@
           },
           "falls": {
             "type": "boolean",
-            "description": "Solids: drops as a rigid piece, with every solid that falls touching it, once no fixed solid and no floor holds the piece up; it sinks through lighter liquids and floats on denser ones."
+            "description": "Solids: drops as a rigid piece, with every solid that falls touching it, once no fixed solid and no floor holds the piece up; it sinks through lighter liquids and floats on denser ones. How it comes down is set by the source's pieces."
+          },
+          "clings": {
+            "type": "boolean",
+            "description": "A solid that falls (moss): with pieces \"tumble\", held by any fixed solid it touches, under it too, and a piece of its own apart from other falling solids, as a plant holds on; without it a piece standing on a fixed solid rests there and topples off it. Default false."
           },
           "colors": {
             "type": "array",

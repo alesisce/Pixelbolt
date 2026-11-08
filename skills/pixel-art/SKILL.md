@@ -21,7 +21,7 @@ For looping interference or portal interiors, start from `examples/interference.
 
 For crystals that grow from seeds (a quartz cluster, an amethyst geode, pyrite cubes, snowflakes), start from `examples/quartz-cluster.crystal.json`, `examples/geode.crystal.json`, `examples/pyrite.crystal.json` or `examples/snowflakes.crystal.json` and compile it ([crystal growth](../../docs/art-workflow.md#crystal-growth)). Draw the rock they grow from as the source's underlay, and its front lip as the overlay so their feet grow out of it.
 
-For falling-sand scenes (things burning and collapsing, lava meeting water, a blast throwing sand, rain putting out a fire), start from `examples/hut-fire.powder.json`, `examples/lava-falls.powder.json`, `examples/quarry-blast.powder.json` or `examples/rain-on-fire.powder.json` ([falling sand](../../docs/art-workflow.md#falling-sand)): `base: "sandbox"` gives the starter materials, the scene and scripted inputs set it going, and clips sample it.
+For falling-sand scenes (things burning and collapsing, lava meeting water, a blast throwing sand, rain putting out a fire), start from `examples/hut-fire.powder.json`, `examples/lava-falls.powder.json`, `examples/quarry-blast.powder.json`, `examples/rain-on-fire.powder.json` or, for things that topple and tumble (`pieces: "tumble"`), `examples/stilt-hut.powder.json` ([falling sand](../../docs/art-workflow.md#falling-sand)): `base: "sandbox"` gives the starter materials, the scene and scripted inputs set it going, and clips sample it.
 
 ## Art direction
 

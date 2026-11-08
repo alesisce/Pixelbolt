@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { compilePowder, renderProject, encodeGIF } from '../../src/index.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-export const POWDER_SHOWCASE = ['hut-fire', 'lava-falls', 'quarry-blast', 'rain-on-fire'];
+export const POWDER_SHOWCASE = ['hut-fire', 'lava-falls', 'quarry-blast', 'rain-on-fire', 'stilt-hut'];
 const HOLD = 1200;
 
 // One GIF per example, at 3× (4× for the narrower ones): `recipes` may hand in recipes compiled elsewhere (the tests),

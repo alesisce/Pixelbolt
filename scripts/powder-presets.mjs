@@ -115,4 +115,40 @@ const rainOnFire = (() => {
   });
 })();
 
-export const powderPresets = { 'hut-fire': hutFire, 'lava-falls': lavaFalls, 'quarry-blast': quarryBlast, 'rain-on-fire': rainOnFire };
+// A tall hut on stilts over a pool, its pieces tumbling (pieces: "tumble"): one stilt burns at the waterline, the hut
+// leans onto the stub, then topples over into the water with a splash and lies there on its side, still burning, while
+// a raft rocks in the waves. Nothing is scripted after the first frame.
+const STILT_HUT = [
+  '........rrrrrr........',
+  '......rrrrrrrrrr......',
+  '....rrrrrrrrrrrrrr....',
+  '..rrrrrrrrrrrrrrrrrr..',
+  'rrrrrrrrrrrrrrrrrrrrrr',
+  '.ww................ww.',
+  '.ww....wwww........ww.',
+  '.ww....w..w....www.ww.',
+  '.ww....wwww....w.w.ww.',
+  '.ww............w.w.ww.',
+  'wwwwwwwwwwwwwwwwwwwwww',
+  'wwwwwwwwwwwwwwwwwwwwww'
+];
+const stiltHut = (() => {
+  const W = 128, H = 80, ground = H - 4, water = 56, hx = 30, floor = water - 24;
+  return source('stilt-hut', W, H, 5, {
+    pieces: 'tumble',
+    scene: [
+      { material: 'stone', rect: [0, ground, W, 4] },
+      { material: 'stone', rect: [0, water - 6, 12, ground - water + 6] }, { material: 'sand', rect: [0, water - 12, 10, 6], fill: 0.95 },
+      { material: 'stone', rect: [W - 14, water - 10, 14, ground - water + 10] },
+      { material: 'water', rect: [12, water, W - 26, ground - water] },
+      { material: 'moss', rect: [12, ground - 2, 40, 2], fill: 0.5 },
+      { rows: STILT_HUT, at: [hx, floor - STILT_HUT.length + 2], legend: { r: 'wood', w: 'wood' } },
+      { material: 'wood', rect: [hx + 1, floor + 2, 2, ground - floor - 2] }, { material: 'wood', rect: [hx + 19, floor + 2, 2, ground - floor - 2] },
+      { material: 'wood', rect: [hx + 19, water - 3, 2, 3], burning: true },
+      { material: 'wood', rect: [84, water - 2, 14, 2] }
+    ],
+    clips: { 'stilt-hut': { start: 160, frames: 90, every: 4 } }
+  });
+})();
+
+export const powderPresets = { 'hut-fire': hutFire, 'lava-falls': lavaFalls, 'quarry-blast': quarryBlast, 'rain-on-fire': rainOnFire, 'stilt-hut': stiltHut };

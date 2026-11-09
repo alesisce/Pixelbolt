@@ -62,7 +62,7 @@ A tile set also exports `name.tsx`, a [Tiled](https://www.mapeditor.org) tileset
 - **Variants and weights.** Tiles with one Wang id are alternatives the brush picks between at random, at each tile's `probability`: its `tile.weight` against the heaviest tile of its kind (its terrain and mask, its corners, or the plain tiles).
 - **Slopes.** A set's slopes and their feet are plain tiles with their collision objects, outside the Wang sets: paint the terrain, then place them by hand.
 - **Collision.** `tile.collision` polygons are objects in each tile's collision group (the Tile Collision Editor), in exported pixels; `tile.oneWay` is a bool property `oneWay` on the tile, for the game to read.
-- **Animated tiles.** An animation that loops over frames of one kind animates its first frame's tile, with each frame's time, wherever its frames are on the sheet; its later frames are left out of the Wang sets, so the brush never places a still frame of it.
+- **Animated tiles.** An animation over frames of one kind is one tile, its first frame's: its later frames are left out of the Wang sets, so the brush never places a still frame of it, and when it loops the tile plays it, with each frame's time, wherever its frames are on the sheet. An animation that plays once stays a still tile of its first frame. The Godot TileSet takes the same frames as tiles from the same sheet.
 - **Scenes.** A scene export (`pixelbolt scene`, MCP `pixel_scene`) writes `assets/<n>/tileset.tsx` beside every asset's `color.png` (a Tiled tileset has one image): a tile set's with its terrains, any other asset's with its frames as tiles and its looping animations animated. `alignment.json` names each under the asset's `tiled`, and the map under `tiled`.
 
 #### The scene as a Tiled map

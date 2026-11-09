@@ -247,7 +247,7 @@ export function createToolRunner({ directory, root, version }) {
       const clash = [...seen].find(other => inside(other, id) || inside(id, other));
       if (clash !== undefined) throw new PixelError(where, `${target} and another saveAs path would need one to be a folder of the other`);
       seen.add(id);
-      plan.push({ key, file, destination, bytes, replaced: Boolean(existing) });
+      plan.push({ key, target, file, destination, bytes, replaced: Boolean(existing) });
     }
     // Every saved atlas names the sheet it describes: a saved sheet (the one in its own folder first), or else the
     // export folder's, whose name is only known once that folder exists (null here).
@@ -300,18 +300,29 @@ export function createToolRunner({ directory, root, version }) {
   // never missing, even if the call is stopped, and a hard link to the old file keeps the old bytes. If a step fails,
   // what this call put in place is undone (replaced files get their old bytes back, new copies are removed), but only
   // where the file is still the one it placed, so another server's later write is never undone; a backup that can't
-  // be put back is kept, and the error names it.
+  // be put back is kept, and the error names it. The error is the entry that could not be written, by the key and
+  // path the caller gave, and why in a few words: the system's own message names the temporary files.
   const temporaryIn = folder => path.join(folder, `.pixelbolt-${randomUUID()}.tmp`);
   const identity = async file => { const info = await stat(file, { bigint: true }).catch(() => null); return info && `${info.dev}:${info.ino}`; };
+  const REFUSALS = { EACCES: 'no permission to write there', EPERM: 'no permission to write there, or the file is open in another program', EBUSY: 'the file is open in another program', EROFS: 'the disk is read-only', ENOSPC: 'the disk is full', EDQUOT: 'the disk quota is used up', EEXIST: 'a file appeared there after the paths were checked', ENOENT: 'its folder went missing after the paths were checked', ENOTDIR: 'a folder in it became a file after the paths were checked' };
+  const whyNot = (error, destination) => {
+    // Windows reports a name it can't hold as a missing file. It counts UTF-16 units, other systems bytes.
+    const long = part => (process.platform === 'win32' ? part.length : Buffer.byteLength(part)) > 255;
+    if (error.code === 'ENAMETOOLONG' || destination.split(path.sep).some(long)) return 'a name in it is too long for the disk';
+    return REFUSALS[error.code] ?? (error.code ? `${/^\w+: ([^,]+)/.exec(error.message)?.[1] ?? 'the system refused it'}, ${error.code}` : error.message);
+  };
   const writeSaves = async (saves, replace, bytesOf) => {
     const staged = [], placed = [], backups = new Set(), kept = [];
+    let writing;
     try {
       for (const item of saves) {
+        writing = item;
         await mkdir(path.dirname(item.destination), { recursive: true });
         staged.push(temporaryIn(path.dirname(item.destination)));
         await writeFile(staged.at(-1), bytesOf(item), { flag: 'wx' });
       }
       for (const [index, item] of saves.entries()) {
+        writing = item;
         // A rename or link keeps the file's identity, so it is known before anyone else can touch the destination.
         let mine = await identity(staged[index]), backup = null;
         if (!replace) {
@@ -335,10 +346,10 @@ export function createToolRunner({ directory, root, version }) {
       for (const step of placed.reverse()) {
         if (step.mine === null || await identity(step.destination) !== step.mine) continue;
         try { if (step.backup) await rename(step.backup, step.destination); else await rm(step.destination, { force: true }); }
-        catch { if (step.backup) kept.push(step); }
+        catch { kept.push(step); }
       }
-      if (kept.length) throw new PixelError('saveAs', `${error.message}; ${kept.map(step => `${step.destination} could not be put back: its old bytes are kept at ${step.backup}`).join('; ')}`);
-      throw error;
+      const left = kept.map(step => (step.backup ? `${step.destination} could not be put back: its old bytes are kept at ${step.backup}` : `${step.destination} was written and could not be removed`));
+      throw new PixelError(`saveAs.${writing.key}`, `${writing.target} could not be written (${whyNot(error, writing.destination)}), so ${left.length ? `the other saveAs files were undone, but ${left.join('; ')}` : 'no saveAs file was written or changed'}`);
     } finally {
       const keep = new Set(kept.map(step => step.backup));
       await Promise.all([...staged, ...[...backups].filter(file => !keep.has(file))].map(file => rm(file, { force: true })));
@@ -434,13 +445,20 @@ export function createToolRunner({ directory, root, version }) {
         if (frames) await writeBundle(frames, path.join(out, 'sequence'));
         if (gifs.length) await mkdir(path.join(out, 'gifs'));
         for (const item of gifs) await writeFile(path.join(out, 'gifs', `${item.animation}.gif`), item.data, { flag: 'wx' });
-        await writeSaves(saves, overwrite === true, item => {
-          if (item.rebase === undefined) return item.bytes;
-          const sheet = item.rebase ?? path.join(out, `${bundle.project.name}.png`);
-          if (item.file.endsWith('.tileset.tres')) return rebasedTileSet(item.bytes, item.destination, sheet);
-          if (item.file.endsWith('.tsx')) return rebasedTiled(item.bytes, item.destination, sheet);
-          return item.file.endsWith('.tres') ? rebasedSpriteFrames(bundle.atlas, item.destination, sheet) : rebasedAtlas(item.bytes, item.destination, sheet);
-        });
+        // A copy that can't be written undoes the copies, not the export: the folder and the revision are whole, and
+        // the error carries both under the names a finished render gives them.
+        try {
+          await writeSaves(saves, overwrite === true, item => {
+            if (item.rebase === undefined) return item.bytes;
+            const sheet = item.rebase ?? path.join(out, `${bundle.project.name}.png`);
+            if (item.file.endsWith('.tileset.tres')) return rebasedTileSet(item.bytes, item.destination, sheet);
+            if (item.file.endsWith('.tsx')) return rebasedTiled(item.bytes, item.destination, sheet);
+            return item.file.endsWith('.tres') ? rebasedSpriteFrames(bundle.atlas, item.destination, sheet) : rebasedAtlas(item.bytes, item.destination, sheet);
+          });
+        } catch (error) {
+          error.message += `. The export itself was written to ${out}: use its files, or send revision "${savedRevision}" with saveAs paths that can be written`;
+          throw Object.assign(error, { made: { revision: savedRevision, directory: out } });
+        }
         const check = checkDelivery(bundle.project, { recipe, gifs, expect, animation });
         return { content: [textContent(withResolved({ ok: true, revision: savedRevision, directory: out, ...outputSummary(out, files, listFiles === true), ...withRates(bundle.project, recipe), playback: path.join(out, 'preview.html'), ...(gifs.length && { gifs: { directory: 'gifs', count: gifs.length, scale: gifs[0].scale, width: gifs[0].width, height: gifs[0].height, ...(gifs.length <= 16 && { files: gifs.map(item => `gifs/${item.animation}.gif`) }), notes: gifs.flatMap(item => item.notes.map(text => `${item.animation}: ${text}`)).slice(0, 16) } }), ...(frames && { sequence: sequenceSummary(frames.info) }), ...(saves.length && { saved: saves.map(item => ({ file: item.file, path: item.destination, ...(item.replaced && { replaced: true }) })) }), check, preview: viewSummary(view), warnings: bundle.project.warnings, ...(shared && { share: shared }) }, resolved)), imageContent(view.sheet)], ...(preview && preview(bundle.project, {
           animation, files: [...new Set([
@@ -512,7 +530,7 @@ export function createToolRunner({ directory, root, version }) {
         const project = renderProject(imported.recipe), view = inspectProject(project, { maxCells: 256 });
         return { content: [textContent({ ok: true, revision: await remember(imported.recipe), name: project.name, width: project.width, height: project.height, frames: project.frames.length, provenance: imported.provenance, preview: viewSummary(view) }), imageContent(view.sheet)], ...(preview && preview(project)) };
       }
-    } catch (cause) { return { isError: true, content: [textContent({ error: cause.message, ...(cause.path ? { path: cause.path } : {}), ...(cause.errors && { errors: cause.errors }) })] }; }
+    } catch (cause) { return { isError: true, content: [textContent({ error: cause.message, ...(cause.path ? { path: cause.path } : {}), ...(cause.errors && { errors: cause.errors }), ...cause.made })] }; }
   };
 }
 

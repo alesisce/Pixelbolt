@@ -529,13 +529,15 @@ function simulate(effect, context) {
       const r = salt => random(q.tag, index, q.age, k, salt), back = spread && q.px !== undefined && k < count - 1;
       const x = back ? q.px + (q.x - q.px) * (k + 1) / count : q.x, y = back ? q.py + (q.y - q.py) * (k + 1) / count : q.y;
       add(launch(e, index, x + ox, y + oy, k, count, r, hash(q.tag, index, q.age, k), born, q));
-      if (born >= first && born <= total) stats[index].spawned++;
+      // Counted as its parents' spawns are: born in one of the effect's own frames, not in the one after a loop's last.
+      if (born >= first && born < total) stats[index].spawned++;
     }
     if (count) mark(e, born, q.x + ox, q.y + oy);
   };
   const layered = emitters.some(e => e.behind);
   let counted = null;
-  for (let t = 0; t < total + (loop ? 1 : 0); t++) {
+  const end = total + (loop ? 1 : 0);
+  for (let t = 0; t < end; t++) {
     // recording: one of the effect's own frames; the frame after a loop's last is drawn but not counted.
     const cycle = t % frames, drawing = t >= first, recording = drawing && t < total;
     if (t === total) counted = { operations, culled };
@@ -708,8 +710,9 @@ function simulate(effect, context) {
         }
       }
     }
-    // In the parents' drawing order.
-    for (let k = events.length - 1; k >= 0; k--) { const [q, when] = events[k]; for (const index of children[q.index][when]) spawnChildren(index, q, emitters[index].burst, t + 1); }
+    // In the parents' drawing order. After the last frame there is no next one to appear in, so an effect that plays
+    // once is not held to the limit on particles alive by children it never shows.
+    if (t + 1 < end) for (let k = events.length - 1; k >= 0; k--) { const [q, when] = events[k]; for (const index of children[q.index][when]) spawnChildren(index, q, emitters[index].burst, t + 1); }
     if (counted) ({ operations, culled } = counted);
     if (operations > LIMITS.operations) fail(context.path, `the effect needs more than ${LIMITS.operations} drawing operations; lower counts or frames`);
   }

@@ -307,6 +307,45 @@ test('pixel_render saveAs puts replaced files back when a later one can\'t be re
   assert.equal(await readFile(path.join(project, 'a.png'), 'utf8'), 'old a');
   assert.equal(await readFile(path.join(project, 'b.png'), 'utf8'), 'old b');
   assert.deepEqual((await readdir(project)).filter(name => name.endsWith('.tmp')), []);
+  // The reply names the file that could not be replaced, and the export that was made all the same.
+  assert.equal(info.path, 'saveAs.frames/blink.png', JSON.stringify(info));
+  assert.match(info.error, /^saveAs\.frames\/blink\.png: b\.png could not be written \([^)]+\), so no saveAs file was written or changed\./);
+  assert.deepEqual(await exports(project), [path.basename(info.directory)]);
+  assert.match(info.revision, /^[a-f0-9]{12}$/);
+});
+
+// A target the checks accept and the disk then refuses. On Windows, a name longer than a disk holds, which Windows
+// reports as a missing file until it is written (Linux and macOS refuse it while it is checked); there the first two
+// copies are in place by then and are undone. Elsewhere, a folder without write permission, which a Windows folder
+// can't be made with a mode and an administrator's writes ignore; there no copy is in place yet.
+test('pixel_render saveAs that fails while writing names the entry, leaves no copy and says where the export is', { skip: process.platform !== 'win32' && process.getuid() === 0 }, async t => {
+  const project = await temp(t), mcp = await session(t, project), windows = process.platform === 'win32';
+  const target = windows ? `art/${'x'.repeat(300)}.png` : 'art/closed/blink.png';
+  await mkdir(path.join(project, 'art'));
+  await mkdir(path.join(project, 'art', 'closed'), { mode: 0o555 });
+  const { isError, info } = await mcp.render({ project: spirit, animation: 'idle', saveAs: { sheet: 'art/sheet.png', gif: 'art/idle.gif', 'frames/blink.png': target } });
+  assert.equal(isError, true, JSON.stringify(info));
+  // The entry by its key and the path as it was given, and why in a few words, not the system's message.
+  assert.equal(info.path, 'saveAs.frames/blink.png', JSON.stringify(info));
+  assert.ok(info.error.startsWith(`saveAs.frames/blink.png: ${target} could not be written (${windows ? 'a name in it is too long for the disk' : 'no permission to write there'}), so no saveAs file was written or changed. `), info.error);
+  assert.doesNotMatch(info.error.replace(info.directory, ''), /\.tmp|\.pixelbolt-|copyfile|E[A-Z]{4,}/);
+  // The export and the revision, under the names a finished render gives them, and in the message.
+  assert.deepEqual(Object.keys(info), ['error', 'path', 'revision', 'directory']);
+  assert.match(info.revision, /^[a-f0-9]{12}$/);
+  assert.deepEqual(await exports(project), [path.basename(info.directory)]);
+  assert.ok(info.error.endsWith(`The export itself was written to ${info.directory}: use its files, or send revision "${info.revision}" with saveAs paths that can be written`), info.error);
+  const bundle = await createBundle(spirit);
+  for (const file of ['forest-spirit.png', 'forest-spirit.atlas.json', 'forest-spirit.pixel.json', 'frames/blink.png', 'preview.html']) assert.deepEqual(await readFile(path.join(info.directory, file)), Buffer.from(bundle.files.get(file)), file);
+  assert.deepEqual(await readFile(path.join(info.directory, 'gifs', 'idle.gif')), Buffer.from(animationGIF(bundle.project, 'idle', {}).data));
+  // No copy and no temporary file, hidden ones included.
+  assert.deepEqual(await readdir(path.join(project, 'art')), ['closed']);
+  assert.deepEqual(await readdir(path.join(project, 'art', 'closed')), []);
+  // The revision renders again with paths that can be written, the ones just undone among them.
+  const again = await mcp.render({ revision: info.revision, animation: 'idle', saveAs: { sheet: 'art/sheet.png', gif: 'art/idle.gif', 'frames/blink.png': 'art/blink.png' } });
+  assert.equal(again.isError, false, JSON.stringify(again.info));
+  assert.equal(again.info.revision, info.revision);
+  assert.deepEqual(await readFile(path.join(project, 'art', 'sheet.png')), bundle.files.get('forest-spirit.png'));
+  assert.deepEqual((await readdir(path.join(project, 'art'))).sort(), ['blink.png', 'closed', 'idle.gif', 'sheet.png']);
 });
 
 test('pixel_render saveAs refuses the export directory or a folder above it', async t => {

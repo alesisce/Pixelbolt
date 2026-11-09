@@ -1,7 +1,8 @@
 // A recipe on a canvas of another size: the same drawing, cut to a window or given margins, never scaled. The window
 // is chosen from what the frames draw (the one holding the most drawn pixels), every operation moves by one whole
-// offset, and the result renders exactly as that window of the original does. Browser-compatible.
-import { PixelError, CANVAS_SIDE, FRAME_AREA, renderProject } from './core.js';
+// offset (a layer's by its own x and y as well), and the result renders exactly as that window of the original does:
+// a margin shows the background, or nothing. Browser-compatible.
+import { PixelError, CANVAS_SIDE, FRAME_AREA, parseColor, renderProject } from './core.js';
 
 const fail = (path, message) => { throw new PixelError(path, message); };
 
@@ -66,13 +67,36 @@ export function resizeRecipe(recipe, size, path = 'size') {
       if (x >= ox && x < ox + width && y >= oy && y < oy + height) kept++;
     }
   }
-  // Drawing the old canvas clipped would show in a new margin: clear the margins after everything else is drawn.
-  const margins = project.clipping ? [
-    oy < 0 && { op: 'clear', x: 0, y: 0, w: width, h: dy },
-    oy + height > oldHeight && { op: 'clear', x: 0, y: dy + oldHeight, w: width, h: height - dy - oldHeight },
-    ox < 0 && { op: 'clear', x: 0, y: 0, w: dx, h: height },
-    ox + width > oldWidth && { op: 'clear', x: dx + oldWidth, y: 0, w: width - dx - oldWidth, h: height }
-  ].filter(Boolean) : [];
+  // What the old canvas cut off (an operation hanging over an edge, a layer moved past one) would show in a new
+  // margin, so the list that drew it ends by clearing everything outside the part of the new canvas it could reach.
+  // Frame operations draw before the layers and each layer draws on a canvas of its own, so each list clears for
+  // itself, and only a list that was cut. A render names up to sixteen places that were cut, so a recipe with more is
+  // asked frame by frame (what a frame continues changes nothing that is cut), and in a frame with more than that any
+  // list may have been. A replace is never cut, since it reaches every pixel of its canvas: the margins too.
+  const { animations, sheet, ...single } = recipe;
+  // The places cut in one frame, as paths within it (ops[2], layers[0], layers[1].ops[0]), or null for any.
+  const cutIn = ({ from, ...frame }, index) => {
+    const whole = !project.clippingOmitted || recipe.frames.length === 1, made = whole ? project : renderProject({ ...single, frames: [frame] });
+    const under = `project.frames[${whole ? index : 0}].`;
+    return made.clippingOmitted ? null : (made.clipping ?? []).filter(entry => entry.path.startsWith(under)).map(entry => entry.path.slice(under.length));
+  };
+  const overhangs = (cut, list, ops) => ops.some(op => op.op === 'replace')
+    || (ops.length > 0 && (!cut || cut.some(at => at.startsWith(list) && (at.length === list.length || '.['.includes(at[list.length])))));
+  // Clears for the new canvas outside columns x0 to x1 and rows y0 to y1 (ends excluded), none over another.
+  const between = (value, low, high) => Math.max(low, Math.min(high, value));
+  const outside = (x0, x1, y0, y1) => {
+    x0 = between(x0, 0, width); x1 = between(x1, x0, width); y0 = between(y0, 0, height); y1 = between(y1, y0, height);
+    return [
+      x1 > x0 && y0 > 0 && { op: 'clear', x: x0, y: 0, w: x1 - x0, h: y0 },
+      x1 > x0 && y1 < height && { op: 'clear', x: x0, y: y1, w: x1 - x0, h: height - y1 },
+      x0 > 0 && { op: 'clear', x: 0, y: 0, w: x0, h: height },
+      x1 < width && { op: 'clear', x: x1, y: 0, w: width - x1, h: height }
+    ].filter(Boolean);
+  };
+  // Frame operations clear the background with the rest, so a visible one is painted back: once a pixel (it may be
+  // partly clear), and in its own colour whatever the frame's palette says.
+  const background = parseColor(recipe.background ?? 'transparent', project.palette), margins = outside(dx, dx + oldWidth, dy, dy + oldHeight);
+  if (background[3]) margins.push(...margins.map(clear => ({ ...clear, op: 'rect', color: `#${background.map(value => value.toString(16).padStart(2, '0')).join('')}` })));
   const point = ([x, y]) => [x + dx, y + dy];
   const frames = recipe.frames.map((frame, index) => {
     const p = `frames[${index}]`;
@@ -80,13 +104,27 @@ export function resizeRecipe(recipe, size, path = 'size') {
     for (const key of ['flipX', 'flipY', 'wrap', 'tile', 'translate']) {
       if (key === 'translate' ? frame.translate?.some(Boolean) : frame[key]) fail(path, `${p}.${key} is tied to the canvas size, so this recipe cannot move to another one; change the size in its source instead`);
     }
-    const ops = [...moveOps(frame.ops ?? [], dx, dy, `${p}.ops`, path), ...margins];
+    const ops = moveOps(frame.ops ?? [], dx, dy, `${p}.ops`, path);
+    // A layer is drawn on a canvas of its own, cut by it, then moved by the layer's x and y and cut by the frame.
+    // Here its operations take that move as well, so its canvas is the new one, and what either cut took is cleared.
+    const moved = (frame.layers ?? []).map(({ x = 0, y = 0, ops: list = [] }, li) => moveOps(list, dx + x, dy + y, `${p}.layers[${li}].ops`, path));
+    const beyond = (frame.layers ?? []).map(({ x = 0, y = 0 }) => outside(dx + Math.max(0, x), dx + oldWidth + Math.min(0, x), dy + Math.max(0, y), dy + oldHeight + Math.min(0, y)));
+    const cut = margins.length || beyond.some(clears => clears.length) ? cutIn(frame, index) : [];
+    if (margins.length && overhangs(cut, 'ops', frame.ops ?? [])) ops.push(...margins);
+    const layers = frame.layers?.map(({ x, y, ...layer }, li) => {
+      if (beyond[li].length && overhangs(cut, `layers[${li}]`, layer.ops ?? [])) {
+        // A sorted layer takes only what stands on the ground, and nothing that stands there erases.
+        if (layer.sort) fail(path, `${p}.layers[${li}] is sorted by ground and draws past the canvas where the new one has a margin, which a sorted layer cannot clear, so this recipe cannot move to that canvas size; change the size in its source instead`);
+        moved[li].push(...beyond[li]);
+      }
+      return { ...layer, ...((layer.ops || moved[li].length > 0) && { ops: moved[li] }) };
+    });
     return {
       ...frame,
       ...(frame.anchor && { anchor: point(frame.anchor) }),
       ...(frame.points && { points: Object.fromEntries(Object.entries(frame.points).map(([name, at]) => [name, point(at)])) }),
       ...((frame.ops || ops.length > 0) && { ops }),
-      ...(frame.layers && { layers: frame.layers.map((layer, li) => ({ ...layer, ...(layer.ops && { ops: moveOps(layer.ops, dx, dy, `${p}.layers[${li}].ops`, path) }) })) }),
+      ...(layers && { layers }),
       // Corrections are single canvas pixels, and one outside the canvas is an error, so those cut off are left out.
       ...(frame.pixels && { pixels: frame.pixels.map(pixel => ({ ...pixel, x: pixel.x + dx, y: pixel.y + dy })).filter(pixel => pixel.x >= 0 && pixel.y >= 0 && pixel.x < width && pixel.y < height) })
     };

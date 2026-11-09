@@ -371,10 +371,12 @@ test('deploy copies only page files, inserts once, keeps second-run bytes and mt
   }
 });
 
-test('main-thread lifecycle handles reduced motion, stale results, errors, cancellation and the 20-second deadline', async () => {
-  // This exercises the real controller without a browser or network. Pixels and workers have their own tests above.
-  const elements = new Map(), timers = new Map(), workers = [], events = new Map(), questions = [], addresses = [];
-  let timerId = 0, answer = true;
+// The real controller (playground/app.js) without a browser or network: an element for each id in index.html, a
+// Worker that answers when told to, timers fired by hand, and an address that history.replaceState changes as a
+// browser's does. Each call imports its own copy of the page. Pixels and workers have their own tests above.
+async function playgroundPage(tag, run) {
+  const elements = new Map(), timers = new Map(), workers = [], events = new Map(), questions = [], addresses = [], copied = [];
+  let timerId = 0;
   class Element {
     constructor(tag) { this.tag = tag; this.value = ''; this.textContent = ''; this.children = []; this.events = new Map(); this.style = {}; this.dataset = {}; this.attributes = {}; this.classList = { add() {}, remove() {} }; }
     get options() { return this.children.flatMap(child => child.tag === 'optgroup' ? child.children : [child]); }
@@ -394,80 +396,268 @@ test('main-thread lifecycle handles reduced motion, stale results, errors, cance
     terminate() { this.terminated = true; }
     reply(value) { this.onmessage({ data: { id: this.requests.at(-1).id, ...value } }); }
   }
+  const location = { href: 'http://localhost/playground/?engine=../src/', origin: 'http://localhost', pathname: '/playground/', search: '?engine=../src/', hash: '' };
   const replacements = {
     document: { body, hidden: false, getElementById: id => { assert.ok(elements.has(id), id); return elements.get(id); }, createElement: tag => new Element(tag), addEventListener() {} },
-    location: { href: 'http://localhost/playground/?engine=../src/', origin: 'http://localhost', pathname: '/playground/', search: '?engine=../src/', hash: '' },
-    history: { replaceState: (state, title, url) => addresses.push(url) }, Worker,
+    location, Worker,
+    history: { replaceState: (state, title, url) => { addresses.push(url); const at = String(url).indexOf('#'); location.hash = at < 0 ? '' : String(url).slice(at); } },
+    navigator: { clipboard: { writeText: async text => { copied.push(text); } } },
     matchMedia: () => ({ matches: true, addEventListener() {} }),
     requestAnimationFrame: () => {},
     addEventListener: (name, callback) => events.set(name, callback),
     removeEventListener: (name, callback) => { if (events.get(name) === callback) events.delete(name); },
-    confirm: message => { questions.push(message); return answer; },
+    confirm: message => { questions.push(message); return page.answer; },
     fetch: async () => ({ ok: true, json: async () => manifest }),
     ImageData: class { constructor(data, width, height) { this.data = data; this.width = width; this.height = height; } },
     setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id)
   };
   const originals = new Map(Object.keys(replacements).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+  const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const fireTimer = delay => { const entry = [...timers].find(([, timer]) => timer.delay === delay); assert.ok(entry, `timer ${delay}`); timers.delete(entry[0]); entry[1].callback(); };
   const preview = { ...renderRecipe(engine, tiny), digest: 'abc123', version: pin };
+  const $ = id => elements.get(id), named = name => JSON.stringify({ ...tiny, name });
+  const page = {
+    elements, workers, events, questions, addresses, copied, body, location, preview, flush, fireTimer, $, named, answer: true,
+    // The worker's last request, and its answers: an error, the recipe an example, file or link holds, a render.
+    asked: () => workers.at(-1).requests.at(-1),
+    reply: value => workers.at(-1).reply(value),
+    refuse: async (message, extra) => { page.reply({ error: { name: 'Error', message, ...extra } }); await flush(); },
+    source: name => page.reply({ source: { text: named(name), version: pin } }),
+    render: async name => { page.reply({ result: { ...preview, name } }); await flush(); },
+    type: text => { $('recipe').value = text; $('recipe').emit('input'); },
+    file: name => ({ name, type: name.endsWith('.gif') ? 'image/gif' : 'application/json', data: new Uint8Array(4) }),
+    // What the page says of itself. These must agree with each other at every step.
+    shown: () => ({ state: body.dataset.state, error: $('error').hidden ? null : $('error').textContent, invalid: $('recipe').attributes['aria-invalid'], exports: !$('export-frame').disabled, retry: !$('retry').hidden, status: $('status').textContent })
+  };
   try {
     for (const [key, value] of Object.entries(replacements)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-    await import('../playground/app.js?controller-test'); await flush();
-    assert.equal(workers.length, 1);
-    workers[0].reply({ source: { text: JSON.stringify(tiny), version: pin } });
-    workers[0].reply({ result: preview }); await flush();
-    assert.equal(body.dataset.state, 'ready'); assert.equal(body.dataset.digest, 'abc123');
-    assert.equal(elements.get('play').textContent, 'Play');
-    assert.equal(elements.get('gif-size').textContent, 'GIF: 2×1 px, 2 frames, scale 1');
-    assert.equal(elements.get('copy-link').disabled, false);
-    elements.get('preview').emit('keydown', { key: 'ArrowRight' });
-    assert.equal(elements.get('frame-counter').textContent, '2 / 2');
-    elements.get('preview').emit('keydown', { key: ' ' }); assert.equal(elements.get('play').textContent, 'Pause');
-    elements.get('recipe').value = '{bad'; elements.get('recipe').emit('input'); fireTimer(300);
-    workers[0].reply({ error: { name: 'Error', message: 'Line 1, column 2: bad JSON' } }); await flush();
-    assert.equal(body.dataset.state, 'error'); assert.equal(body.dataset.digest, 'abc123');
-    assert.match(elements.get('error').textContent, /Line 1/);
-    assert.equal(elements.get('export-frame').disabled, true);
-    elements.get('recipe').value = JSON.stringify(tiny); elements.get('recipe').emit('input'); fireTimer(300);
-    const staleId = workers[0].requests.at(-1).id;
-    elements.get('recipe').emit('input'); assert.equal(workers[0].terminated, true); fireTimer(300);
-    assert.equal(workers.length, 2);
-    workers[0].onmessage({ data: { id: staleId, result: { ...preview, digest: 'stale' } } });
-    workers[0].onerror({ preventDefault() {}, message: 'old worker error' });
-    assert.ok(!workers[1].terminated); assert.equal(body.dataset.digest, 'abc123');
-    fireTimer(20000); await flush();
-    assert.equal(workers[1].terminated, true);
-    assert.equal(elements.get('error').textContent, 'Stopped: rendering took longer than 20 s.');
-    elements.get('retry').click(); assert.equal(workers.length, 3);
-    elements.get('cancel').click(); await flush();
-    assert.equal(workers[2].terminated, true); assert.equal(elements.get('error').textContent, 'Stopped: rendering cancelled.');
-    assert.equal(elements.get('cancel').hidden, true);
-    const before = elements.get('recipe').value;
-    // The typed edits are kept by nobody yet: leaving the page asks, and so does a new link in the address bar.
-    // Declining keeps the edits and puts the address back, without loading anything.
-    assert.equal(typeof events.get('beforeunload'), 'function');
-    answer = false; globalThis.location.hash = '#r=broken'; events.get('hashchange')();
-    assert.deepEqual(questions, [REPLACE_EDITS]); assert.deepEqual(addresses, ['/playground/?engine=../src/']);
-    assert.equal(workers.length, 3); assert.equal(elements.get('recipe').value, before);
-    answer = true; events.get('hashchange')();
-    workers[3].reply({ error: { name: 'ShareError', message: 'The link needs both v= and r=.' } }); await flush();
-    assert.equal(elements.get('recipe').value, before);
-    assert.equal(questions.length, 2); assert.equal(typeof events.get('beforeunload'), 'function');
-    // A link that names another engine version than the pin keeps the last good render until that version replies.
-    const other = pin === '0.9.0' ? '0.9.1' : '0.9.0', escape = version => version.replaceAll('.', '\\.');
-    globalThis.location.hash = `#v=${other}&r=valid`; events.get('hashchange')();
-    workers[3].reply({ source: { text: before, version: other } });
-    // The link's recipe replaced the edits (after asking once more), so leaving no longer asks.
-    assert.equal(questions.length, 3); assert.equal(events.has('beforeunload'), false);
-    assert.match(elements.get('engine-version').textContent, new RegExp(`Pixelbolt ${escape(pin)} \\(last good render\\)`));
-    workers[3].reply({ result: { ...preview, version: other } }); await flush();
-    assert.match(elements.get('version-message').textContent, new RegExp(`This recipe was made with Pixelbolt ${escape(other)}`));
-    assert.equal(elements.get('examples').options.some(option => option.value === 'honey.fluid.json'), compareVersions(other, '0.9.1') >= 0);
-    elements.get('use-pin').click(); assert.equal(workers[3].requests.at(-1).version, pin);
-    events.get('pagehide')(); await flush();
+    await import(`../playground/app.js?${tag}`); await flush();
+    await run(page);
   } finally {
+    events.get('pagehide')?.();
     for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
   }
-});
+}
+// The page once its first example has rendered.
+const playgroundReady = (tag, run) => playgroundPage(tag, async page => { page.source('tiny'); await page.render('tiny'); assert.equal(page.body.dataset.state, 'ready'); await run(page); });
+
+test('main-thread lifecycle handles reduced motion, stale results, errors, cancellation and the 20-second deadline', () => playgroundPage('controller-test', async page => {
+  const { elements, workers, events, questions, addresses, body, preview, flush, fireTimer } = page;
+  assert.equal(workers.length, 1);
+  workers[0].reply({ source: { text: JSON.stringify(tiny), version: pin } });
+  workers[0].reply({ result: preview }); await flush();
+  assert.equal(body.dataset.state, 'ready'); assert.equal(body.dataset.digest, 'abc123');
+  assert.equal(elements.get('play').textContent, 'Play');
+  assert.equal(elements.get('gif-size').textContent, 'GIF: 2×1 px, 2 frames, scale 1');
+  assert.equal(elements.get('copy-link').disabled, false);
+  elements.get('preview').emit('keydown', { key: 'ArrowRight' });
+  assert.equal(elements.get('frame-counter').textContent, '2 / 2');
+  elements.get('preview').emit('keydown', { key: ' ' }); assert.equal(elements.get('play').textContent, 'Pause');
+  elements.get('recipe').value = '{bad'; elements.get('recipe').emit('input'); fireTimer(300);
+  workers[0].reply({ error: { name: 'Error', message: 'Line 1, column 2: bad JSON' } }); await flush();
+  assert.equal(body.dataset.state, 'error'); assert.equal(body.dataset.digest, 'abc123');
+  assert.match(elements.get('error').textContent, /Line 1/);
+  assert.equal(elements.get('export-frame').disabled, true);
+  elements.get('recipe').value = JSON.stringify(tiny); elements.get('recipe').emit('input'); fireTimer(300);
+  const staleId = workers[0].requests.at(-1).id;
+  elements.get('recipe').emit('input'); assert.equal(workers[0].terminated, true); fireTimer(300);
+  assert.equal(workers.length, 2);
+  workers[0].onmessage({ data: { id: staleId, result: { ...preview, digest: 'stale' } } });
+  workers[0].onerror({ preventDefault() {}, message: 'old worker error' });
+  assert.ok(!workers[1].terminated); assert.equal(body.dataset.digest, 'abc123');
+  fireTimer(20000); await flush();
+  assert.equal(workers[1].terminated, true);
+  assert.equal(elements.get('error').textContent, 'Stopped: rendering took longer than 20 s.');
+  elements.get('retry').click(); assert.equal(workers.length, 3);
+  elements.get('cancel').click(); await flush();
+  assert.equal(workers[2].terminated, true); assert.equal(elements.get('error').textContent, 'Stopped: rendering cancelled.');
+  assert.equal(elements.get('cancel').hidden, true);
+  const before = elements.get('recipe').value;
+  // The typed edits are kept by nobody yet: leaving the page asks, and so does a new link in the address bar.
+  // Declining keeps the edits and puts the address back, without loading anything.
+  assert.equal(typeof events.get('beforeunload'), 'function');
+  page.answer = false; globalThis.location.hash = '#r=broken'; events.get('hashchange')();
+  assert.deepEqual(questions, [REPLACE_EDITS]); assert.deepEqual(addresses, ['/playground/?engine=../src/']);
+  assert.equal(workers.length, 3); assert.equal(elements.get('recipe').value, before);
+  // The address went back, so the link is pasted again.
+  page.answer = true; globalThis.location.hash = '#r=broken'; events.get('hashchange')();
+  workers[3].reply({ error: { name: 'ShareError', message: 'The link needs both v= and r=.' } }); await flush();
+  assert.equal(elements.get('recipe').value, before);
+  assert.equal(questions.length, 2); assert.equal(typeof events.get('beforeunload'), 'function');
+  // A link that names another engine version than the pin keeps the last good render until that version replies.
+  const other = pin === '0.9.0' ? '0.9.1' : '0.9.0', escape = version => version.replaceAll('.', '\\.');
+  globalThis.location.hash = `#v=${other}&r=valid`; events.get('hashchange')();
+  workers[3].reply({ source: { text: before, version: other } });
+  // The link's recipe replaced the edits (after asking once more), so leaving no longer asks.
+  assert.equal(questions.length, 3); assert.equal(events.has('beforeunload'), false);
+  assert.match(elements.get('engine-version').textContent, new RegExp(`Pixelbolt ${escape(pin)} \\(last good render\\)`));
+  workers[3].reply({ result: { ...preview, version: other } }); await flush();
+  assert.match(elements.get('version-message').textContent, new RegExp(`This recipe was made with Pixelbolt ${escape(other)}`));
+  assert.equal(elements.get('examples').options.some(option => option.value === 'honey.fluid.json'), compareVersions(other, '0.9.1') >= 0);
+  elements.get('use-pin').click(); assert.equal(workers[3].requests.at(-1).version, pin);
+  events.get('pagehide')(); await flush();
+}));
+test('a download or a link clicked while edits wait is delivered or says why not, and the edits render after it', () => playgroundReady('waiting-click', async page => {
+  const { $, workers, events, flush, fireTimer, named } = page;
+  const downloads = () => $('download-links').children.map(link => link.download);
+  // Recipe JSON inside the 300 ms the page waits after a key. The render that followed used to stop the download
+  // without a word; now it waits its turn, and the file is the text as it was when clicked.
+  page.type(named('edited'));
+  let clicked = $('export-recipe').click();
+  assert.equal(page.asked().export, 'recipe'); assert.equal(page.asked().text, named('edited'));
+  fireTimer(300); await flush();
+  assert.equal(workers.length, 1); assert.ok(!workers[0].terminated); assert.equal(page.asked().type, 'export');
+  page.reply({ result: { files: [page.file('edited.pixel.json')], warnings: [] } }); await clicked; await flush();
+  assert.deepEqual(downloads(), ['edited.pixel.json']);
+  // The file holds the edits, so leaving no longer asks, and the render that waited is on its way.
+  assert.equal(events.has('beforeunload'), false);
+  assert.equal(page.asked().type, 'render'); assert.equal(page.asked().text, named('edited'));
+  assert.equal($('status').textContent, 'Download ready. Loading engine and rendering…');
+  await page.render('edited');
+  assert.deepEqual(page.shown(), { state: 'ready', error: null, invalid: 'false', exports: true, retry: false, status: 'Download ready. Rendered edited · 2 frames.' });
+  // Typing while a download is being made does not stop it either. Those edits are not in the file, so they are
+  // still unsaved.
+  clicked = $('export-recipe').click(); page.type(named('later'));
+  assert.ok(!workers[0].terminated); assert.equal(page.asked().text, named('edited'));
+  page.reply({ result: { files: [page.file('edited.pixel.json')], warnings: [] } }); await clicked; await flush();
+  assert.deepEqual(downloads(), ['edited.pixel.json']); assert.equal(typeof events.get('beforeunload'), 'function');
+  fireTimer(300); assert.equal(page.asked().text, named('later')); await page.render('later');
+  // A download that cannot be made says why, and the render that waited behind it does not wipe that away.
+  page.type('{bad'); clicked = $('export-recipe').click(); fireTimer(300);
+  await page.refuse('Line 1, column 2: bad JSON', { line: 1 }); await clicked;
+  assert.equal(page.asked().type, 'render'); assert.match($('status').textContent, /^No download\. Line 1, column 2: bad JSON /);
+  await page.refuse('Line 1, column 2: bad JSON', { line: 1 });
+  assert.deepEqual(page.shown(), { state: 'error', error: 'Line 1, column 2: bad JSON', invalid: 'true', exports: false, retry: true, status: 'No download. Line 1, column 2: bad JSON The last good render is still shown.' });
+  // A link is the recipe as clicked too. Typed over before it arrives, it is not handed out as the editor's link,
+  // and the note under Share link says so.
+  page.type(named('again')); fireTimer(300); await page.render('again');
+  clicked = $('copy-link').click(); page.type(named('retyped'));
+  assert.ok(!workers[0].terminated); assert.equal(page.asked().type, 'share');
+  page.reply({ result: { link: 'http://localhost/playground/#v=1.0.0&r=AAAA' } }); await clicked; await flush();
+  assert.equal($('share-error').hidden, false); assert.match($('share-error').textContent, /changed while its link was being made/);
+  assert.match($('status').textContent, /^No link made/); assert.equal($('share-link').value, '');
+  assert.deepEqual(page.addresses, []); assert.deepEqual(page.copied, []);
+  fireTimer(300); await page.render('retyped');
+  // In time, the link is the editor's: copied, in the address, and the edits it holds are kept.
+  clicked = $('copy-link').click(); page.reply({ result: { link: 'http://localhost/playground/#v=1.0.0&r=BBBB' } }); await clicked; await flush();
+  assert.deepEqual(page.copied, ['http://localhost/playground/#v=1.0.0&r=BBBB']); assert.equal(page.location.hash, '#v=1.0.0&r=BBBB');
+  assert.equal($('status').textContent, 'Share link copied.'); assert.equal(events.has('beforeunload'), false);
+  // Choosing an example while a download is being made waits for it as well.
+  clicked = $('export-gif').click(); $('examples').value = 'coin.json'; $('examples').emit('change');
+  assert.ok(!workers[0].terminated); assert.equal(page.asked().type, 'export');
+  page.reply({ result: { files: [page.file('retyped-default.gif')], warnings: [] } }); await clicked; await flush();
+  assert.deepEqual(downloads(), ['retyped-default.gif']); assert.equal(page.asked().type, 'example'); assert.equal(page.asked().file, 'coin.json');
+  assert.equal(workers.length, 1);
+}));
+test('cancelling a download or a link leaves a valid render valid; cancelling a render leaves the text without one', () => playgroundReady('cancel-click', async page => {
+  const { $, workers, flush, fireTimer, named } = page;
+  const rendered = 'Rendered tiny · 2 frames.';
+  assert.deepEqual(page.shown(), { state: 'ready', error: null, invalid: 'false', exports: true, retry: false, status: rendered });
+  for (const [button, said] of [['export-gif', 'Download cancelled.'], ['copy-link', 'Link cancelled.']]) {
+    const clicked = $(button).click(), stopped = workers.at(-1);
+    assert.equal($('cancel').hidden, false); assert.equal(page.body.dataset.state, 'rendering');
+    $('cancel').click(); await clicked; await flush();
+    assert.equal(stopped.terminated, true); assert.equal($('cancel').hidden, true);
+    // The render on screen is still the recipe's: nothing is invalid, nothing is dimmed, every download is offered.
+    assert.deepEqual(page.shown(), { state: 'ready', error: null, invalid: 'false', exports: true, retry: false, status: said });
+    assert.equal($('export-gif').disabled, false); assert.equal($('copy-link').disabled, false);
+  }
+  assert.equal($('download-links').children.length, 0); assert.deepEqual(page.addresses, []); assert.deepEqual(page.copied, []);
+  // The same click works afterwards.
+  const again = $('export-gif').click(); page.reply({ result: { files: [page.file('tiny-default.gif')], warnings: [] } }); await again; await flush();
+  assert.equal($('download-links').children.length, 1); assert.equal(page.shown().status, 'Download ready.'); assert.equal(page.shown().state, 'ready');
+  // Edits waiting behind a cancelled download still render.
+  page.type(named('edited')); const waited = $('export-recipe').click(); fireTimer(300);
+  $('cancel').click(); await waited; await flush();
+  assert.equal(page.asked().type, 'render'); await page.render('edited');
+  assert.equal(page.shown().status, 'Download cancelled. Rendered edited · 2 frames.');
+  // Cancelling a render is different: the text has no render, and the page says so until it is rendered again.
+  page.type(named('slow')); fireTimer(300); $('cancel').click(); await flush();
+  assert.deepEqual(page.shown(), { state: 'error', error: 'Stopped: rendering cancelled.', invalid: 'true', exports: false, retry: true, status: 'The last good render is still shown.' });
+  $('retry').click(); await page.render('slow');
+  assert.deepEqual(page.shown(), { state: 'ready', error: null, invalid: 'false', exports: true, retry: false, status: 'Rendered slow · 2 frames.' });
+}));
+test('why a recipe is invalid stays on the page through a download, until it renders or the text changes', () => playgroundReady('kept-error', async page => {
+  const { $, flush, fireTimer, named } = page;
+  const palette = 'project.palette: expected an object', invalid = { state: 'error', error: palette, invalid: 'true', exports: false, retry: true };
+  const broken = named('tiny').slice(0, -1) + ',"palette":7}';
+  page.type(broken); fireTimer(300); await page.refuse(palette);
+  assert.deepEqual(page.shown(), { ...invalid, status: 'The last good render is still shown.' });
+  // Recipe JSON is still offered for text that parses. Downloading it used to hide the error and leave the page in its
+  // error state, saying only "Download ready."
+  let clicked = $('export-recipe').click();
+  assert.equal(page.shown().error, palette); assert.equal(page.shown().invalid, 'true');
+  page.reply({ result: { files: [page.file('tiny.pixel.json')], warnings: [] } }); await clicked; await flush();
+  assert.deepEqual(page.shown(), { ...invalid, status: 'Download ready.' });
+  assert.equal($('download-links').children.length, 1);
+  // A cancelled download and one that fails leave it there too, and Render again keeps it until the answer comes.
+  clicked = $('export-recipe').click(); $('cancel').click(); await clicked; await flush();
+  assert.deepEqual(page.shown(), { ...invalid, status: 'Download cancelled.' });
+  clicked = $('export-recipe').click(); await page.refuse('The worker ran out of memory.'); await clicked;
+  assert.deepEqual(page.shown(), { ...invalid, status: 'No download. The worker ran out of memory.' });
+  $('retry').click();
+  assert.deepEqual(page.shown(), { state: 'rendering', error: palette, invalid: 'true', exports: false, retry: false, status: 'Loading engine and rendering…' });
+  await page.refuse(palette);
+  assert.deepEqual(page.shown(), { ...invalid, status: 'The last good render is still shown.' });
+  // A changed text is no longer the text the error was about.
+  page.type(named('fixed'));
+  assert.deepEqual(page.shown(), { state: 'rendering', error: null, invalid: 'false', exports: false, retry: true, status: 'Waiting for edits…' });
+  fireTimer(300); await page.render('fixed');
+  assert.deepEqual(page.shown(), { state: 'ready', error: null, invalid: 'false', exports: true, retry: false, status: 'Rendered fixed · 2 frames.' });
+  // A JSON error keeps its line button through a download as well, and a render clears both.
+  page.type('{bad'); fireTimer(300); await page.refuse('Line 1, column 2: bad JSON', { line: 1 });
+  clicked = $('export-recipe').click(); await page.refuse('Line 1, column 2: bad JSON', { line: 1 }); await clicked;
+  assert.deepEqual(page.shown(), { state: 'error', error: 'Line 1, column 2: bad JSON', invalid: 'true', exports: false, retry: true, status: 'No download. Line 1, column 2: bad JSON' });
+  assert.equal($('show-error').hidden, false); assert.equal($('show-error').dataset.line, '1');
+  $('recipe').value = named('fixed'); $('retry').click(); await page.render('fixed');
+  assert.equal(page.shown().state, 'ready'); assert.equal($('show-error').hidden, true);
+  // A download that fails over a valid render says so in the status and leaves the render valid.
+  clicked = $('export-gif').click(); await page.refuse('Choose an available frame.'); await clicked;
+  assert.deepEqual(page.shown(), { state: 'ready', error: null, invalid: 'false', exports: true, retry: false, status: 'No download. Choose an available frame.' });
+}));
+test('the address names a link only while the editor holds its recipe', () => playgroundReady('address-link', async page => {
+  const { $, events, addresses, location, flush, fireTimer, named } = page;
+  const bare = '/playground/?engine=../src/', link = `#v=${pin}&r=AAAA`;
+  const open = async hash => { location.hash = hash; events.get('hashchange')(); await flush(); };
+  await open(link); page.source('from-link'); await page.render('from-link');
+  assert.equal(location.hash, link); assert.deepEqual(addresses, []);
+  // Typing leaves the address alone: it still says where the recipe came from, and the unsaved-edits guard covers
+  // what was typed.
+  page.type(named('typed')); fireTimer(300); await page.render('typed');
+  assert.equal(location.hash, link); assert.deepEqual(addresses, []); assert.equal(typeof events.get('beforeunload'), 'function');
+  // An example that does not arrive leaves the editor, and so the address, as they were.
+  $('examples').value = 'coin.json'; $('examples').emit('change');
+  assert.equal(page.asked().type, 'example'); assert.equal(location.hash, link);
+  await page.refuse('Could not load example coin.json: HTTP 404.');
+  assert.equal($('recipe').value, named('typed')); assert.equal(location.hash, link); assert.deepEqual(addresses, []);
+  // One that arrives takes the editor, so the old link leaves the address: reloading used to bring its recipe back.
+  $('examples').value = 'coin.json'; $('examples').emit('change'); page.source('coin');
+  assert.equal($('recipe').value, named('coin')); assert.equal(location.hash, ''); assert.deepEqual(addresses, [bare]);
+  await page.render('coin');
+  // So does a file.
+  await open(link); page.source('from-link'); await page.render('from-link'); assert.equal(location.hash, link);
+  $('open-file').files = [{ name: 'chest.json', type: 'application/json', size: 64, text: async () => named('chest') }];
+  $('open-file').emit('change'); await flush();
+  assert.equal(page.asked().type, 'open'); assert.equal(location.hash, link);
+  page.source('chest'); assert.equal(location.hash, ''); assert.deepEqual(addresses, [bare, bare]);
+  await page.render('chest');
+}));
+test('a link that does not decode is never the link the address goes back to', () => playgroundReady('address-broken', async page => {
+  const { $, events, addresses, location, flush, fireTimer, named } = page;
+  const bare = '/playground/?engine=../src/', link = `#v=${pin}&r=AAAA`, broken = `#v=${pin}&r=broken`;
+  const open = async hash => { location.hash = hash; events.get('hashchange')(); await flush(); };
+  // It stays in the address to be corrected. Keeping edits when another link arrives used to put it back there.
+  await open(broken); await page.refuse('The link is damaged: its recipe does not unpack.', { name: 'ShareError' });
+  assert.equal(location.hash, broken); assert.equal(page.shown().state, 'error');
+  page.type(named('mine')); fireTimer(300); await page.render('mine');
+  page.answer = false; await open(`#v=${pin}&r=another`);
+  assert.equal(addresses.at(-1), bare); assert.equal(location.hash, ''); assert.equal(page.asked().type, 'render');
+  assert.equal($('recipe').value, named('mine'));
+  // After a link that did decode, that is the one the address goes back to.
+  page.answer = true; await open(link); page.source('from-link'); await page.render('from-link');
+  await open(broken); await page.refuse('The link is damaged: its recipe does not unpack.', { name: 'ShareError' });
+  page.type(named('mine')); fireTimer(300); await page.render('mine');
+  page.answer = false; await open(`#v=${pin}&r=another`);
+  assert.equal(addresses.at(-1), link); assert.equal(location.hash, link); assert.equal($('recipe').value, named('mine'));
+}));

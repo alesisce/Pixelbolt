@@ -213,3 +213,57 @@ test('drawn finer, the share bar ends each team\'s part on a world pixel', () =>
   const { recipe } = compileBodies(match({ territory: board, frames: 60, bodies: [ball('tide', [8, 13], [2, 0.7], { team: 'tide' })], hud: [{ bar: { at: [0, 30], size: [32, 2] } }] }, { subpixels: 2 }));
   for (const frame of recipe.frames) for (const op of frame.ops.filter(op => op.op === 'rect')) assert.ok(op.x % 2 === 0 && op.w % 2 === 0, `${frame.name}: a part from ${op.x / 2} across ${op.w / 2} world pixels`);
 });
+
+test('a power wakes the sleeping body it moves or reshapes, and what rests on it', () => {
+  // Bodies under gravity that have come to rest and fallen asleep by frame 60, when the event fires. Asleep, the taker
+  // took the power and nothing else happened: it hung where it was warped to, stayed sunk in the floor it grew into,
+  // and its copies sat on it.
+  const rest = (bodies, events, frames = 140) => figures(match({ gravity: [0, 0.3], walls: ['left', 'right', 'bottom'], frames, bodies, events }, { width: 48 }));
+  const box = (name, size, at) => ({ name, shape: 'box', size, at, bounce: 0, fill: 'w' });
+  const round = (name, at, extra = {}) => ({ name, shape: 'circle', radius: 2, at, bounce: 0, fill: 'w', ...extra });
+  // Warp: the box under a stack is taken away. It falls where it lands, and the box it held up falls too, as it does
+  // when the lower one vanishes.
+  const stack = [box('lower', [8, 6], [16, 29]), box('upper', [6, 6], [16, 23])];
+  const warped = rest(stack, [{ frame: 60, body: 'lower', power: 'warp', to: [38, 10] }]).paths, gone = rest(stack, [{ frame: 60, body: 'lower', power: 'vanish' }]).paths;
+  assert.deepEqual(warped.upper[59].slice(0, 2), [16, 23]);
+  assert.deepEqual(warped.lower[60].slice(0, 2), [38, 10]);
+  assert.ok(Math.abs(warped.lower.at(-1)[1] - 29) < 0.1, `the warped box falls to the floor: ${warped.lower.at(-1)}`);
+  assert.ok(Math.abs(warped.upper.at(-1)[1] - 29) < 0.1, `the box it held up falls: ${warped.upper.at(-1)}`);
+  assert.deepEqual(warped.upper, gone.upper, 'as when the lower box vanishes');
+  // Grow: a ball asleep on the floor beside another grows into both. They part, and it stands on the floor at its new
+  // size, then on the floor again when it shrinks back.
+  const grown = rest([round('a', [20, 28]), round('b', [25, 28])], [{ frame: 60, body: 'a', power: 'grow', scale: 2, frames: 40 }]).paths;
+  assert.ok(Math.abs(grown.a[95][1] - 28) < 0.1 && grown.b[95][0] - grown.a[95][0] > 5.5, `grown, it stands on the floor clear of its neighbour: ${grown.a[95]} ${grown.b[95]}`);
+  assert.ok(Math.abs(grown.a.at(-1)[1] - 30) < 0.1, `and comes back down when it shrinks: ${grown.a.at(-1)}`);
+  // A ball that fell asleep while grown is on the floor again once it shrinks: it hung 2 pixels over it.
+  const shrunk = rest([round('ball', [24, 20])], [{ frame: 2, body: 'ball', power: 'grow', scale: 2, frames: 60 }]).paths.ball;
+  assert.ok(Math.abs(shrunk[50][1] - 28) < 0.1 && Math.abs(shrunk.at(-1)[1] - 30) < 0.1, `${shrunk[50]} then ${shrunk.at(-1)}`);
+  // Split: the copies of a ball asleep on the floor come apart.
+  const split = rest([round('ball', [24, 28])], [{ frame: 60, body: 'ball', power: 'split', count: 3 }]);
+  assert.equal(split.pixels.at(-1), 3 * split.pixels[59], `three balls show: ${split.pixels[59]} to ${split.pixels.at(-1)} pixels`);
+  // Magnet: one over a ball asleep on the floor lifts it, and lets it fall when it stops.
+  const lifted = rest([round('ball', [24, 28]), round('other', [4, 28])], [{ frame: 60, body: 'other', power: 'magnet', to: [24, 4], strength: 1, frames: 40 }], 180).paths.ball;
+  const highest = Math.min(...lifted.slice(60, 100).map(q => q[1]));
+  assert.ok(Math.abs(lifted[59][1] - 30) < 0.1 && highest < 12, `lifted from ${lifted[59]} to ${highest}`);
+  assert.ok(Math.abs(lifted.at(-1)[1] - 30) < 0.1, `and back on the floor after it: ${lifted.at(-1)}`);
+});
+
+test('a tireless body keeps what a power gives it', () => {
+  // What a tireless body keeps was set once, when it was made, and every hit set it back: a speed power lasted until the
+  // next bounce, and a warped ball went on bouncing to the height it was dropped from.
+  const free = (name, at, velocity, extra = {}) => ({ name, shape: 'circle', radius: 1.5, at, velocity, bounce: 1, friction: 0, fill: 'w', ...extra });
+  const speeds = tireless => { const { ball: p } = figures(match({ frames: 60, bodies: [free('ball', [6, 16], [1, 0], { tireless })], events: [{ frame: 5, body: 'ball', power: 'speed', factor: 2 }] })).paths; return [step(p, 2), step(p, 8), step(p, 50)]; };
+  assert.deepEqual(speeds(true).map(v => Math.round(v * 100) / 100), [1, 2, 2], 'twice as fast after the walls as before them');
+  assert.deepEqual(speeds(true), speeds(false));
+  // Dropped from y = 14 and warped at frame 60: the bounces after it reach the height the warp left it able to reach
+  // (about where it was put), every time, not the height it was dropped from.
+  const apex = to => {
+    const p = figures(match({ gravity: [0, 0.3], frames: 220, bodies: [free('ball', [16, 14], [0, 0], { tireless: true })], events: [{ frame: 60, body: 'ball', power: 'warp', to }] })).paths.ball;
+    const top = (from, until) => Math.min(...p.slice(from, until).map(q => q[1]));
+    return [top(0, 60), top(100, 160), top(160, 220)];
+  };
+  for (const y of [5, 24]) {
+    const [before, after, later] = apex([16, y]);
+    assert.ok(Math.abs(before - 14) < 0.3 && Math.abs(after - y) < 2 && Math.abs(later - after) < 0.3, `warped to ${y}: bounces to ${before}, then to ${after} and ${later}`);
+  }
+});

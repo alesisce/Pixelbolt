@@ -562,6 +562,25 @@ test('tumbling: pieces turn off ledges and stubs, float, keep every cell and com
   assert.equal(live.measure().pieces.moving, 0);
 });
 
+test('tumbling: pieces that turn against each other are not left hanging where their cells stopped', () => {
+  // A well of wood blocks that fall onto stubs and each other. Two of the pieces, turning one against the other, were
+  // each drawn a little into the other, and each then waited for the other's cells to get out of its way: their bodies
+  // fell on and came to rest while their cells stayed where they were, 17 rows of air under one of them.
+  const rects = (material, list) => list.map(rect => ({ material, rect }));
+  const live = createLivePowder({ ...sandboxSource(96, 80, [
+    ...rects('stone', [[0, 76, 96, 4], [20, 20, 3, 56], [70, 20, 3, 56], [35, 58, 3, 5], [28, 58, 4, 5], [26, 64, 2, 4], [49, 68, 2, 6]]),
+    ...rects('wood', [[43, 22, 15, 4], [26, 13, 6, 2], [47, 16, 4, 7], [59, 8, 6, 8], [38, 22, 7, 9], [54, 29, 9, 9], [28, 15, 16, 9], [39, 7, 12, 3], [34, 1, 11, 8], [47, 2, 16, 3], [36, 6, 8, 2], [28, 25, 14, 5], [24, 2, 14, 9], [36, 16, 16, 8]])
+  ], 1), pieces: 'tumble' });
+  // By frame 30 the two had stopped being drawn while their bodies fell on: the wood lay then as it did at rest.
+  const wood = live.measure().counts.wood, lie = () => { let rows = 0; for (let y = 0; y < 80; y++) rows += y * countIn(live, 'wood', 0, y, 96, y + 1); return rows / wood; };
+  live.step(30);
+  const early = lie();
+  live.step(470);
+  assert.equal(live.measure().counts.wood, wood, 'every cell is kept');
+  assert.deepEqual([live.measure().pieces.moving, live.measure().chunks.stepped], [0, 0], 'everything has come to rest');
+  assert.ok(lie() > early + 3, `the wood went on down the well: it lay ${early.toFixed(1)} rows down on average at frame 30 and ${lie().toFixed(1)} at rest`);
+});
+
 test('tumbling: held where nailed to a wall or hung, moss clings, and a piece standing on stone rests as one', () => {
   const live = createLivePowder({ ...sandboxSource(64, 40, [
     { material: 'stone', rect: [0, 36, 64, 4] }, { material: 'stone', rect: [0, 10, 6, 26] }, { material: 'wood', rect: [6, 14, 20, 2] },

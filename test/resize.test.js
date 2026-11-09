@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderProject } from '../src/core.js';
+import { hash } from '../src/craft.js';
 import { findPreset, loadPreset, compilePreset } from '../src/presets.js';
 import { readSize, resizeRecipe, resizeWarning } from '../src/resize.js';
 import { startMCP } from '../src/mcp.js';
@@ -15,16 +16,17 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const preset = async name => compilePreset((await loadPreset(await findPreset(name))).source).recipe;
 
 // Pixels of the resized recipe that differ from the same window of the original. Outside the old canvas a recipe with
-// a background shows it, and any other shows nothing.
-function differing(recipe, resized, [ox, oy]) {
-  const before = renderProject(recipe), after = renderProject(resized);
+// a background shows it, and any other shows nothing: what an empty frame of the recipe shows. `options` are the
+// renderer's, for a view of chosen layers.
+function differing(recipe, resized, [ox, oy], options = {}) {
+  const before = renderProject(recipe, options), after = renderProject(resized, options);
+  const empty = renderProject({ version: 1, name: 'empty', width: 1, height: 1, palette: recipe.palette, ...(recipe.background && !options.layers && { background: recipe.background }), frames: [{ name: 'empty' }] }).frames[0].data;
   let count = 0;
   before.frames.forEach((frame, index) => {
     const data = after.frames[index].data;
     for (let y = 0; y < after.height; y++) for (let x = 0; x < after.width; x++) {
       const sx = x + ox, sy = y + oy, inside = sx >= 0 && sy >= 0 && sx < before.width && sy < before.height;
-      if (!inside && recipe.background) continue;
-      for (let c = 0; c < 4; c++) if ((inside ? frame.data[(sy * before.width + sx) * 4 + c] : 0) !== data[(y * after.width + x) * 4 + c]) { count++; break; }
+      for (let c = 0; c < 4; c++) if ((inside ? frame.data[(sy * before.width + sx) * 4 + c] : empty[c]) !== data[(y * after.width + x) * 4 + c]) { count++; break; }
     }
   });
   return count;
@@ -32,6 +34,55 @@ function differing(recipe, resized, [ox, oy]) {
 
 const dot = (x, y) => ({ op: 'pixel', x, y, color: 'a' });
 const plain = (width, height, ops, more = {}) => ({ version: 1, name: 'plain', width, height, palette: { a: '#ff0000' }, frames: [{ name: 'one', ops, ...more }] });
+// A frame as rows of # for drawn pixels.
+const rows = (recipe, frame = 0) => { const { width, height, frames } = renderProject(recipe); return Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => (frames[frame].data[(y * width + x) * 4 + 3] ? '#' : '.')).join('')); };
+
+// A seeded recipe with layers. Operations of every placed kind start up to four pixels outside the canvas and reach
+// past it on every side; layers have their own x and y, opacity, palettes and names, and some sort by ground; frames
+// have operations under the layers, corrections over them, their own palettes, and continue earlier frames; colours
+// are solid and partly clear, and some recipes have a background of either kind.
+function layered(seed) {
+  let draws = 0;
+  const roll = sides => hash(seed, draws++) % sides, chance = (n, of) => roll(of) < n, among = (...values) => values[roll(values.length)];
+  const width = 5 + roll(8), height = 5 + roll(8);
+  const at = () => ({ x: roll(width + 8) - 4, y: roll(height + 8) - 4 }), box = () => ({ ...at(), w: 1 + roll(width + 4), h: 1 + roll(height + 4) });
+  const colour = () => among('a', 'b', 'c', 'd', '#12345678');
+  const standing = [
+    () => ({ op: 'pixel', ...at(), color: colour() }),
+    () => ({ op: 'rect', ...box(), color: colour(), filled: chance(2, 3) }),
+    () => ({ op: 'ellipse', ...box(), color: colour() }),
+    () => { const to = at(); return { op: 'line', ...at(), x2: to.x, y2: to.y, color: colour() }; },
+    () => ({ op: 'grid', ...at(), rows: ['ab.', '.cd', 'd.a'], scale: 1 + roll(3), rotate: among(0, 90, 180, 270), flipX: chance(1, 2) }),
+    () => ({ op: 'stamp', symbol: 's', ...at(), flipY: chance(1, 2), remap: { a: 'c' } }),
+    () => ({ op: 'copy', symbol: 's', ...at(), sx: 1, w: 2 }),
+    () => ({ op: 'box', ...at(), w: 4, d: 2 + 2 * roll(2), h: roll(4), top: 'a', left: 'b', right: 'c', edge: 'd' })
+  ];
+  const area = [
+    () => ({ op: 'clear', ...box() }),
+    () => ({ op: 'replace', from: among('transparent', 'a', 'b', 'd'), to: among('c', 'd', '#0080ff') }),
+    () => ({ op: 'tilemap', ...at(), tile: [3, 2], rows: ['#.#', '.##'], legend: { '#': { symbol: 's' } } }),
+    () => ({ op: 'text', text: 'Ag', ...at(), color: colour(), align: among('left', 'center', 'right') })
+  ];
+  const ops = sorted => Array.from({ length: roll(4) }, () => (sorted
+    ? { ...among(...standing)(), ...(chance(1, 3) && { ground: roll(height) }) }
+    : among(...standing, ...area)()));
+  const layer = index => {
+    const sorted = chance(1, 16);
+    return {
+      ...(chance(1, 2) && { name: ['back', 'body', 'front'][index] }), ...(chance(1, 2) && { x: roll(2 * width + 1) - width }), ...(chance(1, 2) && { y: roll(2 * height + 1) - height }),
+      ...(chance(1, 4) && { opacity: 0.5 }), ...(chance(1, 8) && { visible: false }), ...(chance(1, 4) && { palette: { a: '#abcdef' } }), ...(sorted && { sort: 'ground' }), ops: ops(sorted)
+    };
+  };
+  return {
+    version: 1, name: `layered-${seed}`, width, height, palette: { a: '#ff0000', b: '#00ff00', c: '#0000ff', d: '#ffff0080' }, symbols: { s: ['ab.', 'cda'] },
+    ...(chance(1, 3) && { background: among('#204060', '#20406080', 'b') }),
+    frames: Array.from({ length: 1 + roll(3) }, (_, index) => ({
+      name: `f${index}`, ...(index && chance(1, 2) && { from: `f${roll(index)}` }), ...(chance(1, 4) && { palette: { b: '#fedcba' } }),
+      ...(chance(2, 3) && { ops: ops(false) }), ...(chance(5, 6) && { layers: Array.from({ length: 1 + roll(3) }, (_, li) => layer(li)) }),
+      ...(chance(1, 3) && { pixels: [{ x: roll(width), y: roll(height), color: among('a', 'transparent', '#0000ff80') }] })
+    }))
+  };
+}
 
 test('a size is two whole sides within the canvas limit', () => {
   assert.deepEqual(readSize('32x48'), [32, 48]);
@@ -74,9 +125,113 @@ test('everything a frame places moves with the canvas', () => {
     assert.deepEqual(moved.anchor, [6 - ox, 9 - oy]);
     assert.deepEqual(moved.frames[0].points.hand, [9 - ox, 4 - oy]);
   }
-  // The stamp hangs over the right edge, where the old canvas clipped it: a margin there stays empty.
+  // The stamp hangs over the right edge, where the old canvas clipped it: a margin there stays empty. The second
+  // frame starts from the first and draws inside the canvas, so it has nothing to clear.
   assert.ok(renderProject(recipe).clipping);
-  assert.ok(resizeRecipe(recipe, '15x13').recipe.frames.every(frame => frame.ops.some(op => op.op === 'clear' && op.h === 13)));
+  assert.deepEqual(resizeRecipe(recipe, '15x13').recipe.frames.map(frame => frame.ops.some(op => op.op === 'clear' && op.h === 13)), [true, false]);
+});
+
+test('a layer that hangs over the canvas, or has its own x and y, is that window of the original too', () => {
+  const frame = (more, size = [8, 4]) => ({ version: 1, name: 'layers', width: size[0], height: size[1], palette: { a: '#ff0000', b: '#0000ff' }, frames: [{ name: 'one', ...more }] });
+  const bar = { op: 'rect', x: -1, y: 1, w: 10, h: 2, color: 'a' }, cut = ['............', '..########..', '..########..', '............'];
+  // A layer's operations draw after the frame's, so the frame's clears cannot empty the margins of a layer.
+  const over = frame({ layers: [{ ops: [bar] }] });
+  assert.deepEqual(rows(resizeRecipe(over, '12x4').recipe), cut);
+  assert.deepEqual(rows(resizeRecipe(frame({ ops: [bar] }), '12x4').recipe), cut);
+  assert.deepEqual(rows(resizeRecipe(frame({ ops: [{ ...bar, y: 0, h: 1 }], layers: [{ ops: [{ ...bar, y: 2, h: 1 }] }, { ops: [dot(9, 3)] }] }), '12x4').recipe), ['..########..', '............', '..########..', '............']);
+  // A layer is cut by its own canvas before its x and y move it: a block drawn at 0 and moved to the right half.
+  const moved = frame({ layers: [{ x: 4, ops: [{ op: 'rect', x: 0, y: 1, w: 4, h: 2, color: 'a' }] }] }), half = resizeRecipe(moved, '4x4');
+  assert.deepEqual(half.resized, { from: [8, 4], offset: [4, 0], cut: 0 });
+  assert.deepEqual(rows(half.recipe), ['....', '####', '####', '....']);
+  // Both cuts at once: the layer's canvas takes the left of the bar, the frame's takes the right after the move.
+  const both = frame({ layers: [{ x: 3, y: 1, opacity: 0.5, ops: [bar] }] });
+  assert.deepEqual(rows(both), ['........', '........', '...#####', '...#####']);
+  assert.deepEqual(rows(resizeRecipe(both, '14x6').recipe), ['..............', '..............', '..............', '..............', '.........#####', '.........#####']);
+  for (const recipe of [over, moved, both]) for (const size of ['12x4', '4x4', '14x6', '3x9', '8x4']) { const { recipe: sized, resized } = resizeRecipe(recipe, size); assert.equal(differing(recipe, sized, resized.offset), 0, size); }
+  // A frame continued from one whose layer overhangs starts from margins already empty.
+  const next = { ...over, frames: [...over.frames, { name: 'two', from: 'one', ops: [dot(3, 0)] }] };
+  assert.deepEqual(rows(resizeRecipe(next, '12x4').recipe, 1), ['.....#......', ...cut.slice(1)]);
+  // Only a list that was cut clears, and a layer without x or y keeps its operations where the frame's would be.
+  const quiet = resizeRecipe(frame({ ops: [dot(1, 1)], layers: [{ name: 'in', ops: [dot(2, 2)] }, { name: 'out', ops: [bar] }] }), '12x4').recipe.frames[0];
+  assert.deepEqual([quiet.ops, quiet.layers[0]], [[dot(3, 1)], { name: 'in', ops: [dot(4, 2)] }]);
+  assert.deepEqual(quiet.layers[1].ops.map(op => op.op), ['rect', 'clear', 'clear']);
+  // A render names sixteen places that were cut. Past them a layer may have been cut too, so it clears.
+  const many = frame({ ops: Array.from({ length: 17 }, (_, index) => dot(-1, index % 4)), layers: [{ ops: [bar] }] });
+  assert.equal(renderProject(many).clippingOmitted, 2);
+  assert.deepEqual(rows(resizeRecipe(many, '12x4').recipe), cut);
+  // Over several frames, each is asked alone, so a figure that overhangs through a long animation still clears only
+  // in the layers that do: here the second of each frame's three, and not the frame continued from the one before.
+  const long = { ...over, frames: Array.from({ length: 20 }, (_, index) => (index === 9 ? { name: 'f9', from: 'f8', layers: [{ ops: [dot(index % 8, 0)] }] }
+    : { name: `f${index}`, layers: [{ ops: [dot(index % 8, 0)] }, { ops: [{ ...bar, x: index % 2 ? -1 : 5 }] }, { ops: [dot(0, 3)] }] })) };
+  const sized = resizeRecipe(long, '12x6');
+  assert.equal(renderProject(long).clippingOmitted, 3);
+  assert.equal(differing(long, sized.recipe, sized.resized.offset), 0);
+  assert.deepEqual(sized.recipe.frames.map(({ layers }) => layers.map(layer => layer.ops.length).join('')).join(' '), Array.from({ length: 20 }, (_, index) => (index === 9 ? '1' : '151')).join(' '));
+});
+
+test('seeded layered recipes resize to the window of the original, pixel for pixel', () => {
+  let compared = 0, moved = 0, cleared = 0, refused = 0;
+  for (let seed = 1; seed <= 90; seed++) {
+    const recipe = layered(seed), { width, height } = recipe;
+    for (const size of [[width + 3, height + 4], [width - 2, height - 3], [width + 5, height - 4], [width - 4, height + 1], [2 * width, 2 * height], [width, height], [3, 2]]) {
+      const label = `seed ${seed} at ${size.join('x')}`, layers = recipe.frames.flatMap(frame => frame.layers ?? []);
+      let made;
+      try { made = resizeRecipe(recipe, size); } catch (error) {
+        // The one refusal: a sorted layer cannot clear what it draws past the canvas.
+        assert.match(error.message, /^size: frames\[\d\]\.layers\[\d\] is sorted by ground and draws past the canvas where the new one has a margin/, label);
+        assert.ok(layers.some(layer => layer.sort) && (size[0] > width || size[1] > height || layers.some(layer => layer.sort && (layer.x || layer.y))), label);
+        refused++;
+        continue;
+      }
+      assert.equal(differing(recipe, made.recipe, made.resized.offset), 0, label);
+      // Each layer clears for itself, so a view of chosen layers is that window of the same view.
+      for (const name of new Set(layers.map(layer => layer.name).filter(Boolean))) assert.equal(differing(recipe, made.recipe, made.resized.offset, { layers: [name] }), 0, `${label}, layer ${name}`);
+      compared++;
+      if (layers.some(layer => layer.x || layer.y)) moved++;
+      if (made.recipe.frames.some((frame, fi) => frame.layers?.some((layer, li) => layer.ops.length > recipe.frames[fi].layers[li].ops.length))) cleared++;
+    }
+  }
+  // Most cases resize, most of those have a layer with its own x or y, and many clear a layer's margins.
+  assert.ok(compared >= 500 && moved >= 300 && cleared >= 150 && refused >= 10, JSON.stringify({ compared, moved, cleared, refused }));
+});
+
+test('a margin shows the background, or nothing, whatever the drawing does to the rest', () => {
+  const backed = (background, ops, more = {}) => ({ ...plain(8, 4, ops, more), palette: { a: '#ff0000', b: '#0000ff' }, background });
+  const bar = { op: 'rect', x: -1, y: 1, w: 10, h: 2, color: 'a' };
+  const corner = recipe => [...renderProject(recipe).frames[0].data.subarray(0, 4)];
+  // Clearing what hangs over the old canvas clears the background there too, so it is painted back: a solid one, a
+  // partly clear one (once a pixel), and one named by a palette key that the frame recolours.
+  for (const [background, colour, more] of [['#204060', [32, 64, 96, 255]], ['#20406080', [32, 64, 96, 128]], ['b', [0, 0, 255, 255], { palette: { b: '#00ff00' } }]]) {
+    for (const recipe of [backed(background, [bar], more), backed(background, [], { ...more, layers: [{ ops: [bar] }] })]) {
+      const { recipe: sized, resized } = resizeRecipe(recipe, '12x6');
+      assert.deepEqual([resized.offset, corner(sized)], [[-2, -1], colour], background);
+      assert.equal(differing(recipe, sized, resized.offset), 0, background);
+    }
+  }
+  // A replace recolours every pixel of its canvas without being cut by it: the margins of a larger one too.
+  const flood = [dot(2, 2), { op: 'replace', from: 'transparent', to: 'b' }];
+  for (const recipe of [plain(8, 4, flood), plain(8, 4, [], { layers: [{ x: 3, y: -1, opacity: 0.5, ops: flood }] }), backed('#204060', [{ op: 'replace', from: '#204060', to: 'a' }])]) {
+    recipe.palette = { a: '#ff0000', b: '#0000ff' };
+    for (const size of ['12x6', '5x3', '10x2']) { const { recipe: sized, resized } = resizeRecipe(recipe, size); assert.equal(differing(recipe, sized, resized.offset), 0, size); }
+  }
+  assert.deepEqual(rows(resizeRecipe(plain(4, 2, [{ op: 'replace', from: 'transparent', to: 'a' }]), '6x4').recipe), ['......', '.####.', '.####.', '......']);
+});
+
+test('a sorted layer that draws past the canvas is refused where a margin would show it', () => {
+  const sorted = (ops, more = {}) => plain(8, 4, [], { layers: [{ name: 'props', sort: 'ground', ...more, ops }] });
+  const bar = { op: 'rect', x: -1, y: 1, w: 10, h: 2, color: 'a' }, post = { op: 'rect', x: 1, y: 0, w: 2, h: 3, color: 'a' }, far = { op: 'rect', x: 0, y: 1, w: 4, h: 1, color: 'a', ground: 9 };
+  // Only a clear erases, and a sorted layer takes none.
+  assert.throws(() => resizeRecipe(sorted([bar]), '12x4'), /size: frames\[0\]\.layers\[0\] is sorted by ground and draws past the canvas where the new one has a margin, which a sorted layer cannot clear, so this recipe cannot move to that canvas size; change the size in its source instead$/);
+  assert.throws(() => resizeRecipe(sorted([post], { x: 7 }), '12x4'), /layers\[0\] is sorted by ground/);
+  // Without a margin the new canvas cuts what the old one cut; and a sorted layer that stays inside moves like any
+  // other, its own x and y and each ground row with it.
+  for (const [recipe, size] of [[sorted([bar]), '6x4'], [sorted([bar]), '8x2'], [sorted([far, post], { x: 3, y: 1 }), '12x7'], [sorted([far, post], { x: 3, y: 1 }), '5x3']]) {
+    const { recipe: sized, resized } = resizeRecipe(recipe, size);
+    assert.equal(differing(recipe, sized, resized.offset), 0, size);
+  }
+  const stood = resizeRecipe(sorted([far, post], { x: 3, y: 1 }), '12x7');
+  assert.deepEqual(stood.resized.offset, [-2, -3]);
+  assert.deepEqual(stood.recipe.frames[0].layers[0], { name: 'props', sort: 'ground', ops: [{ ...far, x: 5, y: 5, ground: 13 }, { ...post, x: 6, y: 4 }] });
 });
 
 test('a recipe whose operations read the whole canvas says so instead of drawing something else', () => {

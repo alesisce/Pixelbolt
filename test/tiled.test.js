@@ -8,6 +8,7 @@ import { compileAutotile } from '../src/authoring.js';
 import { createBundle } from '../src/export.js';
 import { createSceneBundle } from '../src/scene-export.js';
 import { tiledTileset } from '../src/tiled.js';
+import { tileSets } from '../src/godot.js';
 import { GODOT_TILE_SOURCES, godotTileRecipe } from '../scripts/verify-godot.mjs';
 import { tiledScene } from '../scripts/verify-tiled.mjs';
 import { prepareScene, renderScene } from '../src/scene.js';
@@ -72,6 +73,73 @@ test('a looping animation animates its first tile, and one-way platforms, plain 
   assert.match(tileOf(ledge.text, ledge.id('rock')), /^<tile id="141">\n  <objectgroup draworder="index" id="2">\n   <object id="1" x="0" y="0">\n    <polygon points="0,6 6,0 12,6 6,12"\/>/);
   assert.equal(tileOf(ledge.text, ledge.id('sprout')), '<tile id="142" probability="0.333333"/>');
   assert.equal(tileOf(ledge.text, ledge.id('blank')), undefined);
+});
+
+// What the two engines' files offer from one sheet, as Tiled's tile ids: the tiles a terrain brush picks between (a
+// Godot tile with a peering bit, a Tiled Wang tile; the lone cell's tile, mask 0, is neither) and the tiles that play.
+const offered = (tres, tsx) => {
+  const columns = Number(tsx.match(/ columns="(\d+)"/)[1]), count = Number(tsx.match(/ tilecount="(\d+)"/)[1]);
+  const cells = pattern => [...new Set([...tres.matchAll(pattern)].map(match => match[1]))].map(cell => cell.split(':').map(Number)).map(([c, r]) => r * columns + c).sort((a, b) => a - b);
+  return {
+    godot: { brush: cells(/^(\d+:\d+)\/0\/terrains_peering_bit\//gm), plays: cells(/^(\d+:\d+)\/animation_frame_0\//gm) },
+    tiled: { brush: [...tsx.matchAll(/<wangtile tileid="(\d+)"/g)].map(match => Number(match[1])).sort((a, b) => a - b), plays: Array.from({ length: count }, (_, id) => id).filter(id => tileOf(tsx, id)?.includes('<animation>')) }
+  };
+};
+// An untrimmed atlas of 4×4 frames, four to a row.
+const stripAtlas = (names, animations = {}) => ({ frames: Object.fromEntries(names.map((name, i) => [name, { frame: { x: (i % 4) * 4, y: Math.floor(i / 4) * 4, w: 4, h: 4 }, duration: 100 }])), animations, meta: { image: 'strip.png', size: { w: 16, h: Math.ceil(names.length / 4) * 4 } } });
+
+test('a Tiled tileset offers its terrain brush the tiles the Godot TileSet offers its painter: one rule says which frames an animation takes', async () => {
+  // An animation that plays once can't play in a tile of either: it is its first frame's tile, still, and its later
+  // frames are no tiles (the .tsx had them as Wang tiles of their mask, three stills the brush picked between).
+  const recipe = godotTileRecipe(GODOT_TILE_SOURCES[2]), once = { ...recipe, animations: { ...recipe.animations, 'surf-1': { ...recipe.animations['surf-1'], loop: false } } };
+  const bundle = await createBundle(once), id = name => once.frames.findIndex(frame => frame.name === name);
+  const surf = offered(bundle.files.get('surf.tileset.tres').toString(), bundle.files.get('surf.tsx').toString());
+  assert.deepEqual(surf.tiled, surf.godot);
+  assert.equal(surf.tiled.brush.length, 46);
+  assert.deepEqual(['surf-1-a', 'surf-1-b', 'surf-1-c', 'surf-5-a'].map(name => [surf.tiled.brush.includes(id(name)), surf.tiled.plays.includes(id(name))]), [[true, false], [false, false], [false, false], [true, true]]);
+  assert.deepEqual(bundle.project.warnings, ['surf.tileset.tres: animation surf-1 became still tiles of its first frame: Godot animates a tile by playing the frames after it in the sheet once each, in order, looping',
+    'surf.tsx: animation surf-1 became still tiles of its first frame: Tiled loops every tile animation']);
+  // Three frames of one mask and one of another. A frame that starts one animation and comes later in a second stays
+  // the first one's tile, and the second is left out (in the .tsx, `a` played a, b and `b` was no Wang tile).
+  const strip = animations => {
+    const names = ['a', 'b', 'c', 'd'], source = { atlas: stripAtlas(names, animations), tiles: names.map(frame => ({ frame, mask: frame === 'd' ? 1 : 255, mode: 'blob' })), layered: [], plain: [], colors: {}, name: 'strip' };
+    const godot = tileSets([source]), tiled = tiledTileset(source);
+    return { ...offered(godot.text, tiled.text), text: tiled.text, warnings: [godot.warnings, tiled.warnings] };
+  };
+  const shared = strip({ one: { frames: ['b', 'c'], loop: true }, two: { frames: ['a', 'b'], loop: true } });
+  assert.deepEqual([shared.godot, shared.tiled], Array(2).fill({ brush: [0, 1, 3], plays: [1] }));
+  assert.deepEqual(shared.warnings.map(list => list.filter(warning => warning.startsWith('animation'))), [[], []]);
+  // Two animations from one frame take the later frames of both. Godot plays the one in sheet order, and a Tiled tile
+  // the first that loops, since it plays frames in any order; each says which it left still.
+  const twice = strip({ one: { frames: ['a', 'c'], loop: true }, two: { frames: ['a', 'b'], loop: true } });
+  assert.deepEqual([twice.godot, twice.tiled], Array(2).fill({ brush: [0, 3], plays: [0] }));
+  assert.equal(tileOf(twice.text, 0), '<tile id="0">\n  <animation>\n   <frame tileid="0" duration="100"/>\n   <frame tileid="2" duration="100"/>\n  </animation>\n </tile>');
+  assert.deepEqual(twice.warnings.map(list => list.filter(warning => warning.startsWith('animation'))), [['animation one became still tiles of its first frame: Godot animates a tile by playing the frames after it in the sheet once each, in order, looping'],
+    ['animation two became still tiles of its first frame: its first frame already plays an earlier animation, and a Tiled tile plays one']]);
+});
+
+test('a warning names its terrain when the tileset has more than one, in whichever order they come', () => {
+  // Two terrains, one mixing blob and cardinal masks, which gets no Wang set: the other's warning named its terrain
+  // only when it came first.
+  const tiles = { mix: [{ frame: 'm1', mask: 1, mode: 'blob', terrain: 'mix' }, { frame: 'm2', mask: 2, mode: 'cardinal', terrain: 'mix' }], ok: [{ frame: 'k1', mask: 1, mode: 'blob', terrain: 'ok' }, { frame: 'k2', mask: 255, mode: 'blob', terrain: 'ok' }] };
+  for (const order of [['mix', 'ok'], ['ok', 'mix']]) {
+    const list = order.flatMap(name => tiles[name]), { warnings } = tiledTileset({ atlas: stripAtlas(list.map(tile => tile.frame)), tiles: list, layered: [], plain: [], colors: {}, name: 'two' });
+    assert.deepEqual(warnings.sort(), ['terrain mix: no Wang set: it mixes blob and cardinal masks, and a Tiled Wang set matches one way; give one set\'s frames another tile.terrain',
+      'terrain ok: 44 of the 46 blob Wang tiles are missing, so Tiled draws its nearest match where one is needed'], order.join());
+  }
+  // One terrain needs no name.
+  assert.deepEqual(tiledTileset({ atlas: stripAtlas(['k1', 'k2']), tiles: tiles.ok, layered: [], plain: [], colors: {}, name: 'one' }).warnings, ['44 of the 46 blob Wang tiles are missing, so Tiled draws its nearest match where one is needed']);
+});
+
+test('a sheet with no terrain plays every looping animation from its first frame, whatever else its frames are in', () => {
+  // A sprite's tileset in a scene: no brush picks between its frames, so the rule that keeps an animation's frames off
+  // the terrain brush does not hold a walk back for passing through the frame its idle starts on.
+  const names = ['stand', 'blink', 'step', 'stride'], animations = { idle: { frames: ['stand', 'blink'], loop: true }, walk: { frames: ['step', 'stand', 'stride'], loop: true }, wave: { frames: ['stride', 'blink'], loop: false } };
+  const { text, warnings } = tiledTileset({ atlas: stripAtlas(names, animations), tiles: [], layered: [], plain: names, colors: {}, name: 'sprite' }, { oneShots: false });
+  const plays = id => [...(tileOf(text, id) ?? '').matchAll(/<frame tileid="(\d+)"/g)].map(match => Number(match[1]));
+  assert.deepEqual([0, 1, 2, 3].map(plays), [[0, 1], [], [2, 0, 3], []]);
+  assert.deepEqual(warnings, []);
+  assert.doesNotMatch(text, /<wangsets>/);
 });
 
 test('a sheet without a grid, or a terrain matching two ways, is reported instead of guessed', async () => {

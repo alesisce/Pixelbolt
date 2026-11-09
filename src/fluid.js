@@ -4661,7 +4661,13 @@ function fluidForces(run, crowd) {
       const rx = i + 0.5 - b.x - (across ? 0 : sign * 0.5), ry = j + 0.5 - b.y - (across ? sign * 0.5 : 0);
       load += column; loadX += column * rx; loadY += column * ry;
     }
-    if (!Kx && !Ky && !sub && !load && !px && !py) { b.push = null; b.float = null; return; }
+    if (!Kx && !Ky && !sub && !load && !px && !py) {
+      // A body that slept held up by the fluid, or under a load of it, wakes when none of it is left: asleep, a crate
+      // afloat on a pool that drained away stayed where the water had held it.
+      if (b.asleep && (b.restSub > 0 || b.restLoad > 0)) { b.asleep = false; b.sleepy = 0; }
+      b.restSub = undefined; b.restLoad = undefined; b.restLevel = undefined; b.push = null; b.float = null;
+      return;
+    }
     const m = 1 / b.invMass, added = ADDED_MASS * heavy * sub, fall = b.weightless ? 0 : 1, lift = heavy * sub;
     const tau = (sub ? (sx - b.x) * -lift * gy - (sy - b.y) * -lift * gx : 0) + loadX * gy - loadY * gx, inertia = b.invInertia ? 1 / b.invInertia : 0;
     // In a gas, the body's own motion sets much of the pressure on its faces that pushes it back: met a frame at a time, a
@@ -4689,13 +4695,16 @@ function fluidForces(run, crowd) {
     }
     // A sleeping body stays asleep in still fluid: what holds it (its buoyancy, the ground or the bottom under it) holds
     // it as before. Fluid flowing past it faster than BODY_WAKE, or rising, falling or piling a row against it, wakes it.
+    // So does the level it floats at moving a pixel: a light body has less of itself under the liquid than a row of its
+    // cells, and all of that could drain away without the row's worth of change that wakes a heavier one.
     if (b.asleep) {
       const flow = K ? Math.sqrt(Ku * Ku + Kv * Kv) / K : 0, row = Math.max(2, inside.size / 6);
-      b.restSub ??= sub; b.restLoad ??= load;
-      if (flow < BODY_WAKE && Math.abs(sub - b.restSub) < row && Math.abs(load - b.restLoad) < row) return;
+      b.restSub ??= sub; b.restLoad ??= load; b.restLevel ??= float ? level : null;
+      const shifted = b.restLevel !== null && !(float && Math.abs(level - b.restLevel) < 1);
+      if (flow < BODY_WAKE && Math.abs(sub - b.restSub) < row && Math.abs(load - b.restLoad) < row && !shifted) return;
       b.asleep = false; b.sleepy = 0;
     }
-    b.restSub = undefined; b.restLoad = undefined;
+    b.restSub = undefined; b.restLoad = undefined; b.restLevel = undefined;
     // Never hand the bodies a number that isn't one: a body keeps its own motion rather than vanish.
     if (![vx, vy, w, ...push].every(Number.isFinite)) { b.push = null; b.float = null; return; }
     b.vx = vx; b.vy = vy; b.w = w; b.push = push; b.float = float;

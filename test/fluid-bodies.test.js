@@ -107,6 +107,19 @@ test('a fixed body turning on the spot in sand leaves its cells without a veloci
   assert.ok(turned.length === 11 && turned.filter(Boolean).length > 5, `the paddle turns through the frames: ${turned}`);
 });
 
+test('a light crate asleep afloat comes down with the water as its pool drains', () => {
+  // A crate that floats with less of itself under the water than a row of its cells fell asleep there, and stayed asleep
+  // as the pool drained slowly from under it: what was under it never changed by the row's worth that wakes a sleeping
+  // body, and it was left standing in the air a pixel and a half over the dry floor.
+  for (const [size, density] of [[6, 0.1], [4, 0.15]]) {
+    const crate = paths(pool([{ name: 'crate', shape: 'box', size: [size, size], at: [36, 38 - size / 2 + density * size], density, fill: 'h' }],
+      { frames: 256, fill: [{ x: 0, y: 38, w: 48, h: 2 }], emitters: [{ name: 'drain', at: [24, 38], area: [48, 6], rate: 1, density: -0.012, start: 30 }] })).crate;
+    const bottom = f => crate[f][1] + size / 2;
+    assert.ok(Math.abs(bottom(29) - (38 + density * size)) < 0.3, `a ${size} × ${size} crate floats, its bottom at ${bottom(29)}`);
+    assert.ok(Math.abs(bottom(255) - 40) < 0.1, `and stands on the floor once the pool is gone, its bottom at ${bottom(255)}`);
+  }
+});
+
 test('what rests on a body weighs on it: sand poured on one end of a plank tips it', () => {
   const plank = paths(fluidBodyPresets['plank-tip']).plank, turn = (plank.at(-1)[2] - plank[0][2] + 540) % 360 - 180;
   assert.ok(Math.abs(turn) > 20, `the plank tips down under the sand: ${plank[0]} to ${plank.at(-1)}`);

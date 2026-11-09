@@ -170,6 +170,50 @@ test('child emitters spawn where parents end, land or travel, and loops stay sea
   assert.equal(new Set(stampsAt(opsOf(scatter().recipe)[2]).map(String)).size, 4);
 });
 
+test('a child emitter\'s spawned counts the children born in the effect\'s own frames, not in the frame after the last', () => {
+  const drawn = (recipe, symbol) => opsOf(recipe).map(ops => ops.filter(op => op.symbol === symbol).length), sum = list => list.reduce((a, b) => a + b, 0);
+  const figures = source => { const { recipe, metadata } = compileEffects(effects(source)); return { emitters: metadata.effects.burst.emitters, cool: drawn(recipe, 'cool'), warm: drawn(recipe, 'warm') }; };
+  // A loop of one parent a frame. Each child lives one frame, so it is drawn once, in the frame it is born in: the stamps
+  // drawn over the loop are the children born in it. The frame after the last (the next cycle's first, drawn for the
+  // seam review) bears children too, which are frame 0's and were counted twice.
+  const parent = { name: 'p', at: [12, 4], area: [8, 1], rate: 1, angle: 90, speed: 1, life: 4, shapes: ['dot'] };
+  const cases = {
+    death: [parent, { from: 'p', when: 'death', burst: 1, life: 1, shapes: ['cool'] }],
+    floor: [{ ...parent, floor: 6, life: 6 }, { from: 'p', when: 'floor', burst: 1, life: 1, shapes: ['cool'] }],
+    life: [parent, { from: 'p', when: 'life', rate: 1, life: 1, shapes: ['cool'] }]
+  };
+  for (const [when, emitters] of Object.entries(cases)) {
+    const { emitters: [, child], cool } = figures({ frames: 8, loop: true, seed: 2, emitters });
+    assert.deepEqual(cool, Array(8).fill(when === 'life' ? 4 : 1), when);
+    assert.deepEqual([when, child.spawned, child.maxAlive], [when, sum(cool), Math.max(...cool)]);
+  }
+  // Three generations: every particle born in a loop is drawn for its whole life within it, so stamps = spawned × life.
+  const chain = figures({ frames: 8, loop: true, seed: 2, emitters: [parent, { name: 'c', from: 'p', burst: 2, life: 3, shapes: ['warm'] }, { from: 'c', when: 'life', rate: 1, life: 1, shapes: ['cool'] }] });
+  assert.deepEqual(chain.emitters.map(e => [e.spawned, e.maxAlive]), [[8, 4], [16, 6], [48, 6]]);
+  assert.deepEqual([sum(chain.warm), sum(chain.cool)], [16 * 3, 48]);
+  // A burst that lives the whole loop dies into the next cycle's first frame: its children are frame 0's, counted once.
+  const seam = figures({ frames: 2, loop: true, emitters: [{ name: 'p', at: [12, 12], burst: 10, life: 2, shapes: ['dot'] }, { from: 'p', burst: 1, life: 1, shapes: ['cool'] }] });
+  assert.deepEqual([seam.cool, seam.emitters[1]], [[10, 0], { spawned: 10, maxAlive: 10 }]);
+  // Played once, a parent that ends in the last frame has no next frame for its children: none is born, drawn or counted.
+  const last = figures({ frames: 4, emitters: [{ name: 'p', at: [12, 12], burst: 1, life: 4, shapes: ['dot'] }, { from: 'p', burst: 5, life: 2, shapes: ['cool'], cue: 'pop' }] });
+  assert.deepEqual([last.cool, last.emitters[1]], [[0, 0, 0, 0], { spawned: 0, maxAlive: 0 }]);
+  // One frame earlier they are born in the last frame, and counted.
+  const shown = figures({ frames: 4, emitters: [{ name: 'p', at: [12, 12], burst: 1, life: 3, shapes: ['dot'] }, { from: 'p', burst: 5, life: 2, shapes: ['cool'] }] });
+  assert.deepEqual([shown.cool, shown.emitters[1]], [[0, 0, 0, 5], { spawned: 5, maxAlive: 5 }]);
+  // Nor do children that are never born count as particles alive: 600 parents with two each stay under the 1024 alive.
+  const crowd = figures({ frames: 4, emitters: [{ name: 'p', at: [12, 12], area: [20, 20], burst: 600, life: 4, shapes: ['dot'] }, { from: 'p', burst: 2, life: 2, shapes: ['cool'] }] });
+  assert.deepEqual(crowd.emitters, [{ name: 'p', spawned: 600, maxAlive: 600 }, { spawned: 0, maxAlive: 0 }]);
+  // The limit of 4096 particles is on those the loop bears: 3200 of mist, 128 parents and their 768 children are exactly
+  // 4096 and compile (the children counted twice made 4864), and one more particle of mist in the loop is over it.
+  const full = more => effects({ frames: 32, loop: true, seed: 2, emitters: [
+    ...[0, more / 32].map(extra => ({ at: [12, 12], area: [20, 20], rate: 50 + extra, life: 1, shapes: ['warm'] })),
+    { name: 'p', at: [12, 12], area: [20, 20], burst: 128, life: 32, shapes: ['dot'] }, { from: 'p', burst: 6, life: 1, shapes: ['cool'] }] });
+  const atLimit = compileEffects(full(0));
+  assert.deepEqual(atLimit.metadata.effects.burst.emitters.map(e => e.spawned), [1600, 1600, 128, 768]);
+  assert.equal(sum(drawn(atLimit.recipe, 'cool')), 768);
+  assert.throws(() => compileEffects(full(1)), error => error.path === 'fx.effects.burst.emitters' && /more than 4096 particles/.test(error.message));
+});
+
 test('tint stages recolour particles over their life, over their own remap', () => {
   const { recipe } = compileEffects(effects({ frames: 4, emitters: [{ at: [12, 12], burst: 1, life: 4, shapes: ['chip'], remaps: [{ o: 'g' }], tint: [{}, { y: 'w' }] }] }));
   assert.deepEqual(opsOf(recipe).map(ops => ops[0].remap), [{ o: 'g' }, { o: 'g' }, { o: 'g', y: 'w' }, { o: 'g', y: 'w' }]);

@@ -91,13 +91,16 @@ function tiledModel(recipe, atlas) {
     if (frame.ops?.[0]?.op === 'autotile') return { key: `${frame.tile?.terrain ?? recipe.name} ${frame.ops[0].mask}`, terrain: frame.tile?.terrain ?? recipe.name, mode: frame.ops[0].mode ?? 'blob', mask: frame.ops[0].mask };
     return frame.tile || drawn(i) ? { key: 'plain' } : null;
   });
-  // A looping animation over frames of one kind animates its first tile; its other frames are no Wang tiles.
-  const animated = new Map(), covered = new Set();
+  // An animation over frames of one kind takes them: its first frame is its tile, which plays it when it loops, and its
+  // other frames are no Wang tiles, loop or not. One with a frame an earlier animation took, or a later frame that
+  // starts an earlier one, takes nothing (the rule the Godot TileSet follows too: tileAnimations in src/tiled.js).
+  const animated = new Map(), covered = new Set(), starts = new Set();
   if (recipe.animations !== undefined) for (const animation of Object.values(atlas.animations)) {
     const sequence = animation.frames.map(name => ids.get(name)), kind = kinds[sequence[0]];
-    if (!animation.loop || sequence.length < 2 || !kind || sequence.some(i => kinds[i]?.key !== kind.key) || animated.has(sequence[0]) || sequence.some(i => covered.has(i))) continue;
-    animated.set(sequence[0], sequence.map(i => [i, atlas.frames[frames[i].name].duration]));
+    if (sequence.length < 2 || !kind || sequence.some(i => kinds[i]?.key !== kind.key || covered.has(i) || (i !== sequence[0] && starts.has(i)))) continue;
+    starts.add(sequence[0]);
     for (const i of sequence.slice(1)) if (i !== sequence[0]) covered.add(i);
+    if (animation.loop && !animated.has(sequence[0])) animated.set(sequence[0], sequence.map(i => [i, atlas.frames[frames[i].name].duration]));
   }
   const weight = i => frames[i].tile?.weight ?? 1, heaviest = new Map();
   frames.forEach((_, i) => { if (kinds[i] && !covered.has(i)) heaviest.set(kinds[i].key, Math.max(heaviest.get(kinds[i].key) ?? 1, weight(i))); });

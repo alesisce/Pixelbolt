@@ -791,7 +791,11 @@ export function createBodyWorld(effect, context) {
     return pieces.length;
   };
   // Territory and powers (territory.js): cells owned by teams, pickups, events and strikes.
-  const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, shatter: (b, at, count) => shatter(b, at, count, b.breaks ? b.breaks.speed : 0.5), width, height, fastest: MAX_SPEED }) : null;
+  // A body a power is about to move or reshape wakes, and so does what leans on it where it is; what it touches where the
+  // power leaves it wakes once it is placed there (see advance).
+  const stirred = [];
+  const stir = b => { rouse([b]); b.asleep = false; b.sleepy = 0; stirred.push(b); };
+  const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, shatter: (b, at, count) => shatter(b, at, count, b.breaks ? b.breaks.speed : 0.5), stir, energy, width, height, fastest: MAX_SPEED }) : null;
   // A body that cuts passes through what it cuts, so it is drawn over it (paintBodies draws it last).
   for (const r of effect.strikes ?? []) if (r.cut) bodies[r.by].cuts = true;
   let current = 0;
@@ -1164,6 +1168,7 @@ export function createBodyWorld(effect, context) {
       turf.frame(f, bodies);
       for (const b of bodies) if (!b.gone) place(b);
       rouse(bodies.filter((b, k) => k < was.length && b.gone && !was[k]));
+      if (stirred.length) { rouse(stirred.filter(b => !b.gone)); stirred.length = 0; }
     }
     // Hits change colour once a frame (a fill list that steps with time doesn't); slow bodies fall
     // asleep; bodies far outside the canvas are gone. A named body's path has a place for every frame: null once it is gone.

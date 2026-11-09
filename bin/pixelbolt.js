@@ -225,7 +225,8 @@ async function writeOutputs(targets, force, inputs = []) {
   if (read) throw new Error(`${read} is a file this command reads; even --force never writes over it. Choose another file; no files were written.`);
   if (!force) for (const [, target] of entries) {
     try { await access(target); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    throw new Error(`Output already exists: ${target}. Choose a new file or pass --force.`);
+    // Said outright, since an agent that misses the refusal opens the old file and takes it for this run's.
+    throw new Error(`Output already exists: ${target}. Nothing was written, so that file is an earlier run's, not this one's. Choose a new file or pass --force.`);
   }
   for (const [, target, data] of entries) {
     await mkdir(path.dirname(target), { recursive: true });

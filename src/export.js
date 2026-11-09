@@ -402,7 +402,7 @@ export async function writeBundle(bundle, directory, { force = false, inputs = [
   // Preflight all output collisions before writing any artifact.
   if (!force) for (const filename of bundle.files.keys()) {
     try { await access(path.join(root, filename)); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    throw new Error(`Output already exists: ${path.join(root, filename)}. Choose a new folder or pass --force.`);
+    throw new Error(`Output already exists: ${path.join(root, filename)}. Nothing was written, so that folder holds an earlier export, not this one. Choose a new folder or pass --force.`);
   }
   const stale = force ? await leftovers(bundle, root) : [];
   if (force) for (const filename of await respelled(bundle, root)) await rm(path.join(root, filename), { force: true });

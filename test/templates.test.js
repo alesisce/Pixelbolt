@@ -360,3 +360,18 @@ test('an arm left out of rig.arms holds what it carries: the shield of the knigh
   // The sword's guard is gold too and passes the shield's right rim, so the left rim is the one that tells.
   assert.ok(boxes.every(([left]) => Math.abs(left - boxes[0][0]) <= 1), JSON.stringify(boxes));
 });
+
+test('an attachment to a missing point or instance says what the pose has and how to add the point', async () => {
+  // The hero with a bow hung from `attach`: the mistake a first character makes.
+  const text = await readFile(new URL('../examples/hero.poses.json', import.meta.url), 'utf8');
+  const withBow = attach => { const source = JSON.parse(text); source.parts.bow = { rows: ['k', 'k'] }; source.poses[0].parts.push({ name: 'bow', part: 'bow', attach }); return source; };
+  const cases = [
+    [{ part: 'nearHand', point: 'grip' }, /"nearHand" has no point "grip" \(it has none\)\. Name one of its points, or add this one under parts\.hand\.points: "grip": \[column, row\] in its rows$/],
+    [{ part: 'chest', point: 'grip' }, /"chest" has no point "grip" \(its points: end, shoulder, neck, nape\)\..*parts\.chest\.points: "grip": "end", or \[along, across\] from the start of the bone$/],
+    [{ part: 'hips', point: 'grip' }, /its points: hip, waist\).*\[x, y\] from the centre of the mass$/],
+    [{ part: 'hand', point: 'grip' }, /no part instance named "hand" in this pose \("hand" is a part definition, placed here as "nearHand"; attach\.part takes an instance's name\); its instances: tail, tip, .* and 3 more$/],
+    [{ part: 'nope', point: 'grip' }, /no part instance named "nope" in this pose; its instances: tail, tip, /]
+  ];
+  for (const [attach, pattern] of cases) assert.throws(() => compilePoses(withBow(attach)), error => { assert.equal(error.path, 'poses.poses[0].parts[18].attach'); assert.match(error.message, pattern); return true; });
+});
+

@@ -225,7 +225,7 @@ test('compile --draft-views prints drafts, writes only the files named, and neve
   assert.ok(image.width > 100 && image.height > 30);
   assert.equal(await readFile(source, 'utf8'), text);
   // Existing files are kept unless --force, and the flag's form is checked.
-  await assert.rejects(run(process.execPath, [cli, 'compile', source, '--draft-views', 'farBoot:345', '--preview', preview]), /Output already exists/);
+  await assert.rejects(run(process.execPath, [cli, 'compile', source, '--draft-views', 'farBoot:345', '--preview', preview]), /Output already exists: .*Nothing was written, so that file is an earlier run's, not this one's\. Choose a new file or pass --force\./);
   await assert.rejects(run(process.execPath, [cli, 'compile', source, '--draft-views', '30,boot']), /expects part:angle,angle such as boot:30,330/);
   await assert.rejects(run(process.execPath, [cli, 'compile', source, '--draft-views', 'boot:30', '--metadata', out]), /--metadata cannot be combined with --draft-views/);
   // A preset works as its file does.

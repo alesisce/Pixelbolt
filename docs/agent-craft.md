@@ -7,7 +7,7 @@ Short checklists by subject, for the pixel art skill: read the one section the j
 - The recipe is the source. Keep the JSON file. Don't paint PNGs with another library and don't hand-edit exported files.
 - An existing asset is edited through its recipe with patches. Rebuild from scratch only when the user asks.
 - Change one pixel with a patch, not by rewriting the recipe. A patch preview lists the frames it changes and, for small edits, each pixel; read that list.
-- Save edits to a new recipe (`--out`) rather than over the old one, and render each attempt into a new folder. Use `--force` only to replace output you made, and only when the user wants it replaced.
+- Save edits to a new recipe (`--out`) rather than over the old one, and render each attempt into a new folder. Use `--force` only to replace output you made, and only when the user wants it replaced. A write to a file that exists is refused and leaves the old file as it was, so number your drafts (`sheet-1.png`, `sheet-2.png`) and read `ok` in the reply before opening an image: a sheet opened after a refused write is the earlier one.
 - Validation and the render `check` show that a file matches the format and what was asked, not that the art works. Look at the inspect image at native size and enlarged, and at the animation in playback, before you say it is done.
 - Stay in the palette: no gradients, anti-aliasing or subpixel positions. Export at scale 1 for game assets unless the user asks for enlarged pixels baked into the files.
 - If the request leaves size or use open, pick a sensible default (for example 16 to 64 px for a game sprite, 4 to 16 colours), state it in one line, and build. Ask only when the answer changes the build.

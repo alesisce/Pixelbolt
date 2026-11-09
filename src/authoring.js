@@ -333,7 +333,12 @@ export function compilePoses(source, mode) {
         if (instance.attach !== undefined) {
           fields(instance.attach, ['part', 'point'], `${ip}.attach`);
           identifier(instance.attach.part, `${ip}.attach.part`); identifier(instance.attach.point, `${ip}.attach.point`);
-          if (!instances.has(instance.attach.part)) fail(`${ip}.attach`, 'attachment must name a point on a part in this pose');
+          // The error names what the pose does have: a first attachment is usually to a part's definition name, or to a
+          // part that was never given the point.
+          if (!instances.has(instance.attach.part)) {
+            const names = [...instances.keys()], definition = Object.hasOwn(source.parts, instance.attach.part) && spec.parts.filter(other => other.part === instance.attach.part).map(other => other.name);
+            fail(`${ip}.attach`, `no part instance named "${instance.attach.part}" in this pose${definition ? ` ("${instance.attach.part}" is a part definition${definition.length ? `, placed here as ${definition.slice(0, 4).map(name => `"${name}"`).join(', ')}` : ', not placed in this pose'}; attach.part takes an instance's name)` : ''}; its instances: ${names.slice(0, 16).join(', ')}${names.length > 16 ? ` and ${names.length - 16} more` : ''}`);
+          }
           checkGraph(instances.get(instance.attach.part), done, [...stack, i]);
         }
         done.add(i);
@@ -369,7 +374,11 @@ export function compilePoses(source, mode) {
         if (instance.attach !== undefined) {
           resolve(instances.get(instance.attach.part));
           const part = placed[instance.attach.part];
-          if (!part || !Object.hasOwn(part.points, instance.attach.point)) fail(`${ip}.attach`, 'attachment must name a point on a part in this pose');
+          if (!part || !Object.hasOwn(part.points, instance.attach.point)) {
+            const target = spec.parts[instances.get(instance.attach.part)], shape = source.parts[target?.part] ?? {}, have = Object.keys(part?.points ?? {});
+            const how = shape.bone ? '"end", or [along, across] from the start of the bone' : shape.mass ? '[x, y] from the centre of the mass' : '[column, row] in its rows';
+            fail(`${ip}.attach`, `"${instance.attach.part}" has no point "${instance.attach.point}" (${have.length ? `its points: ${have.join(', ')}` : 'it has none'}). Name one of its points, or add this one under parts.${target?.part}.points: "${instance.attach.point}": ${how}`);
+          }
           parent = part.points[instance.attach.point];
           parentAngle = worldAngles.get(instance.attach.part);
         }

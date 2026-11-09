@@ -4,6 +4,11 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Clearer errors where first-time agents stalled
+
+- Attaching a part to a point that isn't there named neither: "attachment must name a point on a part in this pose". The error now says which is missing and what exists. For a missing point: the part's own points and how to add one under `parts.<name>.points` (`[column, row]` in a grid's rows, `"end"` or `[along, across]` on a bone, `[x, y]` from a mass's centre). For a missing instance: the pose's instance names, and, when the name is a part definition, the instances that place it.
+- A refused overwrite says that nothing was written and the file there is an earlier run's. An agent that missed the refusal opened the old sheet and took it for the new one; the craft notes now say to number drafts and read `ok` before opening an image.
+
 ### A second character to start from, and how to make a new one
 
 - `examples/knight.poses.json` (preset `knight`, brief `examples/knight.brief.md`) is a stocky knight in plate on the hero's rig roles: idle, walk, attack and hurt at 32 × 32. Its shield hangs from an arm left out of `rig.arms`, so no template swings it and the shield stays where it is held; the far arm swings and strikes with the sword, and a plume follows as `rig.tail`. A first-time agent asked for a knight had recoloured the slim hero and got a thin column.

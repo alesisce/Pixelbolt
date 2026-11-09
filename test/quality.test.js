@@ -131,7 +131,7 @@ test('authored part replacements keep held objects attached and export timing in
   assert.deepEqual(metadata.animations.cast.entries.map(e => e.start), [0, 80, 180]);
   assert.deepEqual(metadata.animations.cast.entries[1].markers[0].at, [2, 2]);
   source.poses[0].parts[1].attach.part = 'missing';
-  assert.throws(() => compilePoses(source), /part in this pose/);
+  assert.throws(() => compilePoses(source), /no part instance named "missing" in this pose; its instances: hand, held/);
 });
 
 test('a long sheet\'s diagnostics reply gives totals and the frames with the most to clean up', () => {

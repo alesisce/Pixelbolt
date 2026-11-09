@@ -4,6 +4,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Pose sheets without the spare rest frame
+
+- A rigged `pixelforge-poses` source no longer compiles its rest pose (`rig.rest`) into a frame unless an animation plays it. Before, a rig with a four-frame idle exported a five-cell sheet, the fifth being the rest pose that no animation showed, and agents spent a detour removing it. The remaining frames, their pixels and the metadata are unchanged; frame indexes after the rest pose move down by one. To keep the rest pose as a frame, name it in an animation: `"animations": {"stand": {"frames": ["stand"]}}`. Sources without a rig keep every pose they write.
+
 ### Emitters that follow a moving obstacle
 
 - A fluid emitter takes `follow`: the index of an obstacle, or the symbol one obstacle stamps. The emitter keeps its place beside that obstacle as the obstacle's `keys` move it, so a rocket's flame lifts off with the rocket, where before the flame stayed on the pad. A rate emitter is laid along the way between frames, so a fast obstacle leaves one trail, not a puff a frame; sparks, carriers and liquid emitters follow as well. Sources without `follow` compile to the same pixels as before.

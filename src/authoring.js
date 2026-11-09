@@ -240,7 +240,7 @@ export function compilePoses(source, mode) {
       ...(p.cleanup === false && { cleanup: false }), ...(p.squash !== undefined && { squash: p.squash })
     })) };
   };
-  const frames = source.poses.map((pose, index) => {
+  const posed = source.poses.map((pose, index) => {
     const writtenAs = written?.get(pose?.name), path = writtenAs?.path ?? `poses.poses[${index}]`, motion = writtenAs?.motion;
     fields(pose, ['name', 'duration', 'origin', 'parts', 'markers', 'contacts', 'mirror', 'relight', 'tween'], path);
     identifier(pose.name, `${path}.name`);
@@ -455,28 +455,35 @@ export function compilePoses(source, mode) {
     return { name: pose.name, ...(duration !== undefined && { duration }), anchor: origin, ...(markers.length && { points: Object.fromEntries(markers.map(m => [m.name, m.at])) }), layers, ...(lines.length && { pixels: lines }) };
   });
   if (mode === PROBE) return { metadata: { poses: metadata.poses } };
+  // A rig's rest pose is what the motions are made from. It is a frame only when an animation plays it: left in the
+  // sheet otherwise, a four-frame idle would export five cells. Its metadata stays, since the review tools measure it.
+  const played = new Set(Object.values(source.animations ?? {}).flatMap(animation => Array.isArray(animation?.frames) ? animation.frames : []));
+  const frames = source.rig?.rest !== undefined && posed.length > 1 && played.size && !played.has(source.rig.rest) ? posed.filter(frame => frame.name !== source.rig.rest) : posed;
   // When every pose shares one origin, it is declared once as the recipe anchor.
   const shared = frames.every(frame => frame.anchor[0] === frames[0].anchor[0] && frame.anchor[1] === frames[0].anchor[1]);
   if (shared) for (const frame of frames) delete frame.anchor;
-  const recipe = { version: 1, name: source.name, width: source.width, height: source.height, palette: source.palette ?? {}, ...(source.ramps !== undefined && { ramps: source.ramps }), ...(shared && { anchor: compiled[source.poses[0].name].origin }), symbols, frames, ...(source.animations !== undefined && { animations: source.animations }), ...(source.sheet !== undefined && { sheet: source.sheet }) };
+  const recipe = { version: 1, name: source.name, width: source.width, height: source.height, palette: source.palette ?? {}, ...(source.ramps !== undefined && { ramps: source.ramps }), ...(shared && { anchor: compiled[frames[0].name].origin }), symbols, frames, ...(source.animations !== undefined && { animations: source.animations }), ...(source.sheet !== undefined && { sheet: source.sheet }) };
   if (source.rig?.rest !== undefined) {
     const rest = compiled[source.rig.rest];
     if (!rest) fail('poses.rig.rest', 'unknown rest pose');
     for (const name of [source.rig.body, source.rig.chest, source.rig.neck, source.rig.head, ...['legs', 'hind', 'fore', 'arms'].flatMap(role => (source.rig[role] ?? []).flat()), ...(source.rig.tail ?? [])].filter(n => n !== undefined)) if (!Object.hasOwn(rest.placed, name)) fail('poses.rig', `unknown rest-pose instance ${name}`);
-    // Rig output keeps only used, distinct drawings. Lexical selection is independent of cache insertion order.
-    const used = [...new Set(frames.flatMap(frame => frame.layers.map(layer => layer.ops[0].symbol)))].sort();
+    // Rig output keeps only used, distinct drawings. Lexical selection is independent of cache insertion order. A rest
+    // pose left out of the frames is still named like the rest (its metadata says which drawing each part is), but a
+    // drawing only it uses is not in the recipe.
+    const used = [...new Set(posed.flatMap(frame => frame.layers.map(layer => layer.ops[0].symbol)))].sort();
     const canonical = new Map(), aliases = new Map(), unique = {};
     for (const name of used) {
       const rows = symbols[name], key = JSON.stringify(rows);
       if (!canonical.has(key)) { canonical.set(key, name); unique[name] = rows; }
       aliases.set(name, canonical.get(key));
     }
-    for (const frame of frames) for (const layer of frame.layers) {
+    for (const frame of posed) for (const layer of frame.layers) {
       const stamp = layer.ops[0], before = stamp.symbol; stamp.symbol = aliases.get(before);
       const part = metadata.poses[frame.name].parts[layer.name];
       if (part.symbol || before !== stamp.symbol) part.symbol = stamp.symbol;
     }
-    recipe.symbols = unique;
+    const drawn = new Set(frames.flatMap(frame => frame.layers.map(layer => layer.ops[0].symbol)));
+    recipe.symbols = frames === posed ? unique : Object.fromEntries(Object.entries(unique).filter(([name]) => drawn.has(name)));
   }
   const project = describeStampRecipe(recipe);
   // An expanded source cut down to fewer animations still carries the other motions' notes: those are skipped with a
@@ -512,7 +519,7 @@ export function compilePoses(source, mode) {
   // draws nothing inside the canvas, the poses the templates make from it follow it there, and its warning says so.
   const rig = source.rig, rest = rig?.rest !== undefined ? compiled[rig.rest] : undefined, clipped = [];
   let restGone = false;
-  stampsOutside(frames, recipe.symbols, width, height).forEach((clip, index) => {
+  stampsOutside(posed, symbols, width, height).forEach((clip, index) => {
     if (!clip.outside) return;
     const name = clip.name, writtenAs = written?.get(name), origin = compiled[name].origin, gone = clip.outside === clip.total;
     if (gone && written && name === rig?.rest) restGone = true;

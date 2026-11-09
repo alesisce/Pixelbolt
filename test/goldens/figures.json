@@ -53,12 +53,8 @@
     ]
   },
   "R2": {
-    "compiled": "d292ac164223ff8850e93419503876ef7af6d805cae113bac5a852135e1b250d",
+    "compiled": "d589a519259020f3e775a0fb873151d548a0ffe4b61dbcb5890d18ef7ace908b",
     "frames": [
-      {
-        "name": "stand",
-        "rgba": "3fc10467ddb995599b21633356f8a9868d80047d6e4dc50a09a0596cd4c73f3e"
-      },
       {
         "name": "idle-rest",
         "rgba": "03e41d7f3e05497ca916e16709f2c6ae8ffa6f75dcaeb53c292c41e97748c06f"
@@ -218,12 +214,8 @@
     ]
   },
   "R3": {
-    "compiled": "c33a568f8865e0f2b832d56efc247b78af6214dd91e50e939a33aa43fe6a0ada",
+    "compiled": "3dd2371d62a89cc8b47321d87431626994a4c293ef4ec40d84114ec729ae2f2a",
     "frames": [
-      {
-        "name": "stand",
-        "rgba": "571ec7662cf0475740760b45f37cd7c76bcd11c51c185b795e05b6fde54c0114"
-      },
       {
         "name": "idle-rest",
         "rgba": "97ced7ae6e1d3d1f551ff0fd0b3f730e28050cd40398c1673640341b37abb50e"
@@ -607,12 +599,8 @@
     ]
   },
   "plain": {
-    "compiled": "4470ecf7f86a9080f19e2d6c69a02446f6ea4adcd47efa65ac5728c779aa4ae4",
+    "compiled": "dc6d4d3ff6e89e2b8bcef71abb305e5a5a26bfeab4561f06ed6246575e6a6b57",
     "frames": [
-      {
-        "name": "stand",
-        "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
-      },
       {
         "name": "idle-rest",
         "rgba": "b7e327629266a33f5928163aad4f3c7e68e8a10e5f88af5d33a19772518153ae"
@@ -756,12 +744,8 @@
     ]
   },
   "fox": {
-    "compiled": "1a464df842d435146c0abad75b1b1d2f79e81ef23f7255ef2e76a521d3c36c34",
+    "compiled": "496f730e3960a089914d7a2b51c64a2ddbb8d62985aeae3ccf1a3fbf10536e43",
     "frames": [
-      {
-        "name": "stand",
-        "rgba": "ff2923e25c1823c2ef8524e7914152766b66b94d92e2c379efc6a23711c401ac"
-      },
       {
         "name": "idle-0",
         "rgba": "c89f4e2618406e77ff2e5ace0a61908151a61a2410feb69fb8b1f38f5666211d"

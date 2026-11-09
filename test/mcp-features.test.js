@@ -73,12 +73,12 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
   } finally { mcp.input.end(); await mcp.running; }
 });
 
-test('MCP compiles the full 40-frame hero with metadata and images below one MiB', async t => {
+test('MCP compiles the full 39-frame hero with metadata and images below one MiB', async t => {
   const dir = await temp(t, 'hero-response'), mcp = session({ directory: dir }); await mcp.init();
   try {
     const response = await mcp.call('pixel_compile', { source: heroRig(), metadata: true });
     assert.ok(!response.result.isError, JSON.stringify(response.info));
-    assert.equal(response.info.frames, 40);
+    assert.equal(response.info.frames, 39);
     const bytes = Buffer.byteLength(JSON.stringify(response.result));
     assert.ok(bytes <= 1048576, `${bytes} response bytes`);
     t.diagnostic(`R2 pixel_compile response with metadata: ${bytes} bytes`);

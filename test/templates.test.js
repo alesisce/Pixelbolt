@@ -15,7 +15,7 @@ function fixture(make) {
   }
   return cached.get(make);
 }
-for (const [make, count, instances] of [[heroRig, 40, 18], [bossRig, 96, 32]]) {
+for (const [make, count, instances] of [[heroRig, 39, 18], [bossRig, 95, 32]]) {
   test(`${make.name}: editable expansion round-trips, deduplicates drawings and preserves named layers`, () => {
     const f = fixture(make), before = JSON.stringify(f.source);
     assert.equal(f.recipe.frames.length, count);
@@ -202,7 +202,10 @@ test('the rigged hero example compiles without warnings and draws the plain huma
   const frames = renderProject(compiled.recipe).frames;
   assert.deepEqual(frames.map(frame => frame.name), plain.frames.map(frame => frame.name));
   frames.forEach((frame, i) => assert.ok(Buffer.from(frame.data).equals(Buffer.from(plain.frames[i].data)), frame.name));
-  assert.deepEqual(compiled.recipe.frames.find(frame => frame.name === 'stand').anchor, [15, 35]);
+  // The rest pose is measured but, played by no animation, is not a frame; every frame shares its ground point.
+  assert.deepEqual(compiled.metadata.poses.stand.origin, [15, 35]);
+  assert.ok(!compiled.recipe.frames.some(frame => frame.name === 'stand'));
+  assert.deepEqual(compiled.recipe.anchor ?? compiled.recipe.frames[0].anchor, [15, 35]);
 });
 
 test('structural drawing has a deterministic work budget, and cached masses are copies', () => {
@@ -320,4 +323,22 @@ test('a tail follows through: it trails in a run, further than in a walk, lifts 
   assert.throws(() => expandPoses(bare), /^PixelError: poses\.motions\.run\.follow: follow swings the tail; name its instances in rig\.tail$/);
   loose.motions.run.follow = 3;
   assert.throws(() => expandPoses(loose), /poses\.motions\.run\.follow: expected a number from 0 to 2/);
+});
+
+test('a rig rest pose is a frame only when an animation plays it', async () => {
+  const hero = JSON.parse(await readFile(new URL('../examples/hero.poses.json', import.meta.url), 'utf8'));
+  const { recipe, metadata } = compilePoses(hero), played = new Set(Object.values(recipe.animations).flatMap(animation => animation.frames));
+  // Every cell of the sheet is a frame some animation plays: a four-frame idle exports four cells, not five.
+  assert.deepEqual(recipe.frames.map(frame => frame.name).filter(name => !played.has(name)), []);
+  assert.ok(!recipe.frames.some(frame => frame.name === 'stand'));
+  // It is still measured, since the motions and the review tools read it.
+  assert.deepEqual(metadata.poses.stand.origin, [15, 35]);
+  // An animation that names it keeps it, where the source wrote it.
+  const kept = compilePoses({ ...hero, animations: { ...hero.animations, stand: { frames: ['stand'] } } }).recipe;
+  assert.equal(kept.frames.length, recipe.frames.length + 1);
+  assert.equal(kept.frames[0].name, 'stand');
+  assert.deepEqual(kept.frames.slice(1), recipe.frames);
+  // A source without a rig keeps every pose it wrote, played or not.
+  const { rig, motions, ...plain } = expandPoses(hero);
+  assert.equal(compilePoses(plain).recipe.frames.length, recipe.frames.length + 1);
 });

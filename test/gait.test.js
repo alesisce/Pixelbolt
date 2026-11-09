@@ -156,6 +156,10 @@ test('feet drawn with views roll: the heel lands with the toe up and the toe tra
   }
   assert.deepEqual(['take-off', 'rise', 'apex'].map(key => view(`jump-${key}`, 'near')), ['30', '30', 'flat']);
   // The toe-down boot hangs a row lower than the flat one, so a foot showing it is held up: nothing draws below the sole.
+  // The rest pose is no frame of the sheet (no animation plays it), so it is drawn here by naming it in one.
+  const standing = plainRig();
+  standing.animations = { ...standing.animations, stand: { frames: ['stand'] } };
+  rendered.set('stand', renderProject(compilePoses(standing).recipe).frames.find(frame => frame.name === 'stand'));
   const sole = lowestRow('stand');
   for (const name of moving) assert.ok(lowestRow(name) <= sole, `${name} draws below the sole row`);
   // Without views the feet stay flat.

@@ -4,6 +4,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Fix: the Aseprite extension draws smoke at an open edge as Pixelbolt does
+
+- The extension's Lua port lit smoke past an open canvas edge the old way, so after the bright-line fix it no longer matched Pixelbolt pixel for pixel: four of its 21 parity cases failed (the steam vent at its defaults, and the explosion, smoke puff and steam vent with changed settings). The port now reads the edge itself there, as `src/fluid.js` does, and all 21 cases match again.
+
 ### Replies that say each thing once
 
 - A reply's `cells` (and `pixel_validate`'s `frames`) is a line per run of frames that last the same, with a run of numbered names as its ends: `"campfire-0 … campfire-23: 70 ms each"` where there were 24 `{frame, duration}` objects. Compiling the campfire preset over MCP replies with 650 characters, not 1,500; a 240-frame match saves about 9 KB a call. `pixel_validate` gives each animation's frame count, not the index of every frame it plays.

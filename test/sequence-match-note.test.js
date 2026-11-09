@@ -10,22 +10,24 @@ const source = (frames, duration) => ({
   effects: { main: { frames, duration, background: 'k', bodies: [{ name: 'ball', shape: 'circle', radius: 2, at: [8, 4], fill: 'w' }] } }
 });
 const sidecar = (frames, duration, options) => JSON.parse(createBodiesSequence(source(frames, duration), options).files.get('sequence.json'));
-const skipped = info => info.notes.filter(note => note.includes('fall between video frames'));
+// The note's counts, read out of its sentence so that the rest of its wording is free to change:
+// [frames not shown, of how many, whether those are only the match's first frames].
+const skipped = info => info.notes.map(note => note.match(/^(\d+) of the match's (first )?(\d+) frames\b.*\bfall between video frames\b/))
+  .filter(Boolean).map(found => [Number(found[1]), Number(found[3]), found[2] !== undefined]);
 // The match frames a clip shows, worked out apart from the planner: video frame k starts at k / fps seconds and shows
 // the match frame under way then; past the match's end it holds the last one.
 const shown = (frames, duration, fps, count) => new Set(Array.from({ length: count }, (_, k) => Math.min(frames - 1, Math.floor(k * 1000 / (fps * duration)))));
-const note = (missed, of, duration, fps) => `${missed} of the match's ${of} frames (${duration} ms each) fall between video frames at ${fps} frames per second and are not shown; give the effect a duration of at least one video frame (${Math.ceil(1000 / fps)} ms at this rate).`;
 
 test('a match cut short by seconds still says which frames fall between video frames', () => {
   // 20 ms frames at 30 frames a second: 0.3 seconds is 9 video frames, which reach the match's 14th frame and show 9.
   const info = sidecar(30, 20, { fps: 30, seconds: 0.3 }), frames = shown(30, 20, 30, info.frames);
   assert.equal(info.frames, 9);
   assert.deepEqual([Math.max(...frames) + 1, frames.size], [14, 9]);
-  assert.deepEqual(skipped(info), [note(5, 'first 14', 20, 30)]);
+  assert.deepEqual(skipped(info), [[5, 14, true]]);
   // The case that was met: a 33 ms match at 30 frames a second loses one frame in about a hundred.
   const long = sidecar(120, 33, { fps: 30, seconds: 3.9 }), longFrames = shown(120, 33, 30, long.frames);
   assert.deepEqual([long.frames, Math.max(...longFrames) + 1, longFrames.size], [117, 118, 117]);
-  assert.deepEqual(skipped(long), [note(1, 'first 118', 33, 30)]);
+  assert.deepEqual(skipped(long), [[1, 118, true]]);
 });
 
 test('a match held past its end by seconds counts every frame it skipped', () => {
@@ -34,11 +36,11 @@ test('a match held past its end by seconds counts every frame it skipped', () =>
   const held = sidecar(30, 20, { fps: 30, seconds: 2 }), frames = shown(30, 20, 30, held.frames);
   assert.equal(held.frames, 60);
   assert.deepEqual([Math.max(...frames) + 1, frames.size], [30, 19]);
-  assert.deepEqual(skipped(held), [note(11, 30, 20, 30)]);
+  assert.deepEqual(skipped(held), [[11, 30, false]]);
   // Without seconds the note reads as it always has: the clip ends before the last frame, which is the twelfth unseen.
   const whole = sidecar(30, 20, { fps: 30 });
   assert.deepEqual([whole.frames, shown(30, 20, 30, whole.frames).size], [18, 18]);
-  assert.deepEqual(skipped(whole), [note(12, 30, 20, 30)]);
+  assert.deepEqual(skipped(whole), [[12, 30, false]]);
 });
 
 test('frames that seconds cuts off are not counted as skipped', () => {

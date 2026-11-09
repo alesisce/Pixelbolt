@@ -130,17 +130,43 @@ Command results except help and the preview server are JSON. Errors exit with co
 Checkout: node bin/pixelbolt.js <command>. Portable build folder: .\\pixelbolt (Windows) or ./pixelbolt (macOS/Linux).
 `;
 
+// The options each command takes: the one place an option is listed. One named in FLAGS takes no value; every other
+// takes the argument after it.
+const FLAGS = new Set(['force', 'grid', 'native', 'diagnostics', 'open', 'expand', 'embed-recipe', 'embedded', 'project', 'list-files', 'full']);
+const OPTIONS = {
+  init: ['force'],
+  validate: ['fps'],
+  inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'guides', 'motion', 'speed', 'ground', 'metadata'],
+  patch: ['changes', 'out', 'image', 'force'],
+  render: ['out', 'force', 'expect', 'animation', 'list-files', 'embed-recipe'],
+  gif: ['out', 'animation', 'scale', 'background', 'force', 'preset', 'size', 'frames', 'sheet'],
+  'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'],
+  sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'],
+  preview: ['port', 'open'],
+  mcp: ['out', 'root', 'time-limit'],
+  schema: [],
+  compile: ['out', 'metadata', 'preview', 'force', 'expand', 'preset', 'draft-views', 'size', 'frames'],
+  autotile: ['out', 'metadata', 'preview', 'force'],
+  scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files', 'embed-recipe'],
+  overlay: ['changes', 'selections', 'out', 'force'],
+  import: ['out', 'name', 'atlas', 'metadata', 'force', 'embedded'],
+  presets: ['full', 'find'],
+  share: [],
+  skill: ['project', 'dir', 'force']
+};
+const KNOWN = new Set(Object.values(OPTIONS).flat());
 function parseArgs(args) {
   const positional = [], options = {};
   for (let i = 0; i < args.length; i++) {
-    if (['--force', '--grid', '--native', '--diagnostics', '--open', '--expand', '--embed-recipe', '--embedded', '--project', '--list-files', '--full'].includes(args[i])) options[args[i].slice(2)] = true;
-    else if (['--preset', '--sheet', '--find', '--out', '--dir', '--port', '--frames', '--animation', '--region', '--scale', '--background', '--changes', '--image', '--view', '--max-cells', '--metadata', '--selections', '--atlas', '--name', '--layers', '--reference', '--root', '--time-limit', '--fps', '--size', '--align', '--offset', '--loops', '--seconds', '--step', '--fit', '--prefix', '--motion', '--speed', '--ground', '--expect', '--guides', '--time', '--preview', '--draft-views', '--every'].includes(args[i])) {
-      const key = args[i].slice(2);
+    const key = args[i].startsWith('--') ? args[i].slice(2) : null;
+    if (key === null) positional.push(args[i]);
+    else if (FLAGS.has(key)) options[key] = true;
+    else if (key === 'gif') throw new Error('--gif is not an option; the gif command makes one: pixelbolt gif <recipe.json> --out <new.gif>');
+    else if (!KNOWN.has(key)) throw new Error(`Unknown option: ${args[i]}`);
+    else {
       if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`--${key} requires a value`);
       options[key] = args[++i];
-    } else if (args[i] === '--gif') throw new Error('--gif is not an option; the gif command makes one: pixelbolt gif <recipe.json> --out <new.gif>');
-    else if (args[i].startsWith('--')) throw new Error(`Unknown option: ${args[i]}`);
-    else positional.push(args[i]);
+    }
   }
   return { positional, options };
 }
@@ -168,7 +194,6 @@ async function readJSONOption(value, key = 'expect', example = '{"width":32,"hei
     throw Object.assign(new Error(`--${key}: expected JSON such as ${example}: ${error.message}${stripped ? '. Windows PowerShell 5.1 drops the double quotes inside arguments: put the JSON in a .json file and pass its name, or use PowerShell 7, cmd or bash' : ''}`), { path: key });
   }
 }
-const readExpectOption = value => readJSONOption(value);
 const readGuidesOption = value => readJSONOption(value, 'guides', '{"horizon":40,"vanish":[[64,40]]}');
 async function readProject(file) {
   if (!file) throw new Error('Provide a project JSON filename or - for stdin');
@@ -185,7 +210,6 @@ async function readResolved(file) {
 }
 // Every file an export was made from: the recipe itself and the palette and asset files it references.
 const inputsOf = input => [...(input.file === '-' ? [] : [path.resolve(input.file)]), ...input.resolution.files];
-const removedBy = files => (files.removed ? { removed: files.removed } : {});
 // A bundle's files relative to its folder, leaving out each frame (frames/<name>.png) and, past 16, each animation
 // unless --list-files: the reply already names the frames and animations.
 const bundleFiles = (directory, files, options) => { const { files: listed, removed } = outputSummary(directory, files, options['list-files'] === true); return { directory: shown(directory), files: listed, ...(removed && { removed }) }; };
@@ -307,16 +331,8 @@ try {
   else {
     const { positional, options } = parseArgs(rest);
     if (positional.length > 1) throw new Error('Too many positional arguments');
-    const allowed = { init: ['force'], validate: ['fps'], inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'guides'], patch: ['changes', 'out', 'image', 'force'], render: ['out', 'force', 'expect', 'animation', 'list-files'], gif: ['out', 'animation', 'scale', 'background', 'force'], 'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'], sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'], preview: ['port', 'open'], mcp: ['out', 'root', 'time-limit'], schema: [], compile: ['out', 'metadata', 'preview', 'force'], autotile: ['out', 'metadata', 'preview', 'force'], scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files'], overlay: ['changes', 'selections', 'out', 'force'], import: ['out', 'name', 'atlas', 'metadata', 'force'] };
-    allowed.inspect.push('motion', 'speed', 'ground', 'metadata');
-    allowed.compile.push('expand', 'preset', 'draft-views', 'size', 'frames');
-    allowed.gif.push('preset', 'size', 'frames', 'sheet');
-    allowed.presets = ['full', 'find'];
-    allowed.share = [];
-    allowed.skill = ['project', 'dir', 'force'];
-    allowed.render.push('embed-recipe'); allowed.scene.push('embed-recipe'); allowed.import.push('embedded');
-    if (!Object.hasOwn(allowed, command)) throw new Error(`Unknown command: ${command}. Run pixelbolt help.`);
-    for (const key of Object.keys(options)) if (!allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}`);
+    if (!Object.hasOwn(OPTIONS, command)) throw new Error(`Unknown command: ${command}. Run pixelbolt help.`);
+    for (const key of Object.keys(options)) if (!OPTIONS[command].includes(key)) throw new Error(`--${key} is not supported by ${command}`);
     if (['schema', 'mcp'].includes(command) && positional.length) throw new Error(`${command} does not accept a filename`);
     // A preset compiles exactly as its file in examples/ does, so the compile command reads that file.
     if ((command === 'compile' || command === 'gif') && options.preset !== undefined) {
@@ -520,7 +536,7 @@ try {
       const sequence = bodies ? createBodiesSequence(document, settings, { stream: true }) : document?.format === 'pixelforge-scene' ? createSceneSequence(prepareScene(document), document.name, settings) : createSequence(renderProject(document), settings);
       const files = await writeBundle(sequence, options.out, { force: options.force, inputs: inputsOf(input) }), { timing, figures, ...info } = sequence.info;
       // A match's every-frame figures stay in sequence.json; the reply carries their summary, after where the files went.
-      print({ ok: true, ...info, directory: shown(path.resolve(options.out)), files: files.length, ...removedBy(files), ...referenced(input), ...(figures && { figures: figuresSummary(figures) }) });
+      print({ ok: true, ...info, directory: shown(path.resolve(options.out)), files: files.length, ...(files.removed && { removed: files.removed }), ...referenced(input), ...(figures && { figures: figuresSummary(figures) }) });
     } else if (command === 'gif') {
       if (!options.out || !/\.gif$/i.test(options.out)) throw new Error('gif requires --out <new.gif>');
       if (options.sheet !== undefined && !/\.png$/i.test(options.sheet)) throw new Error('--sheet must name a new .png file');
@@ -558,7 +574,7 @@ try {
         if (!options.out) throw new Error('render requires --out <directory>');
         folderOut('render', options.out, 'name a new folder: the sheet, atlas and animations are written inside it (the sheet as <name>.png); for one GIF use pixelbolt gif --out <new.gif>');
         if (positional[0] === '-' && options.expect === '-') throw new Error('Only one input can use stdin');
-        const expect = options.expect === undefined ? undefined : readExpect(await readExpectOption(options.expect));
+        const expect = options.expect === undefined ? undefined : readExpect(await readJSONOption(options.expect));
         // The check runs before anything is written, so an unknown --animation writes nothing. render writes no GIFs.
         const bundle = await createBundle(input.document), check = checkDelivery(bundle.project, { recipe: input.document, expect, animation: options.animation });
         if (options['embed-recipe']) await embedBundleRecipe(bundle, input.document, await engineVersion());

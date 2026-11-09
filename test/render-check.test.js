@@ -173,8 +173,9 @@ test('the render check\'s fixes stay inside the format\'s limits, and applying t
   const tiles = { ...dots, width: 64, height: 64 };
   assert.equal(check(tiles, { expect: { width: 512, height: 512 } }).problems[0].fix, 'an atlas of 100 frames at 512x512 passes 16,777,216 pixels: ask for fewer frames or a smaller size, or set sheet.trim if the frames have empty margins');
   // A trimmed atlas is measured by rendering the change: five full 256x256 frames at sheet.scale 8 pack too large,
-  // while one-pixel frames pack small enough for the same scale.
-  const full = { version: 1, name: 'full', width: 256, height: 256, palette: { r: '#ff0000' }, sheet: { trim: true }, frames: Array.from({ length: 5 }, (_, i) => ({ name: `f${i}`, ops: [{ op: 'rect', x: 0, y: 0, w: 256, h: 256, color: 'r' }] })) };
+  // while one-pixel frames pack small enough for the same scale. Each full frame has a mark of its own: frames that
+  // show one picture share a cell.
+  const full = { version: 1, name: 'full', width: 256, height: 256, palette: { r: '#ff0000', g: '#00ff00' }, sheet: { trim: true }, frames: Array.from({ length: 5 }, (_, i) => ({ name: `f${i}`, ops: [{ op: 'rect', x: 0, y: 0, w: 256, h: 256, color: 'r' }, { op: 'pixel', x: i, y: 0, color: 'g' }] })) };
   assert.equal(check(full, { expect: { width: 2048, height: 2048 } }).problems[0].fix, 'an atlas of 5 trimmed frames at sheet.scale 8 passes 16,777,216 pixels: ask for fewer frames or a smaller size');
   const specks = { ...full, frames: full.frames.map(frame => ({ ...frame, ops: [{ op: 'pixel', x: 0, y: 0, color: 'r' }] })) };
   assert.deepEqual(quoted(check(specks, { expect: { width: 2048, height: 2048 } }).problems[0].fix), { set: 'sheet.scale', value: 8 });

@@ -862,7 +862,8 @@ export function renderProject(spec, options = {}) {
 
 // Compiler-only validation/timing for the stamp subset emitted by compilePoses. It shares header, animation and
 // atlas validation with the renderer, but never allocates or composites a canvas. A stamp cannot erase, so visible
-// symbol bounds suffice to compute the exact trimmed atlas, including flips and canvas clipping.
+// symbol bounds suffice to compute the trimmed atlas, including flips and canvas clipping. Frames drawn the same way
+// share a cell here; the renderer compares pixels, so it also shares frames that only come out the same.
 export function describeStampRecipe(spec) {
   const { width, height, palette, symbols } = readProject(spec, { stills: false });
   if (spec.background !== undefined) fail('project.background', 'compiler stamp recipes omit the background');
@@ -939,8 +940,9 @@ export function describeStampRecipe(spec) {
       left = Math.min(left, x); right = Math.max(right, x);
       top = Math.min(top, y); bottom = Math.max(bottom, y);
     }
-    boxes.push(right < 0 ? { index, sx: 0, sy: 0, w: 1, h: 1, empty: true }
-      : { index, sx: left, sy: top, w: right - left + 1, h: bottom - top + 1 });
+    // Frames drawn by the same stamps and corrections are one picture, and share a cell as the renderer's do.
+    boxes.push(right < 0 ? { index, sx: 0, sy: 0, w: 1, h: 1, empty: true, key: 'empty' }
+      : { index, sx: left, sy: top, w: right - left + 1, h: bottom - top + 1, key: JSON.stringify([frame.layers ?? [], frame.pixels ?? []]) });
     return { name: frameName, duration };
   });
   const animations = readAnimations(spec, frames);
@@ -986,26 +988,47 @@ function readSheet(spec, frames, width, height, boxes = null) {
 // Deterministic shelf packing of each frame's visible bounds (tallest first, then recipe order).
 // Cell coordinates are exported pixels; source bounds are unscaled canvas pixels.
 function packTrimmed(frames, width, height, padding, scale) {
+  const row = (box, y) => { const from = ((box.sy + y) * width + box.sx) * 4; return frames[box.index].data.subarray(from, from + box.w * 4); };
   const boxes = frames.map((frame, index) => {
     let left = width, top = height, right = -1, bottom = -1;
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (frame.data[(y * width + x) * 4 + 3]) {
       if (x < left) left = x; if (x > right) right = x; if (y < top) top = y; if (y > bottom) bottom = y;
     }
-    return right < 0 ? { index, sx: 0, sy: 0, w: 1, h: 1, empty: true } : { index, sx: left, sy: top, w: right - left + 1, h: bottom - top + 1 };
+    if (right < 0) return { index, sx: 0, sy: 0, w: 1, h: 1, empty: true, key: 'empty' };
+    const box = { index, sx: left, sy: top, w: right - left + 1, h: bottom - top + 1 };
+    // FNV-1a over the picture finds candidates; `same` then compares them byte for byte.
+    let hash = 0x811c9dc5;
+    for (let y = 0; y < box.h; y++) for (const byte of row(box, y)) hash = Math.imul(hash ^ byte, 0x01000193);
+    return { ...box, key: hash >>> 0 };
   });
-  return packBoxes(boxes, padding, scale);
+  const same = (a, b) => {
+    if (a.empty) return true;
+    for (let y = 0; y < a.h; y++) { const p = row(a, y), q = row(b, y); for (let i = 0; i < p.length; i++) if (p[i] !== q[i]) return false; }
+    return true;
+  };
+  return packBoxes(boxes, padding, scale, same);
 }
 
-function packBoxes(boxes, padding, scale) {
+// Frames whose trimmed pictures are the same share one cell: a hold, or a frame moved whole (each keeps its own
+// sx, sy, so it is drawn where it stands). A box's `key` names its picture; `same` settles boxes of equal size and key.
+function packBoxes(boxes, padding, scale, same = () => true) {
   const cellWidth = box => (box.w + padding * 2) * scale, cellHeight = box => (box.h + padding * 2) * scale;
-  const target = Math.max(...boxes.map(cellWidth), Math.ceil(Math.sqrt(boxes.reduce((sum, box) => sum + cellWidth(box) * cellHeight(box), 0))));
+  const first = new Map(), twins = new Map();
+  const packed = boxes.filter(box => {
+    const group = `${box.w}x${box.h}:${box.key}`, others = first.get(group) ?? [], twin = others.find(other => same(other, box));
+    if (twin) { twins.set(box, twin); return false; }
+    first.set(group, [...others, box]);
+    return true;
+  });
+  const target = Math.max(...packed.map(cellWidth), Math.ceil(Math.sqrt(packed.reduce((sum, box) => sum + cellWidth(box) * cellHeight(box), 0))));
   const cells = new Array(boxes.length);
   let cursorX = 0, cursorY = 0, shelf = 0, used = 0;
-  for (const box of [...boxes].sort((a, b) => cellHeight(b) - cellHeight(a) || a.index - b.index)) {
+  for (const box of [...packed].sort((a, b) => cellHeight(b) - cellHeight(a) || a.index - b.index)) {
     if (cursorX > 0 && cursorX + cellWidth(box) > target) { cursorY += shelf; cursorX = 0; shelf = 0; }
     cells[box.index] = { x: cursorX + padding * scale, y: cursorY + padding * scale, sx: box.sx, sy: box.sy, w: box.w, h: box.h, ...(box.empty && { empty: true }) };
     cursorX += cellWidth(box); shelf = Math.max(shelf, cellHeight(box)); used = Math.max(used, cursorX);
   }
+  for (const [box, twin] of twins) cells[box.index] = { ...cells[twin.index], sx: box.sx, sy: box.sy };
   return { width: used, height: cursorY + shelf, cells };
 }
 

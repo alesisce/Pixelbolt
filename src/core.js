@@ -1646,6 +1646,19 @@ export function analyzeProject(project) {
   return { advisory: true, frames: stats, animations, findings };
 }
 
+// Diagnostics as a reply carries them. Up to DIAGNOSTIC_ROWS frames keep a row each; past that the rows are added up
+// (`frameTotals`: ranges of visible pixels and colours, cleanup counts summed) and `frames` keeps only the three rows
+// with the most corners and strays, since thirty rows of near-equal counts tell a reader nothing a total does not.
+// Animations and findings are kept whole. `analyzeProject` still measures every frame.
+export const DIAGNOSTIC_ROWS = 8;
+export function briefDiagnostics(diagnostics) {
+  const { frames, ...rest } = diagnostics;
+  if (frames.length <= DIAGNOSTIC_ROWS) return diagnostics;
+  const range = key => [Math.min(...frames.map(row => row[key])), Math.max(...frames.map(row => row[key]))], sum = key => frames.reduce((total, row) => total + row[key], 0);
+  const most = frames.map((row, index) => ({ row, index, count: row.corners + row.strays })).filter(entry => entry.count).sort((a, b) => b.count - a.count || a.index - b.index).slice(0, 3).map(entry => entry.row);
+  return { advisory: rest.advisory, frameTotals: { frames: frames.length, visible: range('visible'), colors: range('colors'), corners: sum('corners'), strays: sum('strays') }, frames: most, omitted: frames.length - most.length, animations: rest.animations, findings: rest.findings };
+}
+
 // Two names make one number: the first times NAME_PAIRS (2 to the 26th, more names than a frame has pixels) plus the second.
 const NAME_PAIRS = 67108864;
 // A namer's names as small numbers: `index` names a pixel's colour (once per colour, through `char`, which also notes

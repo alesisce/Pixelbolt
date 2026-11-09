@@ -4,6 +4,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### A shorter `inspect --diagnostics` reply
+
+- `pixelbolt inspect` prints a row of its reply to a line (a cell, a frame's counts, an animation) instead of a line per field, and past 8 frames the diagnostics give `frameTotals`, the three frames with the most corners and strays, and `omitted`, instead of a row for every frame. The 35-frame hero's reply goes from 9,752 to 3,451 bytes with the same findings. `--diagnostics --full` lists every frame. MCP `pixel_inspect` sums long sheets the same way; `analyzeProject` is unchanged, and `briefDiagnostics` is exported for the short form. Grid rows still print one under another.
+
 ### Pose sheets without the spare rest frame
 
 - A rigged `pixelforge-poses` source no longer compiles its rest pose (`rig.rest`) into a frame unless an animation plays it. Before, a rig with a four-frame idle exported a five-cell sheet, the fifth being the rest pose that no animation showed, and agents spent a detour removing it. The remaining frames, their pixels and the metadata are unchanged; frame indexes after the rest pose move down by one. To keep the rest pose as a frame, name it in an animation: `"animations": {"stand": {"frames": ["stand"]}}`. Sources without a rig keep every pose they write.

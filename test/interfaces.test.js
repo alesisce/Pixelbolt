@@ -414,3 +414,25 @@ test('CLI replies stay small: render names its folder once, compile keeps metada
   const validated = JSON.parse(cli('validate', 'over.json').stdout);
   assert.equal(validated.clipping.length, 16); assert.equal(validated.clippingOmitted, 24); assert.match(validated.warnings[0], /and 39 more locations/);
 });
+
+test('CLI inspect prints a row to a line and sums a long sheet\'s diagnostics unless --full', () => {
+  const long = { version: 1, name: 'long', width: 8, height: 4, palette: { k: '#000' }, frames: Array.from({ length: 10 }, (_, i) => ({ name: `f${i}`, ops: [{ op: 'rect', x: 0, y: 0, w: 2, h: 2, color: 'k' }, ...(i === 3 ? [{ op: 'pixel', x: 6, y: 3, color: 'k' }] : [])] })) };
+  const run = (...args) => spawnSync(process.execPath, ['bin/pixelbolt.js', 'inspect', '-', ...args], { cwd: root, input: JSON.stringify(long), encoding: 'utf8' });
+  const brief = run('--diagnostics'), reply = JSON.parse(brief.stdout);
+  assert.equal(brief.status, 0);
+  assert.deepEqual(reply.diagnostics.frameTotals, { frames: 10, visible: [4, 5], colors: [1, 1], corners: 0, strays: 1 });
+  assert.deepEqual(reply.diagnostics.frames, [{ frame: 'f3', visible: 5, colors: 1, corners: 0, strays: 1 }]);
+  assert.equal(reply.diagnostics.omitted, 9);
+  // One line per cell and per frame row, not one per field.
+  assert.match(brief.stdout, /^    \{"frame":"f0","duration":100\},$/m);
+  assert.match(brief.stdout, /^    "frames": \[\{"frame":"f3","visible":5,"colors":1,"corners":0,"strays":1\}\],$/m);
+  const full = run('--diagnostics', '--full'), every = JSON.parse(full.stdout).diagnostics;
+  assert.equal(every.frames.length, 10); assert.equal(every.frameTotals, undefined);
+  assert.ok(brief.stdout.length < full.stdout.length);
+  const alone = run('--full');
+  assert.equal(alone.status, 1); assert.match(JSON.parse(alone.stderr).error, /--full goes with --diagnostics/);
+  // Grid rows stay a line each, so columns line up under each other.
+  const grid = run('--grid', '--frames', 'f3');
+  assert.match(grid.stdout, /^        "kk\.{6}",\n        "kk\.{6}",\n        "\.{8}",\n        "\.{6}k\."$/m);
+  assert.deepEqual(JSON.parse(grid.stdout).grids[0].rows, ['kk......', 'kk......', '........', '......k.']);
+});

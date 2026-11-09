@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PixelError, renderProject, inspectProject, animationNeighbors, animationPosition, reviewPixels, analyzeProject, compareProjects } from '../src/core.js';
+import { PixelError, renderProject, inspectProject, animationNeighbors, animationPosition, reviewPixels, analyzeProject, briefDiagnostics, DIAGNOSTIC_ROWS, compareProjects } from '../src/core.js';
 import { createZip, createBundle } from '../src/export.js';
 import { patchRecipe } from '../src/patch.js';
 import { createOverlay, applyOverlay } from '../src/overlays.js';
@@ -132,4 +132,17 @@ test('authored part replacements keep held objects attached and export timing in
   assert.deepEqual(metadata.animations.cast.entries[1].markers[0].at, [2, 2]);
   source.poses[0].parts[1].attach.part = 'missing';
   assert.throws(() => compilePoses(source), /part in this pose/);
+});
+
+test('a long sheet\'s diagnostics reply gives totals and the frames with the most to clean up', () => {
+  const frame = (name, strays) => ({ name, ops: [{ op: 'rect', x: 0, y: 0, w: 3, h: 3, color: 'a' }, ...Array.from({ length: strays }, (_, i) => ({ op: 'pixel', x: 5 + i * 2, y: 6, color: 'a' }))] });
+  const recipe = count => ({ version: 1, name: 'long', width: 12, height: 8, palette: { a: '#fff' }, frames: Array.from({ length: count }, (_, i) => frame(`f${i}`, i === 4 ? 3 : i === 7 ? 1 : 0)) });
+  const short = analyzeProject(renderProject(recipe(DIAGNOSTIC_ROWS)));
+  assert.equal(briefDiagnostics(short), short);
+  const full = analyzeProject(renderProject(recipe(12))), brief = briefDiagnostics(full);
+  assert.deepEqual(brief.frameTotals, { frames: 12, visible: [9, 12], colors: [1, 1], corners: 0, strays: 4 });
+  assert.deepEqual(brief.frames, [full.frames[4], full.frames[7]]);
+  assert.equal(brief.omitted, 10);
+  assert.equal(brief.findings, full.findings); assert.equal(brief.animations, full.animations); assert.equal(brief.advisory, true);
+  assert.equal(full.frames.length, 12);
 });

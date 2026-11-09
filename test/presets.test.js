@@ -253,6 +253,19 @@ test('finding presets by words lists the names that hold the most of them, else 
   assert.throws(() => findListing(listing, '--'), /find: expected words/);
 });
 
+test('finding a character lists the rigs, never the liquids that say they are not one, and a miss names the rigs to redraw', () => {
+  const entry = (name, kind, about) => ({ name, kind, file: `examples/${name}.${kind}.json`, for: about, size: '8x8', frames: 2, plays: 'loop', colors: 3, animations: { main: '2 frames, loop' } });
+  const listing = { guide: 'g', presets: [entry('honey', 'fluid', 'Honey: viscous liquid. A liquid, not a character.'), entry('pool', 'fluid', 'A simulated liquid, not a character.'),
+    entry('hero', 'poses', 'A character rig whose motion templates make idle, walk.'), entry('fox', 'poses', 'A four-legged animal rig whose motion templates make walk, trot.'), entry('swing', 'poses', 'Posed parts: swing.')] };
+  assert.deepEqual(Object.keys(findListing(listing, 'character').presets), ['hero']);
+  assert.deepEqual(Object.keys(findListing(listing, 'a liquid').presets), ['honey', 'pool']);
+  // The line an agent reads still says a liquid is not a character.
+  assert.match(findListing(listing, 'honey').presets.honey, /not a character/);
+  const miss = findListing(listing, 'wizard');
+  assert.match(miss.guide, /^No preset matches "wizard".*start from a rig and redraw it \(hero, fox; .*help craft "Characters"\)\. Every preset by name:$/);
+  assert.equal(miss.names, 'honey, pool, hero, fox, swing');
+});
+
 test('the standalone skill reaches the presets through the command line and its copied examples', async () => {
   const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')), copies = await skillFiles(version), command = `npx -y pixelbolt@${version}`;
   const quick = copies.get('docs/agent-quick-start.md').toString('utf8'), skill = copies.get('SKILL.md').toString('utf8');

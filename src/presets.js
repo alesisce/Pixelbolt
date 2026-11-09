@@ -119,7 +119,7 @@ function about(entry, source, animations) {
     const rest = Array.isArray(source.poses) ? source.poses.find(pose => pose?.name === source.rig?.rest) : undefined;
     const held = (Array.isArray(rest?.parts) ? rest.parts : []).filter(part => hands.has(part?.attach?.part) && source.parts?.[part.part]?.rows
       && !/hand/i.test(`${part.name} ${part.part}`)).map(part => part.name);
-    return templates.length ? `A ${source.rig?.fore ? 'four-legged ' : ''}rig whose motion templates make ${listNames(templates)}${held.length ? `, with ${listNames(held)} in hand` : ''}.` : `Posed parts: ${listNames(names)}.`;
+    return templates.length ? `A ${source.rig?.fore ? 'four-legged animal' : 'character'} rig whose motion templates make ${listNames(templates)}${held.length ? `, with ${listNames(held)} in hand` : ''}.` : `Posed parts: ${listNames(names)}.`;
   }
   if (entry.kind === 'fx') return `Particles and effect shapes: ${listNames(names)}.`;
   if (entry.kind === 'wave') return `A looping wave pattern: ${listNames(names)}.`;
@@ -295,11 +295,17 @@ const closest = (items, text, words) => {
   const scored = items.map(item => ({ item, score: words.filter(word => text(item).toLowerCase().includes(word)).length })), top = Math.max(0, ...scored.map(entry => entry.score));
   return top ? scored.filter(entry => entry.score === top).map(entry => entry.item) : [];
 };
+const NOT_A_CHARACTER = /,? not a character/g;
 export const namedLike = (entries, words) => closest(entries, entry => entry.name, words);
 export function findListing(listing, query, where = 'find') {
   const words = presetWords(query, where), lines = briefListing(listing).presets;
-  const named = namedLike(listing.presets, words), found = named.length ? named : closest(listing.presets, entry => lines[entry.name], words);
-  if (!found.length) return { guide: `No preset matches "${query}": try another word, or draw it (the quick start says how). Every preset by name:`, names: listing.presets.map(entry => entry.name).join(', ') };
+  // A liquid's line says it is not a character, which is no reason to list it for "character".
+  const named = namedLike(listing.presets, words), found = named.length ? named : closest(listing.presets, entry => lines[entry.name].replace(NOT_A_CHARACTER, ''), words);
+  if (!found.length) {
+    // Nothing ships for most characters, and the way to one is a rig redrawn, so the reply names the rigs.
+    const rigs = listing.presets.filter(entry => entry.kind === 'poses' && /rig whose/.test(entry.for ?? '')).map(entry => entry.name);
+    return { guide: `No preset matches "${query}": try another word, or draw it (the quick start says how).${rigs.length ? ` For a character or creature, start from a rig and redraw it (${rigs.join(', ')}; pixel_help {"topic": "craft", "name": "Characters"}, pixelbolt help craft "Characters").` : ''} Every preset by name:`, names: listing.presets.map(entry => entry.name).join(', ') };
+  }
   return { guide: FIND_NOTE, presets: Object.fromEntries(found.map(entry => [entry.name, lines[entry.name]])), ...(listing.note && { note: listing.note }) };
 }
 

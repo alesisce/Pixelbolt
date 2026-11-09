@@ -266,6 +266,56 @@ const slimeIdle = { format: 'pixelforge-poses', version: 1, name: 'slime-idle', 
   motions: { idle: { template: 'idle', frames: 8, squash: 0.15, duration: 140 } },
   sheet: { columns: 8 } };
 
+// A prop of moving parts, with no bones or rig: a hermit crab that wears a treasure chest. It sits as a chest, lifts
+// its lid a crack to look about, stands on its legs and scuttles off. Each pose lists the parts it shows, back to front:
+// a part left out is hidden (the legs and claws of a shut chest) and another part under the same name swaps the
+// drawing (eyes that look left or right, claws open or shut, the two steps of the legs). The dark gap is always three
+// rows over the base, and the lid covers as much of it as it is down. Lit from the upper left: the right legs are the
+// left ones mirrored with each leg's light put back on its left.
+const chestLegs = left => left.map(row => row + '......' + [...row].reverse().join('').replace(/[^.]+/g, leg => [...leg].reverse().join('')));
+const chestParts = ({ lift = 0, rise = 0, eyes, legs, claws, glint }) => [
+  ...(legs ? [{ name: 'legs', part: `legs-${legs}`, at: [-15, -2 - rise] }] : []),
+  ...(lift ? [{ name: 'gap', part: 'gap', at: [-11, -12 - rise] }] : []),
+  ...(eyes === 'slit' ? [{ name: 'eye-l', part: 'glimmer', at: [-4, -10 - rise] }, { name: 'eye-r', part: 'glimmer', at: [3, -10 - rise] }]
+    : eyes ? [{ name: 'eye-l', part: eyes === 'left' ? 'eye-left' : 'eye-right', at: [-5, -12 - rise] }, { name: 'eye-r', part: eyes === 'right' ? 'eye-right' : 'eye-left', at: [3, -12 - rise] }] : []),
+  { name: 'lid', part: 'lid', at: [-11, -17 - rise - lift] },
+  { name: 'base', part: 'base', at: [-11, -9 - rise] },
+  ...(claws ? [{ name: 'claw-l', part: `claw-l-${claws}`, at: [-17, -14 - rise] }, { name: 'claw-r', part: `claw-r-${claws}`, at: [11, -14 - rise] }] : []),
+  ...(glint ? [{ name: 'lock-glint', part: 'glint', at: [-1, -9 - rise] }, { name: 'lid-glint', part: 'glint', at: [-6, -16 - rise - lift] }] : [])
+];
+const chestShut = {}, chestSlit = { lift: 1, eyes: 'slit' }, chestPeek = eyes => ({ lift: 3, eyes });
+const chestStub = eyes => ({ lift: 2, rise: 2, eyes, legs: 'stub' });
+const chestStepA = eyes => ({ lift: 3, rise: 4, eyes, legs: 'a', claws: 'open' }), chestStepB = eyes => ({ lift: 2, rise: 4, eyes, legs: 'b', claws: 'shut' });
+const chestStates = {
+  idle: [[chestShut, 1400], [{ glint: true }, 90], [chestShut, 900], [chestSlit, 450], [chestShut, 700]],
+  peek: [[chestSlit, 120], [chestPeek('in'), 160], [chestPeek('left'), 420], [chestPeek('in'), 120], [chestPeek('right'), 420], [chestPeek('in'), 200]],
+  rise: [[chestPeek('in'), 80], [chestStub('in'), 90], [chestStepA('in'), 120]],
+  'walk-right': [[chestStepA('right'), 100], [chestStepB('right'), 100]],
+  'walk-left': [[chestStepA('left'), 100], [chestStepB('left'), 100]],
+  hide: [[chestStub('in'), 70], [{ lift: 1 }, 60], [chestShut, 300]]
+};
+const hermitChest = { format: 'pixelforge-poses', version: 1, name: 'hermit-chest', width: 40, height: 32,
+  palette: { k: '#2a1a24', i: '#140c14', d: '#6b3f2a', w: '#9a5f38', l: '#c58a4e', o: '#a8741f', y: '#e2b23c', Y: '#fbe58a', W: '#ffffff', m: '#8f2f24', r: '#d9532b', R: '#f58a55', e: '#f4f0e0' },
+  parts: {
+    lid: { rows: ['...kkkkkkkkkkkkkkkk...', '.kkllYYllllllllYYllkk.', 'kllllyYllllllllyYlllwk', 'kwwwwyYwwwwwwwwyYwwwwk', 'kwwwwyYwwwwwwwwyYwwwdk', 'kwdwwyowwwdwwwwyowwddk', 'kddddyoddddddddyoddddk', 'kYyyyyyyyyyyyyyyyyyook'] },
+    base: { rows: ['kwwwwyYwwoYyowwyYwwwdk', 'kwwwwyYwwykkywwyYwwwdk', 'kwdwwyYwwoyyowwyYwwddk', 'kwwwwyowwwwwwwwyowwwdk', 'kwwdwyowwwwwdwwyowwddk', 'kddddyoddddddddyoddddk', 'kddddyoddddddddyoddddk', 'kyyyyyyyyyyyyyyyyyyook', 'kkkkkkkkkkkkkkkkkkkkkk'] },
+    gap: { rows: ['kiiiiiiiiiiiiiiiiiiiik', 'kiiiiiiiiiiiiiiiiiiiik', 'kiiiiiiiiiiiiiiiiiiiik'] },
+    'eye-left': { rows: ['ee', 'ke', 'ke'] },
+    'eye-right': { rows: ['ee', 'ek', 'ek'] },
+    glimmer: { rows: ['e'] },
+    glint: { rows: ['W'] },
+    'legs-a': { rows: chestLegs(['.RR.........', 'Rr.r........', 'Rr...RrRr...', 'Rr..Rr.Rr...', 'rm..rm.rm...', 'm...m..m....']) },
+    'legs-b': { rows: chestLegs(['RR..........', 'Rr..........', '.Rr..Rr.Rr..', '.rm.Rr..Rr..', '....rm..rm..', '....m....m..']) },
+    'legs-stub': { rows: chestLegs(['............', '.RR.........', 'Rr...Rr.Rr..', 'rm...m..m...']) },
+    'claw-l-open': { rows: ['R..r..', 'R..r..', 'Rrrm..', '.rmrrr'] },
+    'claw-l-shut': { rows: ['.Rr...', '.Rr...', 'Rrrm..', '.rmrrr'] },
+    'claw-r-open': { rows: ['..R..r', '..R..r', '..Rrrm', 'rrrrm.'] },
+    'claw-r-shut': { rows: ['...Rr.', '...Rr.', '..Rrrm', 'rrrrm.'] }
+  },
+  poses: Object.entries(chestStates).flatMap(([state, list]) => list.map(([pose, duration], n) => ({ name: `${state}-${n}`, duration, origin: [20, 30], parts: chestParts(pose) }))),
+  animations: Object.fromEntries(Object.entries(chestStates).map(([state, list]) => [state, { frames: list.map((_, n) => `${state}-${n}`), ...(['peek', 'rise', 'hide'].includes(state) && { loop: false }) }])),
+  sheet: { trim: true, padding: 1 } };
+
 // A four-legged side-view figure rigged for the gaits: a red fox (brief: examples/fox.brief.md). A round mass at the
 // hips is the rig body and the chest is a bone standing out in front of it, which the gallop bends against the hips;
 // the neck turns back against the chest, so the head stays steadier than the body. Each leg is two bones solved to
@@ -767,7 +817,7 @@ const fluids = { campfire, 'smoke-puff': smokePuff, explosion, 'steam-vent': ste
 
 await mkdir(new URL('../examples/', import.meta.url), { recursive: true });
 // Authored sources are pretty-printed; compiled recipes use the CLI's compact formatting.
-const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'fox.poses': fox, 'slime-idle.poses': slimeIdle, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
+const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'fox.poses': fox, 'slime-idle.poses': slimeIdle, 'hermit-chest.poses': hermitChest, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
 // Autotile sets drawn from terrain descriptions (scripts/terrain-presets.mjs).
 Object.assign(authored, terrainPresets);
 // Electric gases: arcs, lightning and plasma (scripts/plasma-presets.mjs).

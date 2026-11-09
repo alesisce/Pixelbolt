@@ -9,6 +9,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - `presets --find character` (MCP `pixel_help` `find`) listed 27 liquids, because each of their lines says "not a character", and none of the rigs. It now lists the rigs: a poses preset's line starts "A character rig" or "A four-legged animal rig", and a liquid's disclaimer no longer counts as a match.
 - A search that matches nothing (`--find wizard`) names the rigs to redraw for a character or creature and points to the craft notes' Characters section.
 
+### A prop of moving parts: the hermit chest
+
+- New example and preset `examples/hermit-chest.poses.json`: a hermit crab that wears a treasure chest, 21 frames at 40 × 32 in six animations (idle, peek, rise, walk-right, walk-left, hide). It is a `pixelforge-poses` source with no bones or rig: each pose lists the drawn parts it shows, so legs and claws appear, eyes and claws swap drawings and the lid lifts. The craft notes and the pixel art skill point to it for props and creatures built from parts.
+
 ### A shorter `inspect --diagnostics` reply
 
 - `pixelbolt inspect` prints a row of its reply to a line (a cell, a frame's counts, an animation) instead of a line per field, and past 8 frames the diagnostics give `frameTotals`, the three frames with the most corners and strays, and `omitted`, instead of a row for every frame. The 35-frame hero's reply goes from 9,752 to 3,451 bytes with the same findings. `--diagnostics --full` lists every frame. MCP `pixel_inspect` sums long sheets the same way; `analyzeProject` is unchanged, and `briefDiagnostics` is exported for the short form. Grid rows still print one under another.

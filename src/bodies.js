@@ -69,7 +69,8 @@ function paletteKey(value, path, palette) {
   return value;
 }
 
-// A convex polygon's local outline, centred on its centroid and wound so (edge.y, −edge.x) points out.
+// A convex polygon's local outline, centred on its centroid and wound so (edge.y, −edge.x) points out, and where that
+// centroid lies among the points as they were written (`centre`).
 function convex(points, path) {
   if (!Array.isArray(points) || points.length < 3 || points.length > 8) fail(path, 'expected 3–8 points [x, y] around the body\'s centre');
   let pts = points.map((p, i) => pair(p, `${path}[${i}]`, -64, 64));
@@ -82,6 +83,7 @@ function convex(points, path) {
   cx /= 3 * area; cy /= 3 * area;
   if (area < 0) pts = pts.reverse();
   pts = pts.map(([x, y]) => [x - cx, y - cy]);
+  pts.centre = [cx, cy];
   for (let i = 0; i < pts.length; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length], [qx, qy] = pts[(i + 2) % pts.length];
     if ((bx - ax) * (qy - by) - (by - ay) * (qx - bx) <= 1e-9) fail(path, 'expected a convex outline, every corner turning the same way (no dents and no three points in a line)');
@@ -149,7 +151,7 @@ function readBody(entry, path, context) {
   if (entry.speed !== undefined && fixed) fail(`${path}.speed`, 'speed holds a free body\'s speed; a fixed body moves exactly by its velocity and spin');
   const speed = entry.speed === undefined ? null : number(entry.speed, `${path}.speed`, 0.05, MAX_SPEED);
   // Geometry in the body's own frame, centred on its centre of mass.
-  let parts, area, inertia, size;
+  let parts, area, inertia, size, centre = null;
   if (shape === 'circle') {
     const r = number(entry.radius, `${path}.radius`, 0.5, 32);
     parts = [{ kind: 'circle', r }]; area = PI * r * r; inertia = r * r / 2; size = [Math.max(1, Math.round(2 * r)), Math.max(1, Math.round(2 * r))];
@@ -158,7 +160,7 @@ function readBody(entry, path, context) {
     if (shape === 'box') {
       const [w, h] = pair(entry.size, `${path}.size`, 1, 64);
       points = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]];
-    } else points = convex(entry.points, `${path}.points`);
+    } else { points = convex(entry.points, `${path}.points`); centre = points.centre; }
     const part = polygonPart(points);
     parts = [part];
     area = 0; let second = 0;
@@ -188,11 +190,22 @@ function readBody(entry, path, context) {
   }
   // Looks: a fill (a list changes colour at each hit), an outline, or a symbol drawn turned with the body.
   if (entry.symbol !== undefined && (entry.fill !== undefined || entry.outline !== undefined)) fail(`${path}.symbol`, 'a body is drawn with a symbol or with fill and outline, not both');
-  let fills = null, outline = null, symbol = null;
+  let fills = null, outline = null, symbol = null, rows = null;
   if (entry.symbol !== undefined) {
     if (typeof entry.symbol !== 'string' || !Object.hasOwn(symbols, entry.symbol)) fail(`${path}.symbol`, `unknown symbol ${JSON.stringify(entry.symbol)}`);
     if (shape === 'hoop') fail(`${path}.symbol`, 'a hoop is drawn as its outline; give it fill');
     symbol = entry.symbol;
+    // A picture is drawn with its middle on the body's centre, and a polygon's centre is its centroid, which a lopsided
+    // outline has off the middle its points were written around. The picture belongs where the points were written, so
+    // it is padded with empty columns and rows until its middle is the centroid: a triangle's picture then stands on
+    // the triangle that collides, instead of hanging a third of the way off it.
+    if (centre) {
+      const padX = Math.round(2 * centre[0]), padY = Math.round(2 * centre[1]);
+      if (padX || padY) {
+        const wide = symbols[symbol].map(row => (padX < 0 ? '.'.repeat(-padX) : '') + row + (padX > 0 ? '.'.repeat(padX) : '')), blank = '.'.repeat(wide[0].length);
+        rows = [...Array(Math.max(0, -padY)).fill(blank), ...wide, ...Array(Math.max(0, padY)).fill(blank)];
+      }
+    }
   } else {
     if (entry.fill === undefined) fail(`${path}.fill`, 'expected a palette key, or a list of keys to change to at each hit');
     fills = Array.isArray(entry.fill) ? entry.fill : [entry.fill];
@@ -277,7 +290,7 @@ function readBody(entry, path, context) {
     invMass: fixed ? 0 : 1 / mass, invInertia: fixed || shape === 'hoop' ? 0 : 1 / (mass * inertia),
     bounce: material.bounce, friction: material.friction, drag: material.drag, spinDrag: material.spinDrag,
     weightless: material.weightless, asleep: material.asleep, tireless: material.tireless, temperature, team, speed, fills, fillEvery, outline, symbol, trail, smear, breaks,
-    ...(pivot && pivoted(x, y, a, pivot, velocity, spin))
+    ...(rows && { rows }), ...(pivot && pivoted(x, y, a, pivot, velocity, spin))
   }));
 }
 // A fixed body turning about a pivot: `at` (x, y) is the pivot, its velocity the pivot's; the body's centre and its
@@ -1163,13 +1176,18 @@ export function createBodyWorld(effect, context) {
         if (b.sleepy >= SLEEP_FRAMES) { b.asleep = true; b.vx = 0; b.vy = 0; b.w = 0; }
       }
       const [x0, y0, x1, y1] = b.box;
-      if (!b.fixed && (x1 < -GONE || y1 < -GONE || x0 > width + GONE || y0 > height + GONE)) { b.gone = true; stats.escaped.push({ body: b.name ?? b.path, frame: f }); }
+      // Far past an open edge a body has left, unless gravity is bringing it back: a ball thrown over the top falls into
+      // the picture again (it left for good at 16 pixels up, mid-flight). A weightless body never comes back.
+      const back = b.weightless ? [0, 0] : gravity;
+      if (!b.fixed && ((x1 < -GONE && !(back[0] > 0)) || (y1 < -GONE && !(back[1] > 0)) || (x0 > width + GONE && !(back[0] < 0)) || (y0 > height + GONE && !(back[1] < 0)))) { b.gone = true; stats.escaped.push({ body: b.name ?? b.path, frame: f }); }
       b.history.push([b.x, b.y]);
       if (b.name !== null && !b.fixed) stats.paths[b.name].push(b.gone ? null : [round(b.x), round(b.y), round(atan2Deg(b.s, b.c))]);
       if (b.history.length > 18) b.history.shift();
       if (b.smear) { b.poses.push([b.x, b.y, b.c, b.s]); if (b.poses.length > b.smear.frames + 1) b.poses.shift(); }
     }
-    if (stats.rest === null && f > 0 && bodies.every(b => b.gone || b.fixed && !moving(b) || b.asleep)) stats.rest = f;
+    // The frame from which everything rests to the end: one that wakes later (a support taken away, a late hit) clears it.
+    if (!(f > 0 && bodies.every(b => b.gone || b.fixed && !moving(b) || b.asleep))) stats.rest = null;
+    else if (stats.rest === null) stats.rest = f;
   };
   // New obstacles (a fluid's that move, or its resting sand) wake the sleeping bodies within a pixel of a hard pixel that
   // came or went, and those resting on them: a crate asleep on a shelf that slid away hung in the air, and one beside a
@@ -1768,7 +1786,7 @@ function work(effect, { width, height, n = 1, symbols = {} }) {
   for (const b of effect.bodies) {
     // A body's picture (its symbol, or its shape) within its reach, turned (a circle doesn't turn), then its trail and its
     // smear: a sample each half (fine) pixel its far end sweeps, each over the bounds it is turned in.
-    const picture = b.symbol ? symbols[b.symbol] : null, w = Math.max(b.size[0], picture ? picture[0].length : 0), h = Math.max(b.size[1], picture ? picture.length : 0);
+    const picture = b.rows ?? (b.symbol ? symbols[b.symbol] : null), w = Math.max(b.size[0], picture ? picture[0].length : 0), h = Math.max(b.size[1], picture ? picture.length : 0);
     const reach = b.shape === 'circle' ? Math.max(w, h) / 2 : Math.sqrt(w * w + h * h) / 2, across = 2 * reach * n + 2;
     let cost = Math.min(width * height * n * n, across * across);
     if (b.trail) { const d = Math.max(1, Math.min(b.size[0], b.size[1]) - 1) * n; cost += b.trail.length * (MAX_SPEED * n + 1) * d * d; }

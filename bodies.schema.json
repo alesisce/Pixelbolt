@@ -168,7 +168,7 @@
               ]
             },
             "maxItems": 4,
-            "description": "Canvas edges that hold bodies in; a body far past an open edge leaves for good."
+            "description": "Canvas edges that hold bodies in; a body far past an open edge leaves for good, but one thrown past the edge gravity pulls it back from (over the top) comes back."
           },
           "obstacles": {
             "type": "array",
@@ -369,7 +369,7 @@
                   },
                   "maxItems": 8,
                   "minItems": 3,
-                  "description": "polygon: 3–8 convex points [x, y] around the body's centre, recentred on their centroid."
+                  "description": "polygon: 3–8 convex points [x, y] around the body's centre, recentred on their centroid (at places the centroid). A symbol stays where the points were written: its middle on the point they are written around."
                 },
                 "sides": {
                   "type": "integer",

@@ -554,6 +554,51 @@ test('the work estimate charges the crowd a strike can make and a smear\'s sweep
   assert.ok(run(crowd()).effect.frames === 256);
 });
 
+test('a body thrown past an open edge that gravity pulls it back from comes back', () => {
+  const floor = { floor: ['k'.repeat(48)] }, ball = extra => ({ name: 'ball', shape: 'circle', radius: 2, at: [24, 20], fill: 'r', ...extra });
+  const thrown = (body, effect = {}) => run(scene({ frames: 160, obstacles: [{ symbol: 'floor', x: 0, y: 31 }], bodies: [body], ...effect }, { symbols: floor })).effect;
+  // Up at 4 pixels a frame it rises 53 pixels, far over the top, and lands again. (It left for good 16 pixels up.)
+  const up = thrown(ball({ velocity: [0, -4] }));
+  assert.deepEqual(up.escaped, []);
+  assert.ok(Math.min(...up.paths.ball.map(p => p[1])) < -20 && up.paths.ball.at(-1)[1] > 28, JSON.stringify(up.paths.ball.at(-1)));
+  // Nothing brings back a weightless body, one thrown sideways, or one that falls out of the bottom.
+  for (const [body, effect] of [[ball({ velocity: [0, -4], weightless: true })], [ball({ velocity: [6, -1] })], [ball({ velocity: [0, 1] }), { obstacles: [] }], [ball({ velocity: [0, -4] }), { gravity: [0, -0.15] }]]) {
+    const gone = thrown(body, effect);
+    assert.equal(gone.escaped.length, 1, JSON.stringify(body));
+    assert.equal(gone.paths.ball.at(-1), null);
+  }
+  // Sideways gravity brings one back over the edge it pulls away from.
+  assert.deepEqual(thrown(ball({ velocity: [-5, 0] }), { gravity: [0.15, 0], walls: ['right', 'top', 'bottom'] }).escaped, []);
+});
+
+test('a picture on a lopsided polygon is drawn on the outline that collides', () => {
+  // A triangle written around the middle of its picture: its centroid is 4 pixels below that middle.
+  const tri = [[0, -12], [8, 12], [-8, 12]], rows = Array.from({ length: 24 }, (_, j) => { const half = Math.round((j + 0.5) / 24 * 8); return '.'.repeat(8 - half) + 'r'.repeat(2 * half) + '.'.repeat(8 - half); });
+  const bounds = (recipe, f) => { let x0 = 99, y0 = 99, x1 = -1, y1 = -1; for (const op of recipe.frames[f].ops.filter(o => o.op === 'grid')) op.rows.forEach((row, j) => [...row].forEach((c, i) => { if (c === 'r') { x0 = Math.min(x0, op.x + i); x1 = Math.max(x1, op.x + i); y0 = Math.min(y0, op.y + j); y1 = Math.max(y1, op.y + j); } })); return [x0, y0, x1, y1]; };
+  const shown = (body, effect = {}) => run(scene({ frames: 60, gravity: [0, 0], bodies: [{ name: 'tri', shape: 'polygon', points: tri, at: [24, 18], ...body }], ...effect }, { symbols: { tri: rows, floor: ['k'.repeat(48)] } }));
+  const outline = bounds(shown({ fill: 'r', weightless: true }).recipe, 0), picture = bounds(shown({ symbol: 'tri', weightless: true }).recipe, 0);
+  assert.deepEqual(picture, outline);
+  assert.deepEqual(outline, [16, 3, 31, 25]);
+  // Dropped, it comes to rest standing on the floor, not sunk into it.
+  const dropped = shown({ symbol: 'tri' }, { gravity: [0, 0.15], obstacles: [{ symbol: 'floor', x: 0, y: 31 }] });
+  assert.equal(bounds(dropped.recipe, 59)[3], 30);
+  // Mirrored left to right and upside down, the padding goes on the other sides; a box or an even polygon needs none.
+  const flipped = tri.map(([x, y]) => [x, -y]), upside = [...rows].reverse();
+  const turned = run(scene({ frames: 2, gravity: [0, 0], bodies: [{ shape: 'polygon', points: flipped, at: [24, 14], symbol: 'tri', weightless: true }] }, { symbols: { tri: upside } })).recipe;
+  const plain = run(scene({ frames: 2, gravity: [0, 0], bodies: [{ shape: 'polygon', points: flipped, at: [24, 14], fill: 'r', weightless: true }] })).recipe;
+  assert.deepEqual(bounds(turned, 0), bounds(plain, 0));
+});
+
+test('rest is the frame everything rests from, to the end', () => {
+  // A crate asleep on a shelf that an event takes away: it rested at first, then fell.
+  const { effect } = run(scene({ frames: 120, obstacles: [{ symbol: 'floor', x: 0, y: 31 }], bodies: [{ name: 'crate', shape: 'box', size: [6, 6], at: [24, 10], fill: 'r' }, { name: 'shelf', shape: 'box', size: [12, 2], at: [24, 14], fixed: true, fill: 'k' }], events: [{ frame: 40, body: 'shelf', power: 'vanish' }] }, { symbols: { floor: ['k'.repeat(48)] } }));
+  const path = effect.paths.crate, last = path.findLastIndex((p, f) => f && (p[0] !== path[f - 1][0] || p[1] !== path[f - 1][1]));
+  assert.ok(last > 45 && path.at(-1)[1] > 25, `${last}`);
+  assert.ok(effect.rest > last && effect.rest < 120, `rest ${effect.rest}, last move ${last}`);
+  // Still moving at the end: no rest.
+  assert.equal(run(scene({ frames: 20, bodies: [{ shape: 'circle', radius: 2, at: [24, 4], fill: 'r' }] })).effect.rest, null);
+});
+
 test('a ball at rest in a corner stays put when the obstacles are traced again', () => {
   // A push kept from the last substep is found again by the number of the face it was on, and a retrace numbers the
   // faces afresh: with the shelf gone the floor's number was the right wall's, and the ball took the floor's push from

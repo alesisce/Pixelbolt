@@ -4,6 +4,12 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Fixes: rigid bodies thrown high, pictures on polygons, the rest frame
+
+- A body thrown past an open edge that gravity pulls it back from comes back. Before, anything more than 16 pixels over an open top was gone for good, in mid-flight: a ball thrown up at 4 pixels a frame, which rises 53, never landed. A weightless body, and one past an edge gravity does not pull it back from, still leaves.
+- A `symbol` on a lopsided polygon is drawn on the outline that collides. A polygon's centre is its centroid, and its picture was centred there instead of on the point its `points` are written around, so a 24-pixel triangle's picture hung 4 pixels below its outline and sank into the floor it stood on. Sources that padded their picture to make up for it should take the padding out.
+- The metadata's `rest` is the frame everything rests from to the end. It kept the first frame everything was asleep, so a crate that slept on a shelf at frame 11 and fell when the shelf vanished at frame 50 was still reported at rest from 11.
+
 ### Clearer errors where first-time agents stalled
 
 - Attaching a part to a point that isn't there named neither: "attachment must name a point on a part in this pose". The error now says which is missing and what exists. For a missing point: the part's own points and how to add one under `parts.<name>.points` (`[column, row]` in a grid's rows, `"end"` or `[along, across]` on a bone, `[x, y]` from a mass's centre). For a missing instance: the pose's instance names, and, when the name is a part definition, the instances that place it.

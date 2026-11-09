@@ -96,6 +96,17 @@ test('a spinning body stirs the water it turns in, and the water keeps its volum
   assert.equal(turning.particles, still.particles, 'the turning paddles neither swallow nor make water');
 });
 
+test('a fixed body turning on the spot in sand leaves its cells without a velocity of its own', () => {
+  // Its turning is not given to sand, so no obstacle ever moved as the sand sees it, and the wake its cells join was only
+  // made once one did: the compile stopped on the first frame the paddle left a cell.
+  const source = { format: 'pixelforge-fluid', version: 1, name: 'paddle', width: 32, height: 24, palette,
+    effects: { paddle: { kind: 'liquid', frames: 12, duration: 50, seed: 1, walls: ['left', 'right', 'bottom'], granular: { repose: 30 }, fill: [{ x: 0, y: 14, w: 32, h: 10 }], emitters: [],
+      look: [{ field: 'density', colors: ['s'], thresholds: [0.35], dither: 0 }], bodies: [{ name: 'paddle', shape: 'box', size: [12, 3], at: [16, 10], fixed: true, spin: 6, fill: 'h' }] } } };
+  assert.equal(compileFluid(source).recipe.frames.length, 12);
+  const turned = changes(source, 'h', 0);
+  assert.ok(turned.length === 11 && turned.filter(Boolean).length > 5, `the paddle turns through the frames: ${turned}`);
+});
+
 test('what rests on a body weighs on it: sand poured on one end of a plank tips it', () => {
   const plank = paths(fluidBodyPresets['plank-tip']).plank, turn = (plank.at(-1)[2] - plank[0][2] + 540) % 360 - 180;
   assert.ok(Math.abs(turn) > 20, `the plank tips down under the sand: ${plank[0]} to ${plank.at(-1)}`);

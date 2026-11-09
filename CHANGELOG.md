@@ -35,6 +35,17 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 - `gemini-extension.json` makes the repository a Gemini CLI extension: `gemini extensions install https://github.com/skulitom/Pixelbolt` adds the MCP server, which runs the release's own `bin/pixelbolt.js` with your Node.js (20 or later) in the folder Gemini CLI was opened in, so exports go to its `output/` folder, and the pixel art skill. The release's tag check now reads its version with the others.
 
+### Fixes from a review of hidden state
+
+- A fluid of sand with a fixed body that turns on the spot (`fixed: true` with a `spin` and no velocity) stopped the compile with `Cannot read properties of undefined (reading 'left')` on the first frame the body left a cell. Sand is not given a body's turning, so nothing had moved as the sand saw it, and the wake the left cells join had not been made. It is now made when the first cell is left.
+- The studio asked before replacing an edited recipe with a sample only when the sample was chosen. What was typed while the sample loaded was replaced without a question; it is now asked about too.
+- `replayStrokes` on a powder runner that had already run some frames applied no stroke at all after the first one behind it. It now passes over the strokes of frames the runner has run and carries on, so a replay can be run in parts.
+- A powder grain that last moved exactly 65,535 frames before the floor under it was taken away hung in the air for one frame: the 16-bit frame stamp it kept read as the current frame's. The stamps are wiped when the frame count wraps.
+- A rigid body resting against two faces (a ball in a corner) could be pushed along one of them on the substep after the obstacles were traced again: its kept push was found by the face's number, and the retrace had given that number to a face looking another way. A kept push is now used only on a face that looks the way the one it came from did. No shipped preset changes.
+- `bodiesFrames(...).image(-1)` returned `null` before any frame had been drawn; it is refused like any other frame outside the match.
+- A second `initialize` sent to the MCP server decided again whether the MCP Apps viewer was offered, after the tool list had been given. The first `initialize` now settles the session, and a repeat gets the same answer.
+- For contributors: `node scripts/goldens.mjs` stopped with a `TypeError` when git could name the base commit but not write it out; it now reports the changed cases with a note that there are no before images. The studio walk checks the sample question.
+
 ## 0.14.0 (2026-11-08)
 
 ### Fixes from a review before release

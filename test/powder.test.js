@@ -628,3 +628,31 @@ test('tumbling: a piece carries its burning and its heat, a blast throws it, and
   const again = replayStrokes(createLivePowder(source), live.strokes, live.frame);
   assert.equal(digest(again), digest(live), 'a tumbling run replays exactly');
 });
+
+test('a replay carries on from a runner part of the way there', () => {
+  // replayStrokes once waited for a stroke of exactly the frame it was on: on a runner past the first stroke's frame it
+  // waited for ever, and every later stroke was left out.
+  const source = sandboxSource(16, 16, [{ material: 'stone', rect: [0, 12, 16, 4] }]), recorded = createLivePowder(source, { record: true });
+  for (let f = 0; f < 12; f++) { if (f % 3 === 0) recorded.paint({ material: 'sand', x: 4 + f, y: 2, radius: 1 }); recorded.step(); }
+  const whole = replayStrokes(createLivePowder(source), recorded.strokes, 12), parts = createLivePowder(source);
+  replayStrokes(parts, recorded.strokes, 5);
+  assert.equal(parts.frame, 5);
+  replayStrokes(parts, recorded.strokes, 12);
+  assert.ok(cellsOf(whole, 'sand').length > 8);
+  assert.deepEqual(parts.cells.mat, whole.cells.mat, 'in two parts as in one');
+  assert.deepEqual(parts.cells.mat, recorded.cells.mat);
+});
+
+test('a cell is not taken for moved because it last moved 65,535 frames ago', () => {
+  // A cell is stamped with the frame's 16-bit tick when it moves, and passed over for the rest of that frame. The tick
+  // came round again to a resting grain's stamp, and on that one frame the grain hung over the hole opened under it.
+  const live = createLivePowder(sandboxSource(16, 16, [{ material: 'stone', rect: [0, 8, 16, 1] }, { material: 'sand', rect: [8, 4, 1, 1] }]));
+  const row = () => Math.floor(cellsOf(live, 'sand')[0] / 16);
+  let landed = 0;
+  for (let f = 1, at = row(); f <= 20; f++) { live.step(); if (row() !== at) { at = row(); landed = f; } }
+  assert.equal(row(), 7, 'the grain rests on the stone');
+  live.step(landed + 65535 - 1 - live.frame);
+  live.erase({ x: 8.5, y: 8.5, radius: 0.5 });
+  live.step();
+  assert.equal(row(), 8, 'and falls on the frame the stone under it goes');
+});

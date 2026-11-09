@@ -247,12 +247,13 @@ function setSource(value, exampleFile) {
 }
 async function loadExample(example) {
   if (!mayReplace()) return;
-  const version = ++loadVersion;
+  const version = ++loadVersion, asked = source.value;
   try {
     const response = await fetch(`/examples/${example.file}.json`);
     if (!response.ok) throw new Error(`Could not load example: HTTP ${response.status}`);
     const value = await response.json();
-    if (version === loadVersion) setSource(value, example.file);
+    // The answer above was for the recipe as it was then: what was typed while the example loaded is asked about too.
+    if (version === loadVersion && (source.value === asked || mayReplace())) setSource(value, example.file);
   } catch (error) { toast(error.message); }
 }
 function setMode(next) {

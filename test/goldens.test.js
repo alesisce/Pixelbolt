@@ -130,4 +130,13 @@ test('goldens --check lists what changed and draws it before and after; --write 
   result = goldensRun('--out', 'test');
   assert.equal(result.status, 2);
   assert.match(result.stderr, /--out test is not empty/);
+  // A commit git can name but not write out (its tree is lost) gives no before images, and the check still reports.
+  writeFileSync(path.join(dir, 'lib', 'art.js'), ART('30, 30, 200'));
+  const tree = run(['rev-parse', 'HEAD^{tree}'], 'git').stdout.trim();
+  rmSync(path.join(dir, '.git', 'objects', tree.slice(0, 2), tree.slice(2)), { force: true });
+  result = goldensRun();
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /changed {5}dots: [0-9a-f]{12}… is now [0-9a-f]{12}…/);
+  assert.match(result.stdout, /Note: no before images: git could not write out HEAD \(/);
+  assert.doesNotMatch(result.stdout + result.stderr, /TypeError/);
 });

@@ -94,6 +94,22 @@ test('MCP Apps negotiates resource discovery and metadata on exactly six tools',
   assert.equal((await mcp.request('resources/read', { uri: 'ui://pixelbolt/missing' })).error.code, -32002);
 });
 
+test('the first initialize settles the session: a repeat is answered as the first was', async t => {
+  // A second initialize once decided again whether the viewer was there, after the tool list had been given.
+  const plain = { protocolVersion: '2025-11-25', capabilities: {} }, apps = { protocolVersion: '2025-11-25', capabilities };
+  const withApps = await session(t, capabilities), first = withApps.initialized.result;
+  assert.deepEqual((await withApps.request('initialize', plain)).result, first);
+  assert.equal((await withApps.request('tools/list')).result.tools.filter(tool => tool._meta).length, 6);
+  assert.equal((await withApps.request('resources/list')).result.resources.length, 1);
+  const without = await session(t, {});
+  assert.deepEqual((await without.request('initialize', apps)).result, without.initialized.result);
+  assert.deepEqual(without.initialized.result.capabilities, { tools: {} });
+  assert.equal((await without.request('tools/list')).result.tools.filter(tool => tool._meta).length, 0);
+  assert.equal((await without.request('resources/list')).error.code, -32601);
+  // A repeat that is not an initialize at all is still refused.
+  assert.equal((await without.request('initialize', {})).error.code, -32602);
+});
+
 test('a negotiated smoke-puff preview keeps content identical and decodes to the compiled native pixels and timing', async t => {
   const plain = await session(t, {}), app = await session(t, capabilities);
   const original = await plain.call('pixel_compile', { preset: 'smoke-puff' }), reply = await app.call('pixel_compile', { preset: 'smoke-puff' });

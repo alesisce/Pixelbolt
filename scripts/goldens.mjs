@@ -284,9 +284,9 @@ function failures(output) {
 
 async function drawBeforeAfter(root, options, scratch, records, moved, report) {
   const base = path.join(scratch, 'before');
-  let before = new Map(), exported = null;
-  try { exported = exportCommit(root, options.base, base); } catch (error) { report.notes.push(`no before images: git could not write out ${options.base} (${error.stderr?.trim() || error.message})`); }
-  if (!exported && !report.notes.some(note => note.startsWith('no before images'))) report.notes.push(`no before images: ${options.base} is not a commit of a git checkout at ${root}`);
+  let before = new Map(), exported = null, why = `${options.base} is not a commit of a git checkout at ${root}`;
+  try { exported = exportCommit(root, options.base, base); } catch (error) { why = `git could not write out ${options.base} (${error.stderr?.trim() || error.message})`; }
+  if (!exported) report.notes.push(`no before images: ${why}`);
   else {
     report.base = { ref: options.base, commit: exported.commit };
     const files = [...new Set(moved.flatMap(({ entry }) => entry.tests))].filter(file => existsSync(path.join(exported.tree, file)));

@@ -837,7 +837,8 @@ export function createLivePowder(source, options = {}) {
 
   // One frame: queued inputs, then every cell from the bottom row up (each row in alternating directions), then heat.
   const advance = () => {
-    tick = tick === 65535 ? 1 : tick + 1;
+    // The stamps are 16 bits, so they are wiped as the tick wraps: one left from 65535 frames ago would read as this frame's.
+    if (tick === 65535) { stamp.fill(0); tick = 1; } else tick++;
     script.forEach((entry, n) => { if (t >= entry.from && t <= entry.to && (t - entry.from) % entry.every === 0) { reseed(SALT.script, t, n); entry.run(); } });
     queue.forEach((input, n) => { reseed(SALT.input, t, n); input(); });
     queue = [];
@@ -2086,9 +2087,12 @@ export function compilePowder(source) {
 }
 
 // ---- Recorded strokes ---------------------------------------------------------------------------------------------
-// Replays recorded strokes on a fresh runner of the same source: each on its frame, then a step, for `frames` frames.
+// Replays recorded strokes (in frame order, as recorded) on a fresh runner of the same source: each on its frame, then a
+// step, for `frames` frames. A runner already part of the way there carries on: the strokes of frames it has run are its
+// past, and are passed over.
 export function replayStrokes(live, strokes, frames) {
   let at = 0;
+  while (at < strokes.length && strokes[at].f < live.frame) at++;
   for (let f = live.frame; f < frames; f++) {
     while (at < strokes.length && strokes[at].f === f) applyStroke(live, strokes[at++]);
     live.step();

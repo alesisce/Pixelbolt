@@ -553,3 +553,26 @@ test('the work estimate charges the crowd a strike can make and a smear\'s sweep
   refused(crowd(4096), 'bodies.effects.e', /need about \d+ million updates, more than 400 million/);
   assert.ok(run(crowd()).effect.frames === 256);
 });
+
+test('a ball at rest in a corner stays put when the obstacles are traced again', () => {
+  // A push kept from the last substep is found again by the number of the face it was on, and a retrace numbers the
+  // faces afresh: with the shelf gone the floor's number was the right wall's, and the ball took the floor's push from
+  // the wall.
+  const shelf = { rows: ['xxxx'], x: 4, y: 10, solid: true, bounce: 0, friction: 0.6 };
+  const world = createBodyWorld({ substeps: 8, iterations: 6, gravity: [0, 0.3], walls: { left: true, right: true, top: true, bottom: true }, obstacles: [shelf],
+    bodies: readBodies([{ shape: 'circle', radius: 4, at: [44, 44], fill: 'w' }], 'bodies', { palette, symbols: {}, width: 48, height: 48 }) }, { width: 48, height: 48, symbols: {} });
+  const [ball] = world.bodies;
+  for (let f = 1; f <= 4; f++) world.advance(f);
+  assert.deepEqual([ball.x, ball.y, ball.vx, ball.vy], [44, 44, 0, 0]);
+  world.retrace([]);
+  world.advance(5);
+  assert.deepEqual([ball.x, ball.y, ball.vx, ball.vy], [44, 44, 0, 0], 'it is not kicked along the floor');
+});
+
+test('a match drawn frame by frame has no frame before its first', () => {
+  const frames = bodiesFrames(scene({ frames: 4, duration: 50, bodies: [{ shape: 'circle', radius: 2, at: [10, 10], fill: 'w' }] }));
+  // Frame -1 once passed as "not behind the frame it is on" and gave null.
+  for (const f of [-1, 4, 0.5]) assert.throws(() => frames.image(f), error => error instanceof PixelError && error.path === 'sequence' && /is not ahead of frame -1 within the match's 4/.test(error.message), `frame ${f}`);
+  assert.equal(frames.image(0).length, 48 * 32 * 4);
+  assert.throws(() => frames.image(-1), error => error instanceof PixelError && /frame -1 is not ahead of frame 0/.test(error.message));
+});

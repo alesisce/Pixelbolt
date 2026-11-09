@@ -4084,7 +4084,6 @@ function moveObstacles(run, cycle) {
     for (const c of wake.cells) if (wake.left[c] && (g.solid[c] || !--wake.left[c])) wake.left[c] = 0;
     wake.cells = wake.cells.filter(c => wake.left[c]);
   }
-  if (effect.liquid && solids.moving) state.wake ??= { cells: [], left: new Uint8Array(g.N), mark: new Uint8Array(g.N) };
   const of = c => (c >= 0 ? solids.velocity(c) : null);
   if (!P && (solids.moving || g.moved || changed)) {
     if (!g.uWall) { g.uWall = new Float64Array(g.u.length); g.vWall = new Float64Array(g.v.length); } else { g.uWall.fill(0); g.vWall.fill(0); }
@@ -4101,8 +4100,11 @@ function moveObstacles(run, cycle) {
   if (effect.liquid) {
     // A body leaves a wake as it turns, too, not only as it moves a whole pixel.
     for (let c = 0; c < g.N; c++) if (before.solid[c] && !layout.solid[c] && before.owner[c] >= 0 && (shift[before.owner[c]] || (cycle > 0 && effect.obstacles[before.owner[c]].body !== undefined))) {
-      if (!state.wake.left[c]) state.wake.cells.push(c);
-      state.wake.left[c] = WAKE;
+      // Made when the first cell is left, not when an obstacle first has a velocity: a fixed body turning on the spot in
+      // sand has none (its turning is not the sand's), and its cells come and go all the same.
+      const wake = state.wake ??= { cells: [], left: new Uint8Array(g.N), mark: new Uint8Array(g.N) };
+      if (!wake.left[c]) wake.cells.push(c);
+      wake.left[c] = WAKE;
     }
   }
   // The cells each moving obstacle passed over on its way, from every cell it held to where that cell is now. An

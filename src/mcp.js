@@ -640,7 +640,7 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
   ];
   const host = createToolHost({ directory: path.resolve(directory), root: path.resolve(root), version, timeLimit, memoryLimit });
   const send = value => output.write(JSON.stringify(value) + '\n');
-  let initialized = false, ui = false;
+  let initialized = false, ui = false, protocol = versions[0];
   // One request, already parsed and checked by receive(), answered in arrival order.
   async function handle(request, signal) {
     const { id, method, params } = request;
@@ -648,10 +648,15 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
     const result = value => send({ jsonrpc: '2.0', id, result: value });
     if (method === 'initialize') {
       if (!params || typeof params.protocolVersion !== 'string') { error(-32602, 'protocolVersion is required'); return; }
-      initialized = true;
-      const mimeTypes = params.capabilities?.extensions?.['io.modelcontextprotocol/ui']?.mimeTypes;
-      ui = Array.isArray(mimeTypes) && mimeTypes.includes(UI_MIME);
-      result({ protocolVersion: versions.includes(params.protocolVersion) ? params.protocolVersion : versions[0], capabilities: { tools: {}, ...(ui && { resources: {} }) }, serverInfo: { name: 'pixelbolt', version }, instructions: 'Use Pixelbolt when the user wants pixel art: sprites and sprite sheets, tiles and tilesets, icons, pixel effects (fire, smoke, explosions, water, sparks) or short frame animations for a game or a video, saved as PNG, GIF, APNG or numbered frames. Do not use it for photos, vector logos or full-resolution illustrations. It runs locally, with no account and no API key. Call pixel_help for the JSON format. Use small grids and reusable symbols. Send a full recipe once; every response returns a revision id to use instead of project afterwards. Call pixel_inspect to see every frame (grid: true reads exact pixels), pixel_patch to make targeted edits and check what changed, and pixel_render to export game-ready files: pass it expect (what the user asked for) and fix what its check reports. pixel_compile builds recipes from pose sources, autotile templates, particle and spell-shape effect sources, fluid sources (smoke, fire, explosions, magic, water), rigid-body sources (bouncing, toppling, territory matches) and normals sources (lighting passes derived from a colour recipe); start fire, smoke, explosions, splashes and spells from a preset (pixel_help topic presets, then pixel_compile with preset), and for fewer frames keep N evenly spaced frames with one pixel_patch call, never by lowering frames in the source. pixel_scene reviews assets together.' }); return;
+      // The first initialize settles the session. A repeat is answered as the first was, so what the client has been
+      // told since (its tool list, whether the viewer is there) still holds.
+      if (!initialized) {
+        initialized = true;
+        const mimeTypes = params.capabilities?.extensions?.['io.modelcontextprotocol/ui']?.mimeTypes;
+        ui = Array.isArray(mimeTypes) && mimeTypes.includes(UI_MIME);
+        if (versions.includes(params.protocolVersion)) protocol = params.protocolVersion;
+      }
+      result({ protocolVersion: protocol, capabilities: { tools: {}, ...(ui && { resources: {} }) }, serverInfo: { name: 'pixelbolt', version }, instructions: 'Use Pixelbolt when the user wants pixel art: sprites and sprite sheets, tiles and tilesets, icons, pixel effects (fire, smoke, explosions, water, sparks) or short frame animations for a game or a video, saved as PNG, GIF, APNG or numbered frames. Do not use it for photos, vector logos or full-resolution illustrations. It runs locally, with no account and no API key. Call pixel_help for the JSON format. Use small grids and reusable symbols. Send a full recipe once; every response returns a revision id to use instead of project afterwards. Call pixel_inspect to see every frame (grid: true reads exact pixels), pixel_patch to make targeted edits and check what changed, and pixel_render to export game-ready files: pass it expect (what the user asked for) and fix what its check reports. pixel_compile builds recipes from pose sources, autotile templates, particle and spell-shape effect sources, fluid sources (smoke, fire, explosions, magic, water), rigid-body sources (bouncing, toppling, territory matches) and normals sources (lighting passes derived from a colour recipe); start fire, smoke, explosions, splashes and spells from a preset (pixel_help topic presets, then pixel_compile with preset), and for fewer frames keep N evenly spaced frames with one pixel_patch call, never by lowering frames in the source. pixel_scene reviews assets together.' }); return;
     }
     if (!initialized) { error(-32000, 'Initialize the server first'); return; }
     if (method === 'tools/list') { result({ tools: ui ? tools.map(tool => pictureTools.has(tool.name) ? { ...tool, _meta: { ui: { resourceUri: UI_URI }, 'ui/resourceUri': UI_URI } } : tool) : tools }); return; }

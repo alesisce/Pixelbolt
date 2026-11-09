@@ -864,7 +864,7 @@ export function createBodyWorld(effect, context) {
         const s = world.segments[index];
         a.world.forEach((pa, ia) => {
           const m = partSegment(pa, s, margin);
-          if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), soft: s.soft, move: s.move });
+          if (m) contacts.push({ a, b: null, key: `${a.index}:s${index}:${ia}`, face: s, ...m, bounce: Math.max(a.bounce, s.bounce), friction: Math.sqrt(a.friction * s.friction), soft: s.soft, move: s.move });
         });
       }
       // Cells of the other teams' territory are walls to it.
@@ -1050,7 +1050,10 @@ export function createBodyWorld(effect, context) {
         const ran = point.rax * ny - point.ray * nx, rbn = point.rbx * ny - point.rby * nx, rat = point.rax * ty - point.ray * tx, rbt = point.rbx * ty - point.rby * tx;
         const kn = ma + mb + ia * ran * ran + ib * rbn * rbn, kt = ma + mb + ia * rat * rat + ib * rbt * rbt;
         point.normalMass = kn > 0 ? 1 / kn : 0; point.tangentMass = kt > 0 ? 1 / kt : 0;
-        const kept = warm.get(`${contact.key}:${point.id}`);
+        // A face is known by its number, and a retrace numbers the faces afresh: a push kept from another way a face
+        // looked is not this face's (a ball in a corner took the floor's push from the wall beside it, and was kicked
+        // along the floor). One kept from a face looking the same way starts the solve as well as its own would.
+        const saved = warm.get(`${contact.key}:${point.id}`), { face } = contact, kept = saved && (!face || (saved[2] === face.nx && saved[3] === face.ny)) ? saved : null;
         point.normal = kept ? kept[0] : 0; point.tangent = kept ? kept[1] : 0; point.most = 0;
       }
     }
@@ -1098,7 +1101,7 @@ export function createBodyWorld(effect, context) {
     const knocks = breakable ? new Map() : null;
     const give = (body, rx, ry, nx, ny) => { const arm = rx * ny - ry * nx; return body.invMass + body.invInertia * arm * arm; };
     for (const contact of contacts) for (const point of contact.points) {
-      next.set(`${contact.key}:${point.id}`, [point.normal, point.tangent]);
+      next.set(`${contact.key}:${point.id}`, contact.face ? [point.normal, point.tangent, contact.face.nx, contact.face.ny] : [point.normal, point.tangent]);
       if (point.approach < -impact && point.most > 0) { contact.a.hit = contact.a.struck = true; if (contact.b) contact.b.hit = contact.b.struck = true; }
       // A strike's body strikes what it pushes, a hit or not: a blade that sweeps a ball along a wall keeps striking it.
       if (turf && contact.b && point.most > 0) turf.strike(contact.a, contact.b);
@@ -1990,7 +1993,7 @@ export function bodiesFrames(source, effectName) {
   return {
     name: source.name, effect: name, width: width * n, height: height * n, palette, frames: effect.frames, duration: effect.duration,
     image: f => {
-      if (!Number.isInteger(f) || f < at || f >= effect.frames) fail('sequence', `frame ${f} is not ahead of frame ${at} within the match's ${effect.frames}`);
+      if (!Number.isInteger(f) || f < 0 || f < at || f >= effect.frames) fail('sequence', `frame ${f} is not ahead of frame ${at} within the match's ${effect.frames}`);
       // Every frame is drawn, shown or not, as compileBodies draws them: a body's drawn place and angle hold from frame
       // to frame, so a frame drawn after skipped ones must have seen each of them. Only the shown one is rendered, as a
       // one-frame recipe whose frame name is fixed (the effect's name and frame number passed the renderer's 64).

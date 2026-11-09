@@ -478,6 +478,20 @@ try {
     await studio.reload(); await ready();
     assert.deepEqual([await evaluate(`document.getElementById('draft').hidden`), await evaluate(`localStorage.length`)], [true, 0]);
   });
+  await check('what is typed while a sample loads is asked about before the sample replaces it', async () => {
+    // The sample's answer is held back until the editor has been typed in. The studio asked only before it sent for the
+    // sample, when there was nothing to lose, and the sample then replaced what had been typed since.
+    await evaluate(`(() => { const real = window.fetch; window.fetch = async (...args) => { const response = await real(...args); if (String(args[0]).startsWith('/examples/')) { window.fetch = real; await new Promise(resolve => { window.__release = resolve; }); } return response; }; })()`);
+    const asked = dialogs.length;
+    await click('#examples .example:nth-child(2)'); await until(`typeof window.__release === 'function'`, 'the sample to be sent for');
+    await type(edited.replace('"name": "forest-spirit"', '"name": "typed-meanwhile"'));
+    assert.deepEqual(dialogs.slice(asked), [], 'nothing was edited when the sample was chosen');
+    await evaluate(`window.__release()`);
+    await until(`!document.getElementById('source').value.includes('typed-meanwhile')`, 'the sample to replace the recipe once the walk agrees');
+    assert.deepEqual(dialogs.slice(asked), ['confirm: Replace your edited recipe? Save JSON first if you want to keep it.']);
+    await studio.reload(); await ready();
+    assert.deepEqual([await evaluate(`document.getElementById('draft').hidden`), await evaluate(`localStorage.length`)], [true, 0]);
+  });
   await check('each tab keeps its own draft: another tab loading a sample or editing leaves it alone, and a closed tab\'s draft is offered to the next', async () => {
     // The names of the drafts this browser keeps, from any tab.
     const kept = page => page.evaluate(`Object.keys(localStorage).filter(key => key.startsWith('pixelforge.studio.draft')).map(key => JSON.parse(localStorage.getItem(key)).name).sort().join(', ')`);

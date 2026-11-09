@@ -160,9 +160,26 @@ function readWhitewater(layer, path, context, gravity) {
   };
 }
 
-function readEmitter(emitter, path, context) {
+// `follow` ties an emitter to an obstacle: an index into the effect's obstacles, or the symbol one of them stamps. The
+// emitter keeps its place beside the obstacle as the obstacle's keys move it, so a nozzle's flame leaves with its rocket
+// and a spout pours from a moving kettle. Returns how far the obstacle is from its own x and y on every frame of the
+// cycle, in the whole pixels it is drawn at, and whether it got there by a cut (no path to lay the emitter along), or
+// null for an obstacle without keys, which never moves.
+function readFollow(value, path, listed) {
+  if (!listed.length) fail(path, 'this effect has no obstacles to follow');
+  let index;
+  if (typeof value === 'string') {
+    const found = listed.flatMap((o, i) => (o.symbol === value ? [i] : []));
+    if (!found.length) fail(path, `no obstacle stamps the symbol ${JSON.stringify(value)}; follow one of ${[...new Set(listed.map(o => o.symbol))].join(', ')}, or an obstacle's index`);
+    if (found.length > 1) fail(path, `${found.map(i => `obstacles[${i}]`).join(' and ')} all stamp ${JSON.stringify(value)}; follow one by its index, such as ${found[0]}`);
+    index = found[0];
+  } else index = integer(value, path, 0, listed.length - 1);
+  const o = listed[index];
+  return { index, path: o.track ? o.track.map((place, f) => ({ x: place.x - o.x, y: place.y - o.y, cut: !f || place.jump })) : null };
+}
+function readEmitter(emitter, path, context, listed = []) {
   const { frames, loop, liquid } = context;
-  fields(emitter, ['name', 'at', 'radius', 'area', 'burst', 'rate', 'start', 'end', 'density', 'temperature', 'falloff', 'velocity', 'expand', 'vortex', 'noise', 'flicker', 'pulse', 'orbit', 'sparks', 'carry'], path);
+  fields(emitter, ['name', 'at', 'radius', 'area', 'burst', 'rate', 'start', 'end', 'density', 'temperature', 'falloff', 'velocity', 'expand', 'vortex', 'noise', 'flicker', 'pulse', 'orbit', 'follow', 'sparks', 'carry'], path);
   if (emitter.name !== undefined) identifier(emitter.name, `${path}.name`);
   if ((emitter.burst === undefined) === (emitter.rate === undefined)) fail(path, 'use exactly one of burst (added once, at start) or rate (added every frame from start until end)');
   const start = integer(emitter.start ?? 0, `${path}.start`, 0, frames - 1);
@@ -192,6 +209,7 @@ function readEmitter(emitter, path, context) {
     noise: number(emitter.noise ?? 0, `${path}.noise`, 0, 8), flicker: number(emitter.flicker ?? 0, `${path}.flicker`, 0, 1),
     pulse: emitter.pulse === undefined ? null : readCycle(emitter.pulse, `${path}.pulse`, frames, loop, false),
     orbit: emitter.orbit === undefined ? null : readCycle(emitter.orbit, `${path}.orbit`, frames, loop, true),
+    ...(emitter.follow !== undefined && { follow: readFollow(emitter.follow, `${path}.follow`, listed) }),
     sparks: emitter.sparks === undefined ? null : readSparks(emitter.sparks, `${path}.sparks`, context, burst),
     // A liquid emitter's water starts at its temperature (the air's when unset).
     ...(liquid && context.heat && { warmth: emitter.temperature ?? null })
@@ -583,7 +601,8 @@ function readEffect(effect, path, source) {
   // A gas with electrodes needs no emitter: its arcs are its source.
   const listedEmitters = effect.emitters ?? (electric ? [] : undefined);
   if (!Array.isArray(listedEmitters) || listedEmitters.length > LIMITS.emitters || (!listedEmitters.length && !fills.length && !electric)) fail(`${path}.emitters`, `expected 1–${LIMITS.emitters} emitters${liquid ? ' (or none, with a fill)' : ' (or none, with electrodes)'}`);
-  const emitters = listedEmitters.map((emitter, i) => readEmitter(emitter, `${path}.emitters[${i}]`, context));
+  const followable = obstacles.slice(0, Array.isArray(effect.obstacles) ? effect.obstacles.length : 0);
+  const emitters = listedEmitters.map((emitter, i) => readEmitter(emitter, `${path}.emitters[${i}]`, context, followable));
   if (!Array.isArray(effect.look) || !effect.look.length || effect.look.length > LIMITS.looks) fail(`${path}.look`, `expected 1–${LIMITS.looks} layers that map a field to palette colours`);
   const look = effect.look.map((layer, i) => readLook(layer, `${path}.look[${i}]`, context));
   const gravity = effect.gravity === undefined ? [0, 0.3] : pair(effect.gravity, `${path}.gravity`, -2, 2);
@@ -680,10 +699,10 @@ function sourceWarnings({ path, width, height, frames, liquid, seed, emitters, f
   emitters.forEach((e, index) => {
     if (!(e.density > 0 || (!liquid && (e.temperature > 0 || e.expand > 0)))) return;
     let open = false, buried = -1, seen = false;
-    // An orbiting rate emitter also works along the path between frames, as emitFrame lays it.
-    const steps = e.orbit && !e.burst && !e.carry ? Math.max(1, Math.ceil(2 * Math.PI * Math.max(e.orbit.radius[0], e.orbit.radius[1]) / Math.abs(e.orbit.period))) : 1;
     for (let cycle = 0; cycle < frames && !open; cycle++) {
       if (!active(e, cycle)) continue;
+      // A rate emitter that orbits or follows an obstacle also works along the path between frames, as emitFrame lays it.
+      const steps = e.burst || e.carry ? 1 : laidSteps(e, cycle);
       // Obstacles that move are where they are on that frame.
       const here = layoutAt ? layoutAt(cycle) : null, solid = here ? here.solid : solidBase, owner = here ? here.owner : ownerBase;
       for (let k = 1; k <= steps && !open; k++) {
@@ -1780,17 +1799,33 @@ function valueNoise(seed, emitter, frame, salt, x, y) {
 }
 // Where an emitter is this frame, and how strongly it emits: rate or burst, times its pulse. Flicker varies the
 // strength from cell to cell and frame to frame (seeded value noise), so a flame's base breaks into tongues.
-// `along` places an orbiting emitter between frames (it defaults to the frame itself); pulse and flicker keep the frame's.
+// `along` places an emitter that orbits or follows an obstacle between frames (it defaults to the frame itself); pulse
+// and flicker keep the frame's.
 // `factor` scales the strength, as a live runner's boost does.
 function emitterState(e, index, cycle, seed, along = cycle, factor = 1) {
   let [x, y] = e.at;
   if (e.orbit) { const angle = 360 * along / e.orbit.period + e.orbit.phase; x += e.orbit.radius[0] * cosDeg(angle); y += e.orbit.radius[1] * sinDeg(angle); }
+  // Beside the obstacle it follows: where the obstacle is drawn on this frame, and on the way there from the frame before.
+  if (e.follow && e.follow.path) {
+    const now = e.follow.path[cycle], back = now.cut ? 0 : cycle - along, was = back ? e.follow.path[cycle - 1] : now;
+    x += now.x + (was.x - now.x) * back; y += now.y + (was.y - now.y) * back;
+  }
   let strength = e.strength * factor;
   if (e.pulse) strength *= 1 + e.pulse.amplitude * sinDeg(360 * cycle / e.pulse.period + e.pulse.phase);
   const flicker = (px, py) => (e.flicker ? strength * (1 + e.flicker * (2 * valueNoise(seed, index, cycle, SALT.flicker, px, py) - 1)) : strength);
   return { x, y, flicker };
 }
 const active = (e, cycle) => e.burst ? cycle === e.start : cycle >= e.start && cycle < e.end;
+// How many places, about a pixel apart, a moving rate emitter is laid at over the frame that ends on `cycle`: along its
+// orbit, and along the way of the obstacle it follows (none across a cut).
+function laidSteps(e, cycle) {
+  let steps = e.orbit ? Math.max(1, Math.ceil(2 * Math.PI * Math.max(e.orbit.radius[0], e.orbit.radius[1]) / Math.abs(e.orbit.period))) : 1;
+  if (e.follow && e.follow.path && !e.follow.path[cycle].cut) {
+    const now = e.follow.path[cycle], was = e.follow.path[cycle - 1];
+    steps = Math.max(steps, Math.abs(now.x - was.x), Math.abs(now.y - was.y));
+  }
+  return steps;
+}
 // Coverage of a point by the emitter's disc or box, with a soft one-cell rim.
 function coverage(e, dx, dy) {
   if (e.radius !== null) { const d = Math.sqrt(dx * dx + dy * dy), w = e.radius + 0.5 - d; return w <= 0 ? 0 : w >= 1 ? 1 : w; }
@@ -4232,12 +4267,12 @@ function emitFrame(run, t, cycle, factors = null) {
     if (!active(e, cycle)) return null;
     const factor = factors ? factors[index] : 1;
     const emit = (along, share) => (liquid ? emitLiquid(state, e, index, cycle, seed, along, factor) : emitGas(state.g, state, e, index, cycle, seed, along, share, factor));
-    // An orbiting rate emitter is laid along the path it covered since the last frame, about a pixel apart, so a fast
-    // orbit leaves a smooth trail instead of a string of beads; its expansion is shared out along the way.
-    // A carrying emitter throws once a frame: carriers already fly, and laying it along its path would throw one per
-    // covered cell at every point.
-    if (!e.orbit || e.burst || e.carry || !t || !active(e, loop ? (cycle + frames - 1) % frames : cycle - 1)) return emit(cycle, 1);
-    const steps = Math.max(1, Math.ceil(2 * Math.PI * Math.max(e.orbit.radius[0], e.orbit.radius[1]) / Math.abs(e.orbit.period)));
+    // A rate emitter that orbits, or follows a moving obstacle, is laid along the path it covered since the last frame,
+    // about a pixel apart, so a fast one leaves a smooth trail instead of a string of beads; its expansion is shared
+    // out along the way. A carrying emitter throws once a frame: carriers already fly, and laying it along its path
+    // would throw one per covered cell at every point.
+    if (!(e.orbit || e.follow) || e.burst || e.carry || !t || !active(e, loop ? (cycle + frames - 1) % frames : cycle - 1)) return emit(cycle, 1);
+    const steps = laidSteps(e, cycle);
     for (let k = 1; k < steps; k++) emit(cycle - 1 + k / steps, 1 / steps);
     return emit(cycle, 1 / steps);
   });

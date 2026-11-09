@@ -536,6 +536,56 @@ test('emitters can fall off toward their rim, orbit on an ellipse and lay a smoo
   assert.deepEqual(trail.frames.slice(1, 4).map(pieces), [1, 1, 1]);
 });
 
+test('an emitter can follow an obstacle that moves on its keys', () => {
+  const thin = [{ field: 'density', colors: ['s'], thresholds: [0.3], dither: 0 }];
+  const source = (emitter, obstacle, effect = {}) => ({ ...gas(null), width: 48, height: 48, symbols: { ship: ['kkkk', 'kkkk'], flag: ['k'] },
+    effects: { plume: { frames: 10, buoyancy: 0, dissipation: 0.5, substeps: 1, look: thin, obstacles: [{ symbol: 'flag', x: 0, y: 0, solid: false }, obstacle], emitters: [{ radius: 0.6, rate: 1, density: 2, ...emitter }], ...effect } } });
+  // The pixels the gas is drawn on, per frame: [x0, x1, y0, y1] and how many separate pieces.
+  const drawn = recipe => recipe.frames.map(frame => {
+    const cells = new Set();
+    for (const op of (frame.ops ?? []).filter(o => o.op === 'grid')) op.rows.forEach((row, j) => [...row].forEach((char, i) => { if (char === 's') cells.add((op.y + j) * 48 + op.x + i); }));
+    const xs = [...cells].map(c => c % 48), ys = [...cells].map(c => Math.floor(c / 48)), seen = new Set();
+    let pieces = 0;
+    for (const start of cells) {
+      if (seen.has(start)) continue;
+      pieces++; seen.add(start);
+      for (const stack = [start]; stack.length;) {
+        const c = stack.pop();
+        for (const next of [c % 48 < 47 ? c + 1 : -1, c % 48 ? c - 1 : -1, c + 48, c - 48]) if (cells.has(next) && !seen.has(next)) { seen.add(next); stack.push(next); }
+      }
+    }
+    return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), pieces, n: cells.size };
+  });
+  // A ship lifts 4 pixels a frame; its flame, written for where the ship starts, leaves with it.
+  const ship = { symbol: 'ship', x: 22, y: 40, keys: [{ frame: 1, y: 8, over: 8 }] };
+  const flame = { at: [24, 43.5] };
+  const [stays, goes, named] = [undefined, 1, 'ship'].map(follow => compileFluid(source({ ...flame, ...(follow !== undefined && { follow }) }, ship)));
+  assert.ok(drawn(stays.recipe).at(-1).y0 >= 38, 'without follow the flame stays on the pad');
+  const last = drawn(goes.recipe).at(-1);
+  assert.ok(last.n > 0 && last.y1 <= 14, `with follow the flame is under the ship at y 8: ${JSON.stringify(last)}`);
+  assert.deepEqual(named.recipe, goes.recipe, 'a symbol names the same obstacle as its index');
+  assert.deepEqual(goes.warnings ?? [], []);
+  // An obstacle without keys never moves, so following it changes nothing.
+  const still = { symbol: 'ship', x: 22, y: 40 };
+  assert.deepEqual(compileFluid(source({ ...flame, follow: 1 }, still)).recipe, compileFluid(source(flame, still)).recipe);
+  // A fast obstacle's emitter is laid along its way, so the trail is one piece. A decoration moves without stirring the gas.
+  const flyer = { symbol: 'ship', x: 2, y: 10, solid: false, draw: 'under', keys: [{ frame: 1, x: 38, over: 6 }] };
+  const trail = drawn(compileFluid(source({ at: [4, 20], follow: 1 }, flyer, { dissipation: 0.25 })).recipe);
+  assert.deepEqual(trail.slice(2, 6).map(f => f.pieces), [1, 1, 1, 1], JSON.stringify(trail));
+  assert.ok(trail[5].x1 - trail[5].x0 >= 12, 'the trail is long');
+  // A key with no `over` is a cut: the emitter is at the new place, with nothing laid between.
+  const cut = drawn(compileFluid(source({ at: [4, 20], follow: 1 }, { ...flyer, keys: [{ frame: 3, x: 38 }] }, { dissipation: 0.5 })).recipe);
+  assert.ok(cut[2].x1 <= 8 && cut[3].x0 >= 36 && cut[3].pieces === 1, JSON.stringify(cut.slice(2, 4)));
+  // It follows through a loop's warm-up too, and with an orbit round the moved point.
+  assert.doesNotThrow(() => compileFluid(source({ at: [4, 20], follow: 1, orbit: { radius: 2, period: 5 }, sparks: { count: 1, colors: ['w'] } }, { ...flyer, keys: [{ frame: 1, x: 38, over: 6 }, { frame: 8, x: 2 }] }, { loop: true })));
+  const bad = (follow, message, obstacles) => assert.throws(() => { const s = source({ ...flame, follow }, ship); if (obstacles) s.effects.plume.obstacles = obstacles; if (obstacles && !obstacles.length) delete s.effects.plume.obstacles; compileFluid(s); }, error => error instanceof PixelError && error.path === 'fluid.effects.plume.emitters[0].follow' && message.test(error.message), String(follow));
+  bad(2, /integer from 0 to 1/);
+  bad(0.5, /integer/);
+  bad('boat', /no obstacle stamps the symbol "boat"; follow one of flag, ship/);
+  bad('ship', /obstacles\[0\] and obstacles\[1\] all stamp "ship"; follow one by its index/, [ship, ship]);
+  bad(0, /no obstacles to follow/, []);
+});
+
 test('loops repeat their forcing, blend their seam and wrap sparks round', () => {
   const effect = { frames: 12, loop: true, seed: 4, emitters: [{ at: [8, 13], area: [6, 2], rate: 1, density: 0.6, temperature: 1, velocity: [0, -1], noise: 0.5, flicker: 0.4, pulse: { amplitude: 0.5, period: 6 },
     sparks: { count: 0.5, life: [6, 10], colors: ['y', 'r'], angle: [260, 280], speed: 0.3 } }], look: [...smoke, { field: 'temperature', colors: ['r', 'y'], thresholds: [0.3, 0.7] }] };

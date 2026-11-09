@@ -788,6 +788,20 @@
                   "additionalProperties": false,
                   "description": "The emitter circles at (or follows an ellipse round it); a negative period turns anticlockwise. A rate emitter is laid along the path it covered since the last frame, so a fast orbit leaves a smooth trail."
                 },
+                "follow": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 31
+                    },
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  ],
+                  "description": "An obstacle this emitter stays beside: its index in obstacles, or the symbol exactly one of them stamps. Write at for where the obstacle starts (its own x and y); as the obstacle's keys move it, the emitter moves the same whole pixels, so a nozzle's flame leaves with its rocket. A rate emitter is laid along the way between frames (not across a key with no over, which is a cut). It emits whether or not the obstacle shows; end stops it."
+                },
                 "carry": {
                   "type": "object",
                   "properties": {

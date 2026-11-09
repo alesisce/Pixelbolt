@@ -64,7 +64,7 @@ const hotStone = fluidSource('hot-stone', 40, 40, { ...water, s: '#a9b3c6', S: '
   kind: 'liquid', frames: 140, duration: 60, seed: 5, walls: ['left', 'right', 'bottom'], gravity: [0, 0.3], flip: 0.4, drag: 0.04, tension: 1.5,
   heat: { air: 0.03, conduct: 0.1, contact: 0.06, latent: 0.5, vaporize: 3, dew: 0.35, condense: 0.5 },
   vapour: { expansion: 5, buoyancy: 0.6, vorticity: 0.3, cooling: 0.03,
-    look: [{ field: 'density', colors: ['s'], thresholds: [0.3], dither: 0.5 }, { field: 'density', colors: ['S'], thresholds: [0.8], dither: 0.4 }],
+    look: [{ field: 'density', colors: ['s', 'S'], thresholds: [0.08, 0.3], dither: 0 }],
     bubbles: { colors: ['e'], rise: 0.8, wobble: 0.4, lift: 0.3 } },
   fill: [{ x: 0, y: 32, w: 40, h: 8 }], emitters: [], look: [{ field: 'density', colors: ['b'], thresholds: [0.5], dither: 0 }, { field: 'depth', colors: ['w', 'c', 'b', 'B'], thresholds: [1, 2, 4, 8], dither: 0 }],
   cleanup: { strays: true },

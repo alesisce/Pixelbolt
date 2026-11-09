@@ -125,7 +125,7 @@ const lightningPond = fluidSource('lightning-pond', 64, 72, { ...arc, k: '#1d203
   vapour: {
     expansion: 8, buoyancy: 0.5, vorticity: 0.3, cooling: 0.12, dissipation: 0.02,
     look: [
-      { field: 'density', colors: ['s'], thresholds: [0.3], dither: 0.5 }, { field: 'density', colors: ['S'], thresholds: [0.8], dither: 0.4 },
+      { field: 'density', colors: ['s', 'S'], thresholds: [0.12, 0.4], dither: 0 },
       ...arcLook('v', 'b', 'c', 'W', [0.25, 0.8])
     ]
   },

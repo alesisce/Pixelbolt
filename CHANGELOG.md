@@ -8,6 +8,12 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 - A rigged `pixelforge-poses` source no longer compiles its rest pose (`rig.rest`) into a frame unless an animation plays it. Before, a rig with a four-frame idle exported a five-cell sheet, the fifth being the rest pose that no animation showed, and agents spent a detour removing it. The remaining frames, their pixels and the metadata are unchanged; frame indexes after the rest pose move down by one. To keep the rest pose as a frame, name it in an animation: `"animations": {"stand": {"frames": ["stand"]}}`. Sources without a rig keep every pose they write.
 
+### Steam and fog without the specks
+
+- The steam vent, boiling pot, ice cube, hot stone, dry ice and lightning pond presets draw their vapour in flat bands (a dim rim round a light body) instead of dithering it: thin vapour dithered into a field of loose specks. The steam vent also gets a shaded underside, a lit top and stray cleanup. Their pixels change; nothing in the engine does.
+- Dry ice has no side walls, so fog that reaches the edge of the picture flows out of it instead of climbing the wall.
+- The craft notes say to draw steam, fog and smoke in flat bands.
+
 ### Emitters that follow a moving obstacle
 
 - A fluid emitter takes `follow`: the index of an obstacle, or the symbol one obstacle stamps. The emitter keeps its place beside that obstacle as the obstacle's `keys` move it, so a rocket's flame lifts off with the rocket, where before the flame stayed on the pad. A rate emitter is laid along the way between frames, so a fast obstacle leaves one trail, not a puff a frame; sparks, carriers and liquid emitters follow as well. Sources without `follow` compile to the same pixels as before.

@@ -3886,6 +3886,10 @@ function renderFields(effect, base, width, height, drawn = null, hold = null, ro
   // A liquid against an obstacle is lit (or shaded) in full where it touches it on the side toward the light (or away
   // from it), and obstacles further off take no part in the sample: a pool in a stepped bowl gets an even rim along the
   // bowl instead of light and dark pixels by turns as the sample lands on the bowl or on liquid.
+  // A gas cut by an open canvas edge goes on past it: a sample that lands outside reads the edge instead of nothing, so
+  // smoke leaving the picture gets no bright line along the edge. A closed edge is a wall, and lights as an obstacle does.
+  const walls = effect.walls, inside = (fx, fy) => bilinearZero(density, width, height,
+    fx < 0 && !walls.left ? 0 : fx > width - 1 && !walls.right ? width - 1 : fx, fy < 0 && !walls.top ? 0 : fy > height - 1 && !walls.bottom ? height - 1 : fy);
   const lit = new Float64Array(N), shade = new Float64Array(N), [lx, ly] = effect.light;
   const sx = lx >= 0.38 ? 1 : lx <= -0.38 ? -1 : 0, sy = ly >= 0.38 ? 1 : ly <= -0.38 ? -1 : 0;
   if (effect.look.some(layer => layer.field === LIGHT || layer.field === SHADOW)) for (let j = 0; j < height; j++) for (let i = 0; i < width; i++) {
@@ -3897,8 +3901,8 @@ function renderFields(effect, base, width, height, drawn = null, hold = null, ro
       shade[c] = touches(-sx, -sy) ? 1 : Math.max(0, 1 - openSample(density, solid, width, height, x - 2 * lx - 0.5, y - 2 * ly - 0.5, here) / here);
       continue;
     }
-    lit[c] = Math.max(0, 1 - bilinearZero(density, width, height, x + 2 * lx - 0.5, y + 2 * ly - 0.5) / here);
-    shade[c] = Math.max(0, 1 - bilinearZero(density, width, height, x - 2 * lx - 0.5, y - 2 * ly - 0.5) / here);
+    lit[c] = Math.max(0, 1 - inside(x + 2 * lx - 0.5, y + 2 * ly - 0.5) / here);
+    shade[c] = Math.max(0, 1 - inside(x - 2 * lx - 0.5, y - 2 * ly - 0.5) / here);
   }
   const sources = [density, base[1], base[2], depth, lit, shade, base[3], base[4], base[5]];
   // A filled gap that no layer coloured (a look whose first colour starts above the surface level) takes the colour of

@@ -4,6 +4,10 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Fix: no bright line where smoke leaves the picture
+
+- A gas look's `light` and `shadow` layers read the smoke past an open canvas edge as empty, so smoke that reached the top or left edge got a bright line along it (a dark one along the bottom or right). They now read the edge itself there, so smoke that leaves the picture is lit only on its own rim. Against a closed edge (`walls`) it is lit as before. Of the shipped presets only the steam vent changes: one pixel on two frames, where a puff leaves the top.
+
 ### Fixes: rigid bodies thrown high, pictures on polygons, the rest frame
 
 - A body thrown past an open edge that gravity pulls it back from comes back. Before, anything more than 16 pixels over an open top was gone for good, in mid-flight: a ball thrown up at 4 pixels a frame, which rises 53, never landed. A weightless body, and one past an edge gravity does not pull it back from, still leaves.

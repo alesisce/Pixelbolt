@@ -8,6 +8,7 @@ import { compileCrystals } from '../src/crystal.js';
 import { compilePowder } from '../src/powder.js';
 import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery } from '../src/check.js';
+import { resizeRecipe, resizeWarning } from '../src/resize.js';
 import { embedBundleRecipe, sameFiles, outputSummary, withRates } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext } from '../src/presets.js';
@@ -56,9 +57,12 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
   pixelbolt compile <source.json> --draft-views boot:30,330[,hand:45] [--preview drafts.png] [--out drafts.json]
                                            Draft turned views of small grid parts to correct and paste into
                                            parts.<name>.views; --preview draws flat, today's turn, draft and drawn
-  pixelbolt compile --preset <name> --out recipe.json [--metadata meta.json]
+  pixelbolt compile --preset <name> --out recipe.json [--metadata meta.json] [--size 32x32]
                                            Compile a shipped preset (smoke-puff, campfire, fire-spells, hero...) as
-                                           its examples/ file compiles; --expand for a poses preset
+                                           its examples/ file compiles; --expand for a poses preset. --size (any
+                                           compile) puts the drawing on a canvas of that size: cut to the window
+                                           holding the most of it or given margins, never scaled; the reply says
+                                           where the window starts and what share of the drawing it cuts
   pixelbolt presets [name] [--full]        List the presets, a line each (size, frames, loop, colours, what each is
                                            for; --full adds every animation and file), or print one preset's source
   pixelbolt presets --find "water splash"  Only the presets those words match: by name, else by description
@@ -269,7 +273,7 @@ try {
     if (positional.length > 1) throw new Error('Too many positional arguments');
     const allowed = { init: ['force'], validate: ['fps'], inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'guides'], patch: ['changes', 'out', 'image', 'force'], render: ['out', 'force', 'expect', 'animation', 'list-files'], gif: ['out', 'animation', 'scale', 'background', 'force'], 'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'], sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'], preview: ['port', 'open'], mcp: ['out', 'root', 'time-limit'], schema: [], compile: ['out', 'metadata', 'preview', 'force'], autotile: ['out', 'metadata', 'preview', 'force'], scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files'], overlay: ['changes', 'selections', 'out', 'force'], import: ['out', 'name', 'atlas', 'metadata', 'force'] };
     allowed.inspect.push('motion', 'speed', 'ground', 'metadata');
-    allowed.compile.push('expand', 'preset', 'draft-views');
+    allowed.compile.push('expand', 'preset', 'draft-views', 'size');
     allowed.presets = ['full', 'find'];
     allowed.share = [];
     allowed.skill = ['project', 'dir', 'force'];
@@ -324,6 +328,8 @@ try {
       // A port you name is used or refused; the usual one gives way to any free port when something else has it.
       const server = await startStudio({ port, project, source, sharedPalette, fallback: options.port === undefined });
       if (options.open && !await openBrowser(`http://127.0.0.1:${server.address().port}/`)) console.log('No browser was opened. Copy the address above into your browser.');
+    } else if (command === 'compile' && options.size !== undefined && (options['draft-views'] !== undefined || options.expand)) {
+      throw new Error('--size goes with a compile that writes a recipe; leave out --draft-views and --expand');
     } else if (command === 'compile' && options['draft-views'] !== undefined) {
       // Drafts are printed (or saved with --out) for the author to correct and paste; the source is never touched.
       for (const key of ['metadata', 'expand']) if (options[key] !== undefined) throw new Error(`--${key} cannot be combined with --draft-views`);
@@ -360,7 +366,7 @@ try {
       console.log(JSON.stringify({ ok: true, ...await writeOutputs({ recipe: [options.out, formatJSON(recipe)] }, options.force, filesRead(positional[0])), embedded: { version, kind } }));
     } else if (['compile', 'autotile', 'overlay', 'import'].includes(command)) {
       if (!options.out || !/\.json$/i.test(options.out)) throw new Error(`${command} requires --out <new.json>`);
-      let value, metadata, input, warnings, preview;
+      let value, metadata, input, warnings, preview, resized;
       if (command === 'compile' || command === 'autotile') {
         input = await readResolved(positional[0]);
         // A preset may be a plain recipe, which compiles to itself.
@@ -368,7 +374,17 @@ try {
         const compiled = compile(input.document);
         // A plain recipe preset compiles to itself and has no metadata to save.
         if (options.metadata && compiled.metadata === undefined) throw new Error(`${options.preset} is a plain recipe preset, which has no metadata; omit --metadata`);
-        value = linkPalette(compiled.recipe, input, options.out); metadata = compiled.metadata; warnings = compiled.warnings ?? []; preview = compiled.preview;
+        metadata = compiled.metadata; warnings = compiled.warnings ?? []; preview = compiled.preview;
+        // --size: the compiled drawing on a canvas of another size (cut or given margins, never scaled).
+        if (options.size !== undefined) {
+          if (command === 'autotile') throw new Error('--size goes with compile: a tile set\'s size is its tile, set in the source');
+          const { recipe, resized: moved } = resizeRecipe(compiled.recipe, options.size, '--size'), cut = resizeWarning(moved, [recipe.width, recipe.height]);
+          compiled.recipe = recipe; resized = moved;
+          if (cut) warnings.push(cut);
+          // The metadata keeps the source's own coordinates; this says where the new canvas starts in them.
+          if (metadata) metadata = { ...metadata, resized };
+        }
+        value = linkPalette(compiled.recipe, input, options.out);
       } else if (command === 'overlay') {
         if (!options.changes) throw new Error('overlay requires --changes <edits.json>');
         if (positional[0] === '-' && options.changes === '-') throw new Error('Only one input can use stdin');
@@ -388,7 +404,7 @@ try {
       const reads = command === 'import' ? filesRead(positional[0], options.atlas) : [...inputsOf(input), ...filesRead(options.changes, options.selections)];
       const written = await writeOutputs({ recipe: [options.out, formatJSON(value)], ...(options.metadata && { metadata: [options.metadata, formatJSON(metadata)] }), ...(testMap && { preview: [options.preview, encodePNG(testMap.data, testMap.width, testMap.height)] }) }, options.force, reads);
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry.
-      console.log(JSON.stringify({ ok: true, ...written, ...(warnings && { warnings }), ...(((metadata && !options.metadata) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) }, null, 2));
+      console.log(JSON.stringify({ ok: true, ...written, ...(resized && { width: value.width, height: value.height, resized }), ...(warnings && { warnings }), ...(((metadata && !options.metadata) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) }, null, 2));
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');

@@ -40,6 +40,10 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
   pixelbolt share <file.json|->           Print a playground link for the resolved recipe
   pixelbolt gif <file.json|-> --out anim.gif [--animation name] [--scale 1-16] [--background color]
                                            Share one animation as a GIF; writes only --out
+  pixelbolt gif --preset <name> --out anim.gif [--size 32x32] [--scale 8] [--sheet frames.png]
+                                           A shipped preset straight to its GIF, in one call: --size as in compile,
+                                           --sheet also writes the frames as a contact sheet to look at (both work
+                                           with a recipe file too)
   pixelbolt gif-frames <folder> --fps 25 --out loop.gif [--loops 0] [--background color] [--prefix name_]
                                            A GIF from numbered PNG frames (name_0001.png ...); writes only --out
   pixelbolt sequence <recipe|source|scene.json> --out folder --fps 30 [--size 1080p|WxH] [--scale n]
@@ -124,7 +128,7 @@ function parseArgs(args) {
   const positional = [], options = {};
   for (let i = 0; i < args.length; i++) {
     if (['--force', '--grid', '--native', '--diagnostics', '--open', '--expand', '--embed-recipe', '--embedded', '--project', '--list-files', '--full'].includes(args[i])) options[args[i].slice(2)] = true;
-    else if (['--preset', '--find', '--out', '--dir', '--port', '--frames', '--animation', '--region', '--scale', '--background', '--changes', '--image', '--view', '--max-cells', '--metadata', '--selections', '--atlas', '--name', '--layers', '--reference', '--root', '--time-limit', '--fps', '--size', '--align', '--offset', '--loops', '--seconds', '--step', '--fit', '--prefix', '--motion', '--speed', '--ground', '--expect', '--guides', '--time', '--preview', '--draft-views'].includes(args[i])) {
+    else if (['--preset', '--sheet', '--find', '--out', '--dir', '--port', '--frames', '--animation', '--region', '--scale', '--background', '--changes', '--image', '--view', '--max-cells', '--metadata', '--selections', '--atlas', '--name', '--layers', '--reference', '--root', '--time-limit', '--fps', '--size', '--align', '--offset', '--loops', '--seconds', '--step', '--fit', '--prefix', '--motion', '--speed', '--ground', '--expect', '--guides', '--time', '--preview', '--draft-views'].includes(args[i])) {
       const key = args[i].slice(2);
       if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`--${key} requires a value`);
       options[key] = args[++i];
@@ -274,6 +278,7 @@ try {
     const allowed = { init: ['force'], validate: ['fps'], inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'guides'], patch: ['changes', 'out', 'image', 'force'], render: ['out', 'force', 'expect', 'animation', 'list-files'], gif: ['out', 'animation', 'scale', 'background', 'force'], 'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'], sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'], preview: ['port', 'open'], mcp: ['out', 'root', 'time-limit'], schema: [], compile: ['out', 'metadata', 'preview', 'force'], autotile: ['out', 'metadata', 'preview', 'force'], scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files'], overlay: ['changes', 'selections', 'out', 'force'], import: ['out', 'name', 'atlas', 'metadata', 'force'] };
     allowed.inspect.push('motion', 'speed', 'ground', 'metadata');
     allowed.compile.push('expand', 'preset', 'draft-views', 'size');
+    allowed.gif.push('preset', 'size', 'sheet');
     allowed.presets = ['full', 'find'];
     allowed.share = [];
     allowed.skill = ['project', 'dir', 'force'];
@@ -282,8 +287,8 @@ try {
     for (const key of Object.keys(options)) if (!allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}`);
     if (['schema', 'mcp'].includes(command) && positional.length) throw new Error(`${command} does not accept a filename`);
     // A preset compiles exactly as its file in examples/ does, so the compile command reads that file.
-    if (command === 'compile' && options.preset !== undefined) {
-      if (positional.length) throw new Error('compile takes a source file or --preset <name>, not both');
+    if ((command === 'compile' || command === 'gif') && options.preset !== undefined) {
+      if (positional.length) throw new Error(`${command} takes a ${command === 'gif' ? 'recipe' : 'source'} file or --preset <name>, not both`);
       const entry = await findPreset(options.preset);
       positional[0] = path.join(PRESET_FOLDER, entry.file); options.preset = entry.name;
     }
@@ -477,10 +482,22 @@ try {
       console.log(JSON.stringify({ ok: true, ...info, directory: path.resolve(options.out), files: files.length, ...removedBy(files), ...referenced(input), ...(figures && { figures: figuresSummary(figures) }) }, null, 2));
     } else if (command === 'gif') {
       if (!options.out || !/\.gif$/i.test(options.out)) throw new Error('gif requires --out <new.gif>');
-      const input = await readResolved(positional[0]), project = renderProject(input.document);
+      if (options.sheet !== undefined && !/.png$/i.test(options.sheet)) throw new Error('--sheet must name a new .png file');
+      // --preset: a shipped preset straight to its GIF, compiled as compile --preset compiles it.
+      const input = await readResolved(positional[0]), compiled = options.preset !== undefined ? compilePreset(input.document) : null, warnings = [...(compiled?.warnings ?? [])];
+      let recipe = compiled ? compiled.recipe : input.document, resized;
+      if (options.size !== undefined) {
+        ({ recipe, resized } = resizeRecipe(recipe, options.size, '--size'));
+        const cut = resizeWarning(resized, [recipe.width, recipe.height]);
+        if (cut) warnings.push(cut);
+      }
+      const project = renderProject(recipe), names = Object.keys(project.animations);
       const { data, ...gif } = animationGIF(project, options.animation, { ...(options.scale !== undefined && { scale: Number(options.scale) }), ...(options.background !== undefined && { background: options.background }) });
-      const written = await writeOutputs({ file: [options.out, data] }, options.force, inputsOf(input));
-      console.log(JSON.stringify({ ok: true, name: project.name, ...gif, ...written, warnings: project.warnings, ...referenced(input) }, null, 2));
+      // The cut is already said once: the clipping it causes is not a second problem.
+      // --sheet: the frames of that animation as a contact sheet, to look at before delivering.
+      const sheet = options.sheet !== undefined ? inspectProject(project, { animation: gif.animation }).sheet : null;
+      const written = await writeOutputs({ file: [options.out, data], ...(sheet && { sheet: [options.sheet, encodePNG(sheet.data, sheet.width, sheet.height)] }) }, options.force, inputsOf(input));
+      console.log(JSON.stringify({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(resized && { resized }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) }, null, 2));
     } else if (command === 'gif-frames') {
       if (!positional[0] || positional[0] === '-') throw new Error('gif-frames requires a folder of numbered PNG frames');
       if (!options.out || !/\.gif$/i.test(options.out)) throw new Error('gif-frames requires --out <new.gif>');

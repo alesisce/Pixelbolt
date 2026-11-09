@@ -89,6 +89,44 @@ test('every shipped preset draws something', async () => {
   }
 });
 
+test('gif --preset makes the GIF that compile then gif make, with a sheet of its frames, and writes nothing when refused', async t => {
+  const dir = await mkdtemp(path.join(path.resolve(os.tmpdir()), 'pixelbolt-presets-gif-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const at = name => path.join(dir, name);
+  // The two-step way, at the preset's own size and on another canvas.
+  await run('compile', '--preset', 'campfire', '--out', at('whole.json'));
+  await run('gif', at('whole.json'), '--scale', '2', '--out', at('whole.two.gif'));
+  await run('compile', '--preset', 'campfire', '--size', '32x32', '--out', at('cut.json'));
+  await run('gif', at('cut.json'), '--out', at('cut.two.gif'));
+  const whole = JSON.parse((await run('gif', '--preset', 'campfire', '--scale', '2', '--out', at('whole.gif'))).stdout);
+  assert.deepEqual([whole.name, whole.width, whole.height, whole.resized, whole.sheet], ['campfire', 64, 96, undefined, undefined]);
+  assert.deepEqual(await readFile(at('whole.gif')), await readFile(at('whole.two.gif')));
+  const cut = JSON.parse((await run('gif', '--preset', 'campfire', '--size', '32x32', '--out', at('cut.gif'), '--sheet', at('cut.png'))).stdout);
+  assert.deepEqual([cut.width, cut.height, cut.resized.from, cut.resized.offset, cut.sheet], [32, 32, [32, 48], [0, 16], at('cut.png')]);
+  assert.deepEqual(await readFile(at('cut.gif')), await readFile(at('cut.two.gif')));
+  assert.equal((await readFile(at('cut.png'))).subarray(1, 4).toString(), 'PNG');
+  // The cut is said once: the clipping it causes is not listed as a second problem.
+  assert.equal(cut.warnings.length, 1);
+  assert.match(cut.warnings[0], /leaves out/);
+  // A preset with several animations names them; --sheet and --size work with a recipe file too.
+  const hero = JSON.parse((await run('gif', '--preset', 'hero', '--animation', 'walk', '--out', at('walk.gif'))).stdout);
+  assert.ok(hero.animation === 'walk' && hero.animations.includes('idle'));
+  const filed = JSON.parse((await run('gif', at('whole.json'), '--size', '32x32', '--out', at('filed.gif'), '--sheet', at('filed.png'))).stdout);
+  assert.deepEqual(await readFile(at('filed.gif')), await readFile(at('cut.gif')));
+  assert.equal(filed.sheet, at('filed.png'));
+  for (const [args, message] of [
+    [[at('whole.json'), '--preset', 'campfire', '--out', at('no.gif')], /gif takes a recipe file or --preset <name>, not both/],
+    [['--preset', 'campfire', '--out', at('no.gif'), '--sheet', at('no.jpg')], /--sheet must name a new .png file/],
+    [['--preset', 'campfire', '--out', at('no.gif'), '--sheet', at('cut.png')], /Output already exists/],
+    [['--preset', 'shrine', '--size', '32x32', '--out', at('no.gif')], /reads the whole canvas/],
+    [['--preset', 'no-such-preset', '--out', at('no.gif')], /no-such-preset/]
+  ]) {
+    const refused = await run('gif', ...args).then(() => null, error => error);
+    assert.match(refused.stdout + refused.stderr, message);
+    await assert.rejects(readFile(at('no.gif')), { code: 'ENOENT' });
+  }
+});
+
 test('compile --preset writes the bytes compiling the preset\'s file writes, and refuses metadata a recipe lacks', async t => {
   const dir = await mkdtemp(path.join(path.resolve(os.tmpdir()), 'pixelbolt-presets-cli-'));
   t.after(() => rm(dir, { recursive: true, force: true }));

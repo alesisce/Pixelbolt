@@ -286,6 +286,7 @@ APNG keeps full alpha and exact timing, but many chat, forum and store pages onl
 
 ```sh
 node bin/pixelbolt.js gif hero.pixel.json --out hero.gif
+node bin/pixelbolt.js gif --preset campfire --size 32x32 --scale 8 --out campfire.gif --sheet campfire-frames.png
 node bin/pixelbolt.js gif hero.pixel.json --animation blink --scale 8 --background "#17191d" --out hero-blink.gif
 ```
 

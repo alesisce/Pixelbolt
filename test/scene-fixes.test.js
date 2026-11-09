@@ -118,8 +118,8 @@ test('lift and light keys eased with overshoot stay in range', () => {
   assert.equal(pixel(sunset, 16, 4)[0], 64);
 });
 
-test('the skill keeps the 4096-pixel still apart from scene backdrops, which are tiled', () => {
-  const skill = readFileSync(path.join(root, 'skills', 'pixel-art', 'SKILL.md'), 'utf8');
+test('the skill\'s craft notes keep the 4096-pixel still apart from scene backdrops, which are tiled', () => {
+  const skill = readFileSync(path.join(root, 'docs', 'agent-craft.md'), 'utf8');
   const still = skill.split(/(?<=\.) /).find(sentence => sentence.includes('4096'));
   assert.match(still, /on its own/);
   assert.match(skill, /backdrop[^.]*\b(repeat|tilemap)\b/);

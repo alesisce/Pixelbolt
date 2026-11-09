@@ -6,15 +6,16 @@ import { PixelError } from './core.js';
 
 export const QUICK_START = '../docs/agent-quick-start.md';
 export const HELP_TOPICS = {
-  guide: '../docs/agent-guide.md', workflow: '../docs/art-workflow.md', schema: '../schema.json', example: '../examples/forest-spirit.json',
+  guide: '../docs/agent-guide.md', workflow: '../docs/art-workflow.md', craft: '../docs/agent-craft.md', schema: '../schema.json', example: '../examples/forest-spirit.json',
   poses: '../poses.schema.json', scenes: '../scene.schema.json', autotile: '../autotile.schema.json', fx: '../fx.schema.json', fluid: '../fluid.schema.json', wave: '../wave.schema.json', crystal: '../crystal.schema.json', powder: '../powder.schema.json', bodies: '../bodies.schema.json', normals: '../normals.schema.json'
 };
 export const TOPICS = [...Object.keys(HELP_TOPICS), 'presets', 'preset'];
 // Topics whose file is JSON (the schemas and the example), which MCP returns parsed.
 export const jsonTopic = topic => HELP_TOPICS[topic]?.endsWith('.json') ?? false;
 // The guide and the workflow are long (the workflow passes 150 KB, more than many clients keep of one reply), so each
-// opens with its sections and their sizes, and `name` returns one `## ` section under the document's title.
-export const SECTIONED = new Set(['guide', 'workflow']);
+// opens with its sections and their sizes, and `name` returns one `## ` section under the document's title. The craft
+// notes are the pixel art skill's checklists, read a section at a time.
+export const SECTIONED = new Set(['guide', 'workflow', 'craft']);
 
 // How each interface asks for one section, for the line that lists them.
 const ASK = {

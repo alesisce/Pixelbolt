@@ -130,7 +130,7 @@ test('CLI help topics print what pixel_help returns, and one section of a long g
   // JSON topics print their file, and presets read as the presets command does.
   assert.equal(JSON.parse(help('fx').stdout).title, 'Pixelbolt particle effects');
   assert.equal(JSON.parse(help('preset', 'smoke-puff').stdout).name, 'smoke-puff');
-  for (const [args, message] of [[['nope'], /Unknown help topic "nope"; topics: quickstart, guide, workflow/], [['workflow', 'no such part'], /has no section "no such part"; its sections are /], [['schema', 'x'], /only guide and workflow do/], [['preset'], /needs a preset name/]]) {
+  for (const [args, message] of [[['nope'], /Unknown help topic "nope"; topics: quickstart, guide, workflow/], [['workflow', 'no such part'], /has no section "no such part"; its sections are /], [['schema', 'x'], /only guide, workflow and craft do/], [['preset'], /needs a preset name/]]) {
     const out = help(...args);
     assert.deepEqual([out.status, out.stdout], [1, ''], args.join(' '));
     assert.match(JSON.parse(out.stderr).error, message);

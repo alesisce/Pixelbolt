@@ -18,7 +18,7 @@ import { compilePowder } from '../src/powder.js';
 import { compileBodies } from '../src/bodies.js';
 import { decodePNG } from '../src/import.js';
 import { skillFiles } from '../src/skill.js';
-import { presetEntries, listPresets, briefListing, BRIEF_NOTE } from '../src/presets.js';
+import { presetEntries, listPresets, briefListing, findListing, FIND_NOTE, BRIEF_NOTE } from '../src/presets.js';
 import { decodeGIF } from './fixtures/decode-gif.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), examples = path.join(root, 'examples');
@@ -77,6 +77,14 @@ test('the presets listing covers every source and looping recipe in examples/, m
   for (const [args, message] of [[{ topic: 'guide', full: true }, /full goes with topic "presets"/], [{ topic: 'presets', full: 'true' }, /expected a boolean/]]) {
     const refused = await mcp.call('pixel_help', args);
     assert.equal(refused.isError, true, JSON.stringify(args)); assert.equal(reply(refused).path, 'full'); assert.match(reply(refused).error, message);
+  }
+  // An agent after one effect asks for it by a word and reads its line, not the listing.
+  const found = reply(await mcp.call('pixel_help', { topic: 'presets', find: 'Campfire' }));
+  assert.deepEqual(found, { guide: FIND_NOTE, presets: { campfire: brief.presets.campfire } });
+  assert.ok(Buffer.byteLength(JSON.stringify(found)) < 1024);
+  for (const [args, message] of [[{ topic: 'guide', find: 'fire' }, /find goes with topic "presets"/], [{ topic: 'presets', find: 'fire', full: true }, /without full/], [{ topic: 'presets', find: ' ' }, /expected words/], [{ topic: 'presets', find: 3 }, /expected words/]]) {
+    const refused = await mcp.call('pixel_help', args);
+    assert.equal(refused.isError, true, JSON.stringify(args)); assert.equal(reply(refused).path, 'find'); assert.match(reply(refused).error, message);
   }
   await mcp.close();
   // 72 presets were 21 KB in full; a line each, they are under half that. A cap on the whole reply and on each line
@@ -228,6 +236,21 @@ test('past its time budget the listing names the remaining presets without measu
   assert.deepEqual(brief.presets, Object.fromEntries(entries.map(entry => [entry.name, `${entry.kind}; not measured, to keep this call short`])));
   assert.equal(brief.note, note);
   assert.deepEqual(briefListing({ guide: 'g', presets: [{ name: 'broken', kind: 'fx', file: 'examples/broken.fx.json', error: 'fx.width: expected 1 to 256' }] }).presets, { broken: 'fx; fails to compile: fx.width: expected 1 to 256' });
+});
+
+test('finding presets by words lists the names that hold the most of them, else the lines that do, else every name', () => {
+  const entry = (name, about) => ({ name, kind: 'fluid', file: `examples/${name}.fluid.json`, for: about, size: '8x8', frames: 2, plays: 'loop', colors: 3, animations: { main: '2 frames, loop' } });
+  const listing = { guide: 'g', presets: [entry('campfire', 'Campfire: gas.'), entry('torch', 'Torch: a flame on a wall.'), entry('water-wheel', 'Water wheel.'), entry('splash', 'Splash: water.')] };
+  const names = query => Object.keys(findListing(listing, query).presets ?? {});
+  assert.deepEqual(names('fire'), ['campfire']);
+  assert.deepEqual(names('a water WHEEL'), ['water-wheel']);
+  assert.deepEqual(names('water'), ['water-wheel']);
+  assert.deepEqual(names('flame'), ['torch']);
+  assert.deepEqual(names('flame, gas'), ['campfire', 'torch']);
+  assert.equal(findListing(listing, 'torch').presets.torch, briefListing(listing).presets.torch);
+  assert.deepEqual(findListing(listing, 'knight'), { guide: 'No preset matches "knight": try another word, or draw it (the quick start says how). Every preset by name:', names: 'campfire, torch, water-wheel, splash' });
+  assert.equal(findListing({ ...listing, note: 'n' }, 'torch').note, 'n');
+  assert.throws(() => findListing(listing, '--'), /find: expected words/);
 });
 
 test('the standalone skill reaches the presets through the command line and its copied examples', async () => {

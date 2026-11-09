@@ -55,6 +55,15 @@ test('pixelbolt presets lists every preset and measures each however long that t
     const refused = await runScript([], path.join(copy, 'bin', 'pixelbolt.js'), ...args).then(() => null, error => error);
     assert.ok(refused, args.join(' ')); assert.match(refused.stdout + refused.stderr, message);
   }
+  // --find measures only the presets whose names match, and prints their lines.
+  const find = async words => JSON.parse((await runScript(['--import', HOUR_PER_READING], path.join(copy, 'bin', 'pixelbolt.js'), 'presets', '--find', words)).stdout);
+  const first = picked[0].name;
+  assert.equal((await find(first)).presets[first], briefListing(listing).presets[first]);
+  assert.match((await find('no-such-thing-zz')).guide, /^No preset matches/);
+  for (const args of [['presets', first, '--find', 'x'], ['presets', '--find', 'x', '--full']]) {
+    const refused = await runScript([], path.join(copy, 'bin', 'pixelbolt.js'), ...args).then(() => null, error => error);
+    assert.ok(refused, args.join(' ')); assert.match(refused.stdout + refused.stderr, /--find goes on its own/);
+  }
   assert.match(guide, /pixel_compile \{"preset": "<name>"\}/);
   assert.deepEqual(presets.map(entry => [entry.name, entry.file]), copied.map(entry => [entry.name, `examples/${entry.file}`]));
   for (const entry of picked) assert.ok(presets.some(listed => listed.file === `examples/${entry.file}`), entry.name);

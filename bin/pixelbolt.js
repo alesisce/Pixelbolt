@@ -10,7 +10,7 @@ import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery } from '../src/check.js';
 import { embedBundleRecipe, sameFiles, outputSummary, withRates } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
-import { PRESET_FOLDER, listPresets, briefListing, findPreset, loadPreset, compilePreset, presetNext } from '../src/presets.js';
+import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext } from '../src/presets.js';
 import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, compileEffects, compileFluid, compileNormals, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 // A reader that stops early (`| head -1`) closes the pipe: stop quietly, as other command-line tools do. Commands print
@@ -24,9 +24,9 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
 
   pixelbolt init [file.json]               Create an editable example
   pixelbolt help [topic] [section]         One reference, as MCP pixel_help gives it: quickstart, guide, workflow,
-                                           schema, example, presets, preset <name>, poses, scenes, autotile, fx,
-                                           fluid, wave, crystal, powder, bodies or normals. guide and workflow list their
-                                           sections first; name one to print only it: help workflow "Particle effects"
+                                           craft, schema, example, presets, preset <name>, poses, scenes, autotile, fx,
+                                           fluid, wave, crystal, powder, bodies or normals. guide, workflow and craft list
+                                           their sections first; name one to print only it: help craft "Characters"
   pixelbolt validate <file.json|-> [--fps 30]
                                            Validate and describe a project; --fps lists durations off that video frame grid
   pixelbolt inspect <file.json|-> [--out sheet.png] [--grid]
@@ -61,6 +61,7 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            its examples/ file compiles; --expand for a poses preset
   pixelbolt presets [name] [--full]        List the presets, a line each (size, frames, loop, colours, what each is
                                            for; --full adds every animation and file), or print one preset's source
+  pixelbolt presets --find "water splash"  Only the presets those words match: by name, else by description
   pixelbolt autotile <template.json> --out recipe.json [--metadata masks.json] [--preview map.png]
                                            Build a 47-tile blob or 16-tile cardinal set from template rows or a
                                            terrain description; --preview draws every tile over a test map
@@ -119,7 +120,7 @@ function parseArgs(args) {
   const positional = [], options = {};
   for (let i = 0; i < args.length; i++) {
     if (['--force', '--grid', '--native', '--diagnostics', '--open', '--expand', '--embed-recipe', '--embedded', '--project', '--list-files', '--full'].includes(args[i])) options[args[i].slice(2)] = true;
-    else if (['--preset', '--out', '--dir', '--port', '--frames', '--animation', '--region', '--scale', '--background', '--changes', '--image', '--view', '--max-cells', '--metadata', '--selections', '--atlas', '--name', '--layers', '--reference', '--root', '--time-limit', '--fps', '--size', '--align', '--offset', '--loops', '--seconds', '--step', '--fit', '--prefix', '--motion', '--speed', '--ground', '--expect', '--guides', '--time', '--preview', '--draft-views'].includes(args[i])) {
+    else if (['--preset', '--find', '--out', '--dir', '--port', '--frames', '--animation', '--region', '--scale', '--background', '--changes', '--image', '--view', '--max-cells', '--metadata', '--selections', '--atlas', '--name', '--layers', '--reference', '--root', '--time-limit', '--fps', '--size', '--align', '--offset', '--loops', '--seconds', '--step', '--fit', '--prefix', '--motion', '--speed', '--ground', '--expect', '--guides', '--time', '--preview', '--draft-views'].includes(args[i])) {
       const key = args[i].slice(2);
       if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`--${key} requires a value`);
       options[key] = args[++i];
@@ -227,7 +228,13 @@ const referenced = input => input.resolution.files.length ? { resolved: input.re
 const engineVersion = async () => JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 // `presets [name] [--full]`, and `help presets [--full]` or `help preset <name>`: every preset, a line each or in full,
 // or one preset's source. A shell has no time limit, so every preset is measured.
-async function presetsText(name, full = false) {
+async function presetsText(name, full = false, find) {
+  if (find !== undefined) {
+    if (name !== undefined || full) throw new Error('--find goes on its own: pixelbolt presets --find "water splash" lists the presets those words match');
+    // Names are known without compiling anything, so a name match measures only the presets it lists.
+    const named = new Set(namedLike(await presetEntries(), presetWords(find, '--find')).map(entry => entry.name));
+    return JSON.stringify(findListing(await listPresets({ budget: Infinity, ...(named.size && { only: entry => named.has(entry.name) }) }), find, '--find'), null, 2);
+  }
   if (name === undefined) { const listing = await listPresets({ budget: Infinity }); return JSON.stringify(full ? listing : briefListing(listing), null, 2); }
   if (full) throw new Error('--full goes with the listing (pixelbolt presets --full); pixelbolt presets <name> prints one preset\'s source');
   const entry = await findPreset(name, 'name'), { source, inlined } = await loadPreset(entry);
@@ -249,7 +256,7 @@ async function helpTopic([topic, ...words]) {
     if (topic === 'presets' && name !== undefined && !full) throw new Error('help presets lists every preset (--full adds every animation and file); for one preset\'s source run pixelbolt help preset <name>');
     return `${await presetsText(full ? undefined : name, full)}\n`;
   }
-  if (name !== undefined && !SECTIONED.has(topic)) throw new Error(`help ${topic} has no sections; only guide and workflow do`);
+  if (name !== undefined && !SECTIONED.has(topic)) throw new Error(`help ${topic} has no sections; only guide, workflow and craft do`);
   return helpText(topic, name, 'cli');
 }
 try {
@@ -263,7 +270,7 @@ try {
     const allowed = { init: ['force'], validate: ['fps'], inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'guides'], patch: ['changes', 'out', 'image', 'force'], render: ['out', 'force', 'expect', 'animation', 'list-files'], gif: ['out', 'animation', 'scale', 'background', 'force'], 'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'], sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'], preview: ['port', 'open'], mcp: ['out', 'root', 'time-limit'], schema: [], compile: ['out', 'metadata', 'preview', 'force'], autotile: ['out', 'metadata', 'preview', 'force'], scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files'], overlay: ['changes', 'selections', 'out', 'force'], import: ['out', 'name', 'atlas', 'metadata', 'force'] };
     allowed.inspect.push('motion', 'speed', 'ground', 'metadata');
     allowed.compile.push('expand', 'preset', 'draft-views');
-    allowed.presets = ['full'];
+    allowed.presets = ['full', 'find'];
     allowed.share = [];
     allowed.skill = ['project', 'dir', 'force'];
     allowed.render.push('embed-recipe'); allowed.scene.push('embed-recipe'); allowed.import.push('embedded');
@@ -287,7 +294,7 @@ try {
       console.log(JSON.stringify({ ok: true, file }));
     } else if (command === 'schema') process.stdout.write(await readFile(new URL('../schema.json', import.meta.url), 'utf8'));
     else if (command === 'presets') {
-      console.log(await presetsText(positional[0], options.full === true));
+      console.log(await presetsText(positional[0], options.full === true, options.find));
     } else if (command === 'skill') {
       if (positional[0] !== 'install') throw new Error('Usage: pixelbolt skill install [--project | --dir <skills folder>] [--force]');
       const { installSkill } = await import('../src/skill.js');

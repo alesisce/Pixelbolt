@@ -73,7 +73,7 @@ test('the installed skill reaches every guide, schema and example it names, and 
   const files = await skillFiles(version);
   // Every example ships with it: the skill tells the agent to begin from one.
   const examples = (await listed(path.join(root, 'examples'))).filter(file => file.endsWith('.json')).map(file => `examples/${file}`);
-  for (const file of [...examples, 'schema.json', 'docs/agent-guide.md', 'docs/art-workflow.md', 'docs/agent-quick-start.md', 'LICENSE']) assert.ok(files.has(file), `${file} is installed`);
+  for (const file of [...examples, 'schema.json', 'docs/agent-guide.md', 'docs/art-workflow.md', 'docs/agent-craft.md', 'docs/agent-quick-start.md', 'LICENSE']) assert.ok(files.has(file), `${file} is installed`);
   for (const [file, data] of files) {
     if (!file.endsWith('.md')) continue;
     const text = data.toString('utf8'), from = path.posix.dirname(file);

@@ -235,13 +235,14 @@ async function openCache(directory) {
 // The cache only ever saves time: when it can't be read or written, the listing measures as it would without it.
 // `concurrency: 1` uses the original in-thread path. Larger values are capped at eight and leave one available core
 // free (at least one); cached facts and a lone miss never need a pool.
-export async function listPresets({ budget = 20000, cache, concurrency = Math.max(1, Math.min(8, availableParallelism() - 1)) } = {}) {
+// `only`, a test of an entry, lists just those presets (a shell's `presets --find`, which has no cache to fill).
+export async function listPresets({ budget = 20000, cache, only, concurrency = Math.max(1, Math.min(8, availableParallelism() - 1)) } = {}) {
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new RangeError('concurrency must be a positive integer');
   concurrency = Math.min(concurrency, Math.max(1, Math.min(8, availableParallelism() - 1)));
   const presets = [], store = cache === undefined ? undefined : await openCache(cache).catch(() => undefined), kept = {};
   // Start the budget after setup (hashing the engine, reading the folder); source resolution and worker startup
   // count toward it, and only work already in flight can finish past it.
-  const entries = await presetEntries(), start = Date.now();
+  const entries = only ? (await presetEntries()).filter(only) : await presetEntries(), start = Date.now();
   // Resolve and check the cache before making a pool: a warm listing, or a single miss, needs no workers. The
   // explicit serial path keeps its original load/measure order. A non-positive budget uses that path too: at zero,
   // its inclusive clock check can admit the first preset before loading it. Pool preparation would lose that turn.
@@ -263,7 +264,7 @@ export async function listPresets({ budget = 20000, cache, concurrency = Math.ma
     }
   }
   // Only presets in this listing are kept, so the file never grows past the folder.
-  if (store && (added || Object.keys(kept).length !== Object.keys(store.cached).length)) await store.save(kept).catch(() => {});
+  if (store && !only && (added || Object.keys(kept).length !== Object.keys(store.cached).length)) await store.save(kept).catch(() => {});
   return { guide: PRESET_GUIDE, presets, ...(unmeasured && { note: `${unmeasured} presets were listed without measuring them, to keep this call short; pixel_compile one by name to see it.` }) };
 }
 
@@ -279,6 +280,27 @@ export function briefListing({ guide, presets, note }) {
     return `${entry.kind}, ${entry.size}, ${entry.frames} frames${count > 1 ? ` in ${count} animations` : ''}, ${entry.plays}, ${entry.colors} colours. ${entry.for}`;
   };
   return { guide: `${guide} ${BRIEF_NOTE}`, presets: Object.fromEntries(presets.map(entry => [entry.name, line(entry)])), ...(note && { note }) };
+}
+
+// The presets a few words mean, so an agent reads the lines it can use and not the whole listing (8 KB for 73 presets,
+// read for one line): the presets whose names hold the most of the words, or, when no name holds any, those whose
+// lines do. Words are matched as written, ignoring case.
+export const FIND_NOTE = 'Matched by name, or by description when no name matches. Each preset reads: kind, size, frames, loop or one-shot, colours, then what it is for. Compile one as it ships with pixel_compile {"preset": "<name>"} (pixelbolt compile --preset <name> --out <new.json>); pixel_help {"topic": "preset", "name": "<name>"} (pixelbolt presets <name>) returns its source to edit and compile. For fewer frames, compile, then keep evenly spaced frames with one patch (the quick start has the call); never lower frames in the source.';
+export function presetWords(query, where = 'find') {
+  const words = typeof query === 'string' ? query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean) : [];
+  if (!words.length) throw new PixelError(where, 'expected words to look for, such as "fire" or "water splash"');
+  return words;
+}
+const closest = (items, text, words) => {
+  const scored = items.map(item => ({ item, score: words.filter(word => text(item).toLowerCase().includes(word)).length })), top = Math.max(0, ...scored.map(entry => entry.score));
+  return top ? scored.filter(entry => entry.score === top).map(entry => entry.item) : [];
+};
+export const namedLike = (entries, words) => closest(entries, entry => entry.name, words);
+export function findListing(listing, query, where = 'find') {
+  const words = presetWords(query, where), lines = briefListing(listing).presets;
+  const named = namedLike(listing.presets, words), found = named.length ? named : closest(listing.presets, entry => lines[entry.name], words);
+  if (!found.length) return { guide: `No preset matches "${query}": try another word, or draw it (the quick start says how). Every preset by name:`, names: listing.presets.map(entry => entry.name).join(', ') };
+  return { guide: FIND_NOTE, presets: Object.fromEntries(found.map(entry => [entry.name, lines[entry.name]])), ...(listing.note && { note: listing.note }) };
 }
 
 async function parallelSummaries(entries, store, deadline, concurrency) {

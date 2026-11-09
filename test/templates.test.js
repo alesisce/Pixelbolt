@@ -273,7 +273,7 @@ test('a sword held with a relative angle turns with the forearm through the atta
   assert.match(rotate, /relative `angle`/);
   assert.match(rotate, /examples\/hero-sword\.poses\.json/);
   assert.doesNotMatch(rotate, /so a held item stays in the hand/);
-  const characters = (await text('skills/pixel-art/SKILL.md')).split('\n## ').find(section => section.startsWith('Characters'));
+  const characters = (await text('docs/agent-craft.md')).split('\n## ').find(section => section.startsWith('Characters'));
   assert.match(characters, /relative `angle`.*hero-sword\.poses\.json/s);
   assert.match((await text('docs/agent-quick-start.md')).split('\n').find(line => line.includes('examples/hero.poses.json')), /hero-sword\.poses\.json`: the prop's relative `angle` turns it with the arm/);
 });

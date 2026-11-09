@@ -75,7 +75,8 @@ From a shell, the same commands are `node bin/pixelbolt.js validate | inspect | 
 
 `pixel_help` with `topic` (from a shell, `pixelbolt help <topic> [section]`):
 
-- `presets`: the ready-made effects, characters and loops to compile instead of drawing; `preset` with a `name` returns one preset's source.
+- `presets`: the ready-made effects, characters and loops to compile instead of drawing (with `find`, such as `"fire"`, only the matching ones); `preset` with a `name` returns one preset's source.
+- `craft`: short checklists (characters, effects, tiles and scenes, delivery, limits); `name` picks one.
 - `guide`: the full authoring reference (every field and operation, inspection, patch paths, exports).
 - `workflow`: the art workflow for advanced formats: poses and motion review, scenes and tilemaps, particle effects, fluids, lighting and normal passes, PNG import. With `name` (such as `"Fluid effects"`), one section.
 - `schema`: the recipe's complete JSON Schema.

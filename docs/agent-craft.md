@@ -1,0 +1,86 @@
+# Pixelbolt craft notes
+
+Short checklists by subject, for the pixel art skill: read the one section the job needs. From a shell, `pixelbolt help craft "<section>"` prints one; over MCP, `pixel_help` with `topic: "craft"` and `name`. Each `help workflow "<section>"` named below is read the same way, with `topic: "workflow"`.
+
+## Rules
+
+- The recipe is the source. Keep the JSON file. Don't paint PNGs with another library and don't hand-edit exported files.
+- An existing asset is edited through its recipe with patches. Rebuild from scratch only when the user asks.
+- Change one pixel with a patch, not by rewriting the recipe. A patch preview lists the frames it changes and, for small edits, each pixel; read that list.
+- Save edits to a new recipe (`--out`) rather than over the old one, and render each attempt into a new folder. Use `--force` only to replace output you made, and only when the user wants it replaced.
+- Validation and the render `check` show that a file matches the format and what was asked, not that the art works. Look at the inspect image at native size and enlarged, and at the animation in playback, before you say it is done.
+- Stay in the palette: no gradients, anti-aliasing or subpixel positions. Export at scale 1 for game assets unless the user asks for enlarged pixels baked into the files.
+- If the request leaves size or use open, pick a sensible default (for example 16 to 64 px for a game sprite, 4 to 16 colours), state it in one line, and build. Ask only when the answer changes the build.
+- Words on screen (titles, captions, counters) use the `text` operation, not hand-drawn letters.
+- Errors name their path, such as `project.frames[1].ops[0].rows[2]`, and come back together. Fix them all, then validate again. Don't guess field names; check `help guide` or `schema`.
+- GIF keeps exact colours but drops partial transparency and rounds timing to 10 ms. Report the `notes` it returns.
+- If asked to match a named game's quality, make original art and report what the visible evidence supports.
+
+## Drawing by hand
+
+- Before drawing, note the size, display scale, three silhouette landmarks, palette roles, light direction, outline treatment, the projection (side, 3/4 top-down, isometric 2:1 or top-down, one for the whole set) and the action. Keep the brief beside the recipe, not inside it.
+- Work in this order: silhouette, then large connected colour shapes, then material accents, then key poses, then timing, then the scene. Don't make variants until the resting silhouette and one action read well.
+- Noise and extra glow can't fix weak structure. Redraw the part.
+- Shade along palette ramps (`ramps` with the `shade` operation) so light stays in the palette. Use dither for transitions and bands, not whole surfaces.
+- Share a palette with `"palette": { "$ref": "palette.json" }`, cycle water or lights with frame or layer `palette` overrides, and use `remap` for colour variants and hit flashes.
+- Water, fire and crystal need different behaviour, not the same shape recoloured.
+- Inspect with `--native --diagnostics`, then `--view silhouette` and `--view grayscale`; use `--animation <name> --view onion` for the poses either side of each frame, and read exact pixels with `--grid --region x,y,w,h` before you change them. Diagnostics are advice: intentional eyes, sparks and holds are fine. Record what reads and what fails, so the next change is deliberate.
+- To set one pixel, a patch file holds `[{"paint": "frames[blink]", "value": [{"x": 9, "y": 7, "color": "k"}]}]`; `"transparent"` erases. On paint, grid, move, recolor or cleanup changes, add `"scope": "frame"` when other frames must keep their pixels.
+- Judge motion in playback. A still sheet can't show weight. `pixelbolt preview <recipe> --open` plays it for the user in a local studio, on this machine only.
+
+## Characters
+
+- For figures in motion, use a `pixelforge-poses` source: bones for limbs, masses for bodies, grid parts for heads, hands and props. Start from `examples/hero.poses.json`. A part without `attach` stands at the pose `origin` plus its `at`, an offset rather than a canvas position.
+- Compile with `pixelbolt compile <source.poses.json> --out <recipe.json> --metadata <new.json>` so review tools keep the pose data.
+- Assign rig roles and use the idle, walk, run, jump, attack and hurt templates as starting points. Set speed, stride, lift and frame timing for the body, and fix compile warnings (a pose off the canvas, a foot out of reach) before adding detail.
+- A prop held in a hand needs a relative `angle`, such as `-45`, so it turns with the arm. `rotate` is absolute: with it, or with neither, the blade keeps one angle through the attack. `examples/hero-sword.poses.json` is the hero holding a sword.
+- In a side view, draw far limbs a ramp step darker (not the darkest step, which merges with the outline) and give paired legs the same rest angles. Near limbs stay in front for the whole cycle.
+- For a four-legged animal, start from `examples/fox.poses.json`: `rig.fore` and `rig.hind` take the place of `legs`, and the templates `walk`, `trot` and `run` set the gait.
+- Start any turned part (boots, hands, held weapons, a tilted head) from a draft, never from nothing: `pixelbolt compile <source.poses.json> --draft-views boot:15,345 --preview <drafts.png>` (MCP `pixel_compile` with `draftViews`) prints the turned rows to correct by eye and paste into `parts.<name>.views`.
+- Review the silhouette, the difference between key poses, planted contacts, the loop join and the gait with `pixelbolt inspect <source> --motion run --speed 48`, and `--view parts` to name the part behind a stray pixel. Don't infer contact quality from a still sheet. More in `help workflow "Authored poses, attachments and cues"`.
+
+## Effects
+
+- **Presets.** For a bigger file, enlarge the GIF (`--scale`, MCP `gif.scale`); a different canvas size also means moving the effect's obstacles and emitters, which use absolute coordinates. Deliver the preset as shipped first, then offer to tune it. Don't build a new recipe around it.
+- **Fluids** (`examples/*.fluid.json`): tune `viscosity` and `yield`; the `look` decides the colours. Check one-shots at 1× and that they end empty, and keep the loop boundary quiet (`help workflow "Fluid effects"`).
+- **Particle effects and spells** (`pixelforge-fx`): fix every edge warning the compile gives unless the effect lists that side in `edges`. Make gas and mist see-through, not outlined. For an effect round a character, give what belongs behind it a `depth`, so the game draws `<effect>-back`, the character, then `<effect>-front`. In a spell file, change only what was asked (`help workflow "Particle effects"`).
+- **Waves and crystals:** keep a portal's rims in an overlay and use particle rings for one-shot impacts; draw a crystal's rock as the source's underlay and its front lip as the overlay (`help workflow "Crystal growth"`).
+- **Falling sand:** `base: "sandbox"` gives the starter materials, and `pieces: "tumble"` lets loose pieces topple (`help workflow "Falling sand"`).
+
+## Tiles and scenes
+
+- **Tiles:** review `--view tile` (a 3×3 repeat) and set `wrap` on frames whose drawing crosses the edges. An autotile `terrain` compiles into 47 blob, 16 cardinal or 16 corner (dual-grid) tiles with `pixelbolt autotile <template.json> --out <recipe.json>`; check its test map and seam warnings. A side-view set takes `slopes`, and tilemap legends take `rules`, `weights` and variants (`help workflow "Autotile templates"`).
+- **Scenes:** put things that stand on the ground in one layer or group with `sort: "ground"`, and give scene placements `anchor: "frame"`. Use `lift` for jumps, `shadow: true` with a light or a `sun`, `haze` for far planes, `box` and `layout: "iso"` for isometric art, and a `camera` with `parallax` to pan. Inspect a 2–4× `region` where different things meet, and check who covers whom with `pixel_scene` `view: "depth"` and `guides` (`help workflow "Depth and perspective"`, `help workflow "Scene and tile review"`).
+- **Lit scenes:** derive normal passes with a `pixelforge-normals` source rather than painting them, light the result from both sides, and tell the user Godot and Unity read +Y up (`help workflow "Aligned material passes"`).
+
+## Exports and delivery
+
+- Put in `--expect` (MCP `expect`) what the user asked for, such as `{"width":24,"height":24,"frames":6}`, or frame counts per animation, `{"idle": 4, "walk": 8}`. Read the `check`, fix every mismatch it lists, and render again.
+- To post or embed: `pixelbolt gif <recipe> --out <new.gif>`. Options include `--animation <name>`, `--scale <1-16>` (use it only to enlarge for posting) and `--background "#17191d"`, which blends transparent pixels onto a colour.
+- For a video editor: `pixelbolt validate <recipe> --fps 30` checks the timing, then `pixelbolt sequence <recipe> --out <new folder> --fps 30 --size 1080p` writes numbered PNG frames. Pass on the ffmpeg command it prints; Pixelbolt does not encode video.
+- From a folder of numbered PNG frames: `pixelbolt gif-frames <folder> --fps 25 --out <new.gif>`.
+- An existing PNG becomes a recipe with `pixelbolt import <image.png> --out <recipe.json>` (any PNG colour type up to 8 bits per channel, indexed and greyscale included; not 16-bit, interlaced or animated).
+- Give the user the paths to the source recipe, the sprite sheet, the atlas JSON, the preview and any GIF, plus a short note on how to use them: Godot 4 (the `.tres` beside the sheet is an `AnimatedSprite2D`'s SpriteFrames, and an autotile set's `.tileset.tres` is a `TileMapLayer`'s TileSet with a terrain to paint), Tiled (the `.tsx` has a terrain set for the Terrain Brush), Phaser (atlas JSON), CSS, or the bundled `player.js` (`docs/game-integration.md`). Mention any `notes` and limits that apply.
+
+## MCP
+
+| Task | CLI | MCP tool |
+|---|---|---|
+| Learn the format | `help quickstart`, `help guide`, `schema` | `pixel_help` (topics such as `guide`, `workflow`, `craft`, `schema`, `example`, `presets`) |
+| Check a recipe | `validate` | `pixel_validate` |
+| See the frames | `inspect` | `pixel_inspect` |
+| Edit | `patch` | `pixel_patch` |
+| Export | `render`, `gif`, `sequence` | `pixel_render`, with the `gif` or `sequence` option |
+| Compile a source or preset | `compile` | `pixel_compile` |
+| Scenes | `scene` | `pixel_scene` |
+| Import a PNG | `import` | `pixel_import` |
+
+Send the recipe once as `project`. Each reply includes a `revision` id; send `revision` in later calls instead of the full recipe. Revisions are saved in the output directory the server was started with (`--out`), so keep using the same absolute path. When the user named files, add `saveAs` to `pixel_render`, such as `{ "sheet": "assets/hero.png", "gif": "assets/hero.gif" }`. Pass `listFiles: true` to see every exported file. Requests are capped at 16 MiB: send a large recipe once and reuse its revision.
+
+## Limits
+
+- Imports: PNG of any colour type up to 8 bits per channel (RGB, RGBA, greyscale, indexed); 16-bit, interlaced and animated PNGs are refused. GIF import, Aseprite files and automatic colour reduction are not supported.
+- Animation frames are at most 256 × 256 pixels, a project has at most 256 frames, and its frames together hold at most 4,194,304 pixels. A backdrop or mural rendered on its own, outside a scene, may be a single-frame still up to 4096 pixels a side; draw it at one pixel per screen pixel, with no enlarged stamps or text. Scene assets are at most 256 pixels a side, so tile a panning backdrop with `repeat` or a `tilemap`.
+- Pixelbolt does not encode video. `sequence` writes the PNG frames and the command.
+- Not for vector or SVG logos, photographs, painted images or pictures from an image model. Say so and suggest a tool for that work.
+- Advisory diagnostics and review notes are prompts to look, not commands to delete pixels. Keep the original assets and any failed comparisons.

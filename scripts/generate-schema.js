@@ -682,9 +682,70 @@ const wave = {
       }, ['frames', 'sources', 'look']) }
   }, ['format', 'version', 'name', 'width', 'height', 'palette', 'effects'])
 };
+const bodyRef = { type: 'string', description: 'A named body, or "world" for a fixed point in the canvas.' };
+const joint = object({
+  name: { ...id, description: 'Optional name, reported when the joint breaks.' },
+  a: bodyRef, b: bodyRef,
+  type: { enum: ['distance', 'rope', 'spring', 'hinge', 'weld'], description: 'distance: both ends stay a length apart. rope: only pulls when farther than max. spring: a soft distance. hinge: the two anchors stay together and the bodies turn freely (with an optional angle limit). weld: the anchors and the relative angle stay fixed.' },
+  anchorA: { ...pairOf(num(-4096, 4096)), description: 'Point on a in its own pixels. With a: "world", the world point.' },
+  anchorB: { ...pairOf(num(-4096, 4096)), description: 'Point on b in its own pixels. With b: "world", the world point.' },
+  length: num(0, 4096, 'Distance (or spring rest length) in pixels; default the distance the bodies start at. A rope uses it as max when max is omitted.'),
+  max: num(0, 4096, 'Rope: longest length it allows. Default length, or the distance the bodies start at.'),
+  stiffness: num(0.05, 1, 'How hard a spring pulls (0.4) or the fraction of the position error a distance joint corrects; default 1.'),
+  damping: num(0, 1, 'Velocity lost along the joint. Default 0.'),
+  break: num(0.01, 1000000, 'Impulse that breaks it; omitted, it never breaks.'),
+  collide: { type: 'boolean', description: 'Whether the two bodies still collide. Default false, so a ragdoll\'s neighbours or a rope\'s links pass through each other.' },
+  limit: { ...pairOf(num(-3600, 3600)), description: 'Hinge or weld: the allowed relative angle [smallest, largest] in degrees.' }
+}, ['a', 'b', 'type']);
+const ropeAnchor = object({
+  body: { type: 'string', description: 'A named body to hang this end from.' },
+  point: { ...pairOf(num(-4096, 4096)), description: 'Point on the body, in its own pixels. Default [0, 0].' },
+  at: { ...pairOf(num(-4096, 4096)), description: 'Or a fixed world point [x, y].' }
+});
+const rope = object({
+  from: ropeAnchor, to: ropeAnchor,
+  links: int(2, 64, 'Cargo links in the chain. Default 12.'),
+  slack: num(0, 2, 'Extra length as a share of the span, so it sags. Default 0.15.'),
+  thickness: num(1, 4, 'Pixels. Default 1.'),
+  look: { enum: ['rope', 'chain'], description: 'rope: a line. chain: a link at each body. Default rope.' },
+  fill: bodyKey, outline: { ...bodyKey, description: 'Optional outline key for a rope line.' },
+  density: num(0.05, 10, 'Mass per square pixel. Default 0.6.'),
+  break: num(0.01, 1000000, 'Joint impulse that splits the rope; omitted, it never breaks.'),
+  draw: { enum: ['under', 'over'], description: 'Under the bodies (default) or over them.' }
+}, ['from', 'to', 'fill']);
+const clothPin = object({
+  at: { ...pairOf(int(0, 127)), description: 'Particle [column, row].' },
+  to: { type: 'string', description: 'A named body: the pin follows its local point.' },
+  point: { ...pairOf(num(-4096, 4096)), description: 'Point on that body. Default [0, 0].' },
+  keys: { ...array({ ...array(num(-4096, 4096), 3), minItems: 3, maxItems: 3 }, 64), minItems: 1, description: 'Or [frame, x, y] keys the pin follows, held before the first and after the last.' },
+  x: num(-4096, 4096), y: num(-4096, 4096)
+}, ['at']);
+const cloth = object({
+  name: { ...id, description: 'Optional name.' },
+  at: { ...pairOf(num(-4096, 4096)), description: 'Top-left particle [x, y] in canvas pixels.' },
+  size: { ...pairOf(int(2, 128)), description: '[columns, rows] of particles; cells are drawn between them.' },
+  cell: int(1, 8, 'Pixels between particles. Default 1.'),
+  mask: { ...array({ type: 'string', minLength: 2, maxLength: 128 }, 128), minItems: 2, description: 'Rows of # for cloth and . for a hole; the size must match.' },
+  fill: { oneOf: [bodyKey, { ...array(bodyKey, 8), minItems: 1 }], description: 'A key, or 1–8 keys from dark to light used as the fold ramp.' },
+  outline: { ...bodyKey, description: 'Key for the cloth\'s silhouette.' },
+  back: { ...bodyKey, description: 'Key for the back of a folded cell; default the ramp follows its light.' },
+  light: { ...pairOf(num(-1, 1)), description: 'Direction toward the light for fold shading. Default [0, -1].' },
+  wind: { ...pairOf(num(-4, 4)), description: 'Wind acceleration [x, y] in pixels a frame². Default [0, 0].' },
+  gust: num(0, 1, 'How much the wind varies in time and across the cloth, flapping across it. Default 0.'),
+  stiffness: num(0.05, 1, 'Structural constraint strength. Default 0.6.'),
+  slack: num(0, 1, 'Extra rest length as a share, so the cloth can billow. Default 0.05.'),
+  shear: num(0, 1, 'Diagonal constraint strength relative to structural. Default 0.4.'),
+  bend: num(0, 1, 'Skip-one constraint strength relative to structural. Default 0.2.'),
+  damping: num(0, 0.8, 'Velocity lost each substep. Default 0.02.'),
+  tear: num(1.01, 16, 'A constraint breaks when stretched past this multiple of its rest length; omitted, the cloth never tears.'),
+  seed: int(0, 2147483647, 'Orders gust variation. Default 0.'),
+  draw: { enum: ['under', 'over'], description: 'Over the bodies (default) or under them.' },
+  collide: { type: 'boolean', description: 'Collide with obstacles and bodies. Default true.' },
+  pins: { ...array(clothPin, 64), description: 'Hold particles to fixed points, keyed points or named bodies.' }
+}, ['at', 'size', 'fill']);
 const bodies = {
-  $schema: schema.$schema, title: 'Pixelbolt rigid bodies',
-  description: 'Rigid bodies (balls, boxes, convex polygons, fixed or spinning hoops) with gravity, walls and pixel obstacles, simulated and baked into editable palette grids: they bounce, slide, roll, stack, knock each other about and come to rest. Units: pixels and frames. One-shot; deterministic.',
+  $schema: schema.$schema, title: 'Pixelbolt articulated bodies',
+  description: 'Rigid bodies (balls, boxes, convex polygons, fixed or spinning hoops) with gravity, walls, pixel obstacles, joints, ropes and cloth, simulated and baked into editable palette grids: they bounce, slide, roll, stack, knock each other about, swing, sag, drape and tear, then come to rest. Units: pixels and frames. One-shot; deterministic.',
   ...object({ format: { const: 'pixelforge-bodies' }, version: { const: 1 }, name: id,
     width: int(4, 256), height: int(4, 256), subpixels: subpixels('the obstacles and background'), palette: schema.properties.palette, anchor: point, sheet: schema.properties.sheet,
     symbols: { type: 'object', propertyNames: { ...id, maxLength: 60 }, additionalProperties: { ...array({ type: 'string', minLength: 1, maxLength: 256 }, 256), minItems: 1 }, description: 'Named rows of palette keys for obstacles and body sprites; dot or space is empty.' },
@@ -705,13 +766,16 @@ const bodies = {
           rows: { ...array({ type: 'string', minLength: 1 }, 4096), description: 'One character a cell: a team\'s colour, or . for a cell no one owns.' },
           split: { enum: ['columns', 'rows'], description: 'Instead of rows: the board shared out among the teams in order, side by side or one above the next.' },
           bounce: num(0, 1, 'Default 1.'), friction: num(0, 2, 'Default 0.') }, ['teams']), description: 'Cells owned by teams, drawn in their colours: a team\'s body passes its own and bounces off the others\', claiming each it hits (the metadata counts them each frame).' },
-        bodies: { ...array(body, 64), minItems: 1, description: 'At most 256 bodies with their copies.' },
-        most: int(1, 4096, 'The most bodies split powers and breaks may make in all, copies and pieces included: at least the bodies listed. Default 256, or room for every body with breaks to break into all its pieces (up to 4096).'),
+        bodies: { ...array(body, 64), minItems: 0, description: 'At most 256 bodies with their copies. May be empty when the effect has cloths or ropes.' },
+        joints: { ...array(joint, 256), description: 'Constraints between named bodies, or between a body and the world.' },
+        ropes: { ...array(rope, 16), description: 'Chains of link bodies drawn as a rope or a chain, with optional break thresholds.' },
+        cloths: { ...array(cloth, 16), description: 'Cloth grids pinned to points, keys or bodies, with wind, collisions and tearing.' },
+        most: int(0, 4096, 'The most bodies split powers and breaks may make in all, copies and pieces included: at least the bodies listed. Default 256, or room for every body with breaks to break into all its pieces (up to 4096).'),
         pickups: { ...array(object({ at: { ...pairOf(num(0, 4096)), description: 'Centre [x, y] in canvas pixels.' }, size: int(1, 64, 'Pixels a side; default the symbol\'s size, or 5.'), from: int(0, 18000, 'First frame it waits. Default 0.'), until: int(1, 18001), symbol: { type: 'string', description: 'Drawn while it waits.' }, color: { ...bodyKey, description: 'Or a plain square.' }, ...powerFields }, ['at', 'power']), 64), description: 'Power-ups the first body to reach one takes.' },
         events: { ...array(object({ frame: int(1, 18000), body: { type: 'string', description: 'A named body.' }, ...powerFields }, ['frame', 'body', 'power']), 64), description: 'Powers given to a named body at the end of a frame.' },
         strikes: { ...array(object({ by: { type: 'string', description: 'A named body: what it pushes (a hit, or a push along) takes the power.' }, rest: int(1, 18000, 'Frames before a body can take this strike again. Default 10.'), from: int(0, 18000, 'First frame it works. Default 0.'), until: int(1, 18001), cut: num(0.1, 8, 'Cut instead of push: the body passes through the free bodies it touches, and what it strikes leaves behind it at this speed (pixels a frame), the pieces of a split fanned about that way, so they lie in its wake.'), ...powerFields }, ['by', 'power']), 16), description: 'Powers given at the end of a frame to every body a named body struck in it: with split, a blade that multiplies each ball it touches (raise most for a crowd).' },
         hud: { ...array({ oneOf: [object({ text: { type: 'string', maxLength: 80, description: '{team} cells, {team%} share, {leader}, {news} (the last power\'s label, for news frames), {frame}.' }, at: point2, color: bodyKey, align: { enum: ['left', 'center', 'right'] }, back: { ...bodyKey, description: 'A box behind the text.' }, pad: int(0, 16), scale: int(1, 8, 'Default 1; at most 16 divided by subpixels.'), news: int(1, 18000, 'Frames {news} shows. Default 45.'), from: int(0, 18000), until: int(1, 18001) }, ['text', 'at', 'color']), object({ bar: object({ at: { ...pairOf(int(0, 4096)), description: 'Top-left [x, y] in canvas pixels.' }, size: { ...pairOf(int(1, 512)), description: '[width, height] in canvas pixels; at most 512 divided by subpixels.' } }, ['at', 'size']), empty: bodyKey, from: int(0, 18000), until: int(1, 18001) }, ['bar'])] }, 16), description: 'With a territory: the score drawn over everything, every frame.' }
-      }, ['frames', 'bodies']) }
+      }, ['frames']) }
   }, ['format', 'version', 'name', 'width', 'height', 'palette', 'effects'])
 };
 const crystalKey = { type: 'string', minLength: 1, maxLength: 1, description: 'A one-character palette key.' };

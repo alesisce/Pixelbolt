@@ -137,14 +137,23 @@ function about(entry, source, animations) {
     return titled ? `${titleLine({ ...titled, note: titled.note.replace(/:\s*/g, ', ') })} Falling sand${of}.` : `A falling-sand sandbox${of}.`;
   }
   if (entry.kind === 'bodies') {
-    // What falls, bounces and topples: each shape counted with its copies on a ring or a grid.
-    const counts = new Map();
-    for (const effect of Object.values(source.effects ?? {})) for (const body of effect?.bodies ?? []) {
+    // What falls, bounces and topples: each shape counted with its copies on a ring or a grid, then its joints, ropes and cloth.
+    const counts = new Map(), effects = Object.values(source.effects ?? {});
+    for (const effect of effects) for (const body of effect?.bodies ?? []) {
       const copies = body?.ring?.count ?? (Array.isArray(body?.grid?.count) ? body.grid.count[0] * body.grid.count[1] : 1);
       counts.set(body?.shape, (counts.get(body?.shape) ?? 0) + copies);
     }
     const parts = [...counts].filter(([shape]) => typeof shape === 'string').map(([shape, n]) => `${n} ${shape}${n === 1 ? '' : shape === 'box' ? 'es' : 's'}`);
-    return `Simulated rigid bodies: ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? 'none'}.`;
+    const joints = effects.reduce((n, effect) => n + (effect?.joints?.length ?? 0), 0);
+    const ropes = effects.reduce((n, effect) => n + (effect?.ropes?.length ?? 0), 0);
+    const cloths = effects.reduce((n, effect) => n + (effect?.cloths?.length ?? 0), 0);
+    const extras = [joints && `${joints} joint${joints === 1 ? '' : 's'}`, ropes && `${ropes} rope${ropes === 1 ? '' : 's'}`, cloths && `${cloths} cloth${cloths === 1 ? '' : 's'}`].filter(Boolean);
+    if (!parts.length && cloths) {
+      const others = extras.filter(extra => !/ cloth/.test(extra));
+      return `Cloth${cloths === 1 ? '' : ` (${cloths})`}${others.length ? ` with ${others.join(' and ')}` : ''}.`;
+    }
+    const bodies = `Simulated rigid bodies: ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? 'none'}.`;
+    return extras.length ? `${bodies.slice(0, -1)}, with ${extras.join(' and ')}.` : bodies;
   }
   return `A hand-drawn recipe: ${listNames(names)}.`;
 }

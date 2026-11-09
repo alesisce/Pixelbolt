@@ -167,4 +167,99 @@ const crateSmash = bodiesSource('crate-smash', 112, 64,
   },
   { crate, pane, ground: ['g'.repeat(112), 's'.repeat(112), 'g'.repeat(112)] });
 
-export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory, 'blade-bloom': bladeBloom, 'crate-smash': crateSmash };
+// Rope bridge: two posts hold a chain of planks by ropes; a crate drops onto the span. The planks are joined end to end,
+// the ropes sag, and a heavy enough load tears one free.
+const bridgeCrate = ['kkkkkkkk', 'khhhhhhk', 'khbbbbhk', 'khbbbbhk', 'khbbbbhk', 'khbbbbhk', 'khhhhhhk', 'kkkkkkkk'];
+const bridgePlank = (name, x, y) => ({ name, shape: 'box', size: [12, 3], at: [x, y], density: 0.7, friction: 0.7, bounce: 0.1, fill: 'b', outline: 'k' });
+const bridgeJoints = Array.from({ length: 6 }, (_, k) => ({ type: 'distance', a: `plank-${k}`, b: `plank-${k + 1}`, anchorA: [6, 0], anchorB: [-6, 0], length: 2, collide: false }));
+const ropeBridge = bodiesSource('rope-bridge', 128, 64,
+  { k: '#14141c', s: '#4a5068', f: '#6f7896', b: '#8a5a36', h: '#c98c4f', r: '#d7b56d', R: '#8a5a36', g: '#2ee68f', w: '#e8f4ff' },
+  {
+    frames: 140, duration: 40, gravity: [0, 0.18], walls: ['left', 'right'],
+    obstacles: [{ symbol: 'ground', x: 0, y: 60 }],
+    bodies: [
+      { name: 'post-L', shape: 'box', size: [4, 42], at: [12, 39], fixed: true, fill: 's', outline: 'k' },
+      { name: 'post-R', shape: 'box', size: [4, 42], at: [116, 39], fixed: true, fill: 's', outline: 'k' },
+      ...[28, 40, 52, 64, 76, 88, 100].map((x, k) => bridgePlank(`plank-${k}`, x, 34)),
+      { name: 'crate', shape: 'box', size: [8, 8], at: [64, 8], density: 2.2, friction: 0.5, bounce: 0.1, symbol: 'crate' }
+    ],
+    joints: bridgeJoints,
+    ropes: [
+      { from: { body: 'post-L', point: [2, -18] }, to: { body: 'plank-0', point: [-6, 0] }, links: 8, slack: 0.05, fill: 'r', outline: 'k', break: 40 },
+      { from: { body: 'post-R', point: [-2, -18] }, to: { body: 'plank-6', point: [6, 0] }, links: 8, slack: 0.05, fill: 'r', outline: 'k', break: 40 }
+    ]
+  },
+  { ground: shapeRows(128, 4, (x, y) => (y ? 's' : 'f')), crate: bridgeCrate });
+
+// Wrecking ball: a heavy ball on a rope swings from a fixed pivot into a pyramid of crates.
+const wreckingBall = bodiesSource('wrecking-ball', 96, 64,
+  { k: '#14141c', s: '#4a5068', f: '#6f7896', m: '#b4bdd8', b: '#8a5a36', h: '#c98c4f', r: '#d7b56d', w: '#e8f4ff' },
+  {
+    frames: 160, duration: 40, gravity: [0, 0.16], walls: ['left', 'right'],
+    obstacles: [{ symbol: 'ground', x: 0, y: 60 }],
+    bodies: [
+      { name: 'pivot', shape: 'circle', radius: 2, at: [48, 8], fixed: true, fill: 's', outline: 'k' },
+      { name: 'ball', shape: 'circle', radius: 6, at: [76, 30], density: 9, bounce: 0.3, friction: 0.5, fill: 'm', outline: 'k' },
+      { shape: 'box', size: [8, 8], at: [24, 56], grid: { count: [3, 1], step: [8, 0] }, asleep: true, density: 0.6, friction: 0.6, bounce: 0.1, symbol: 'crate' },
+      { shape: 'box', size: [8, 8], at: [28, 48], grid: { count: [2, 1], step: [8, 0] }, asleep: true, density: 0.6, friction: 0.6, bounce: 0.1, symbol: 'crate' },
+      { shape: 'box', size: [8, 8], at: [32, 40], asleep: true, density: 0.6, friction: 0.6, bounce: 0.1, symbol: 'crate' }
+    ],
+    ropes: [{ from: { body: 'pivot', point: [0, 0] }, to: { body: 'ball', point: [0, 0] }, links: 22, slack: 0, thickness: 1, fill: 'r', outline: 'k' }]
+  },
+  { ground: shapeRows(96, 4, (x, y) => (y ? 's' : 'f')), crate: bridgeCrate });
+
+// Ragdoll: six blocks hinged into a figure, dropped into a heap.
+const ragdoll = bodiesSource('ragdoll', 96, 64,
+  { k: '#14141c', s: '#4a5068', f: '#6f7896', w: '#e8e4d8', c: '#3a6ea5', d: '#27496d', r: '#c0392b' },
+  {
+    frames: 180, duration: 40, gravity: [0, 0.18], walls: ['left', 'right'],
+    obstacles: [{ symbol: 'ground', x: 0, y: 60 }],
+    bodies: [
+      { name: 'head', shape: 'box', size: [8, 8], at: [44, 14], density: 1, fill: 'w', outline: 'k' },
+      { name: 'torso', shape: 'box', size: [10, 14], at: [44, 26], density: 1.4, fill: 'c', outline: 'k' },
+      { name: 'arm-L', shape: 'box', size: [4, 12], at: [35, 24], density: 0.8, fill: 'd', outline: 'k' },
+      { name: 'arm-R', shape: 'box', size: [4, 12], at: [53, 24], density: 0.8, fill: 'd', outline: 'k' },
+      { name: 'leg-L', shape: 'box', size: [5, 14], at: [40, 43], density: 1, fill: 'r', outline: 'k' },
+      { name: 'leg-R', shape: 'box', size: [5, 14], at: [48, 43], density: 1, fill: 'r', outline: 'k' }
+    ],
+    joints: [
+      { type: 'hinge', a: 'head', b: 'torso', anchorA: [0, 4], anchorB: [0, -7] },
+      { type: 'hinge', a: 'torso', b: 'arm-L', anchorA: [-5, -3], anchorB: [0, -6] },
+      { type: 'hinge', a: 'torso', b: 'arm-R', anchorA: [5, -3], anchorB: [0, -6] },
+      { type: 'hinge', a: 'torso', b: 'leg-L', anchorA: [-2, 7], anchorB: [0, -7] },
+      { type: 'hinge', a: 'torso', b: 'leg-R', anchorA: [2, 7], anchorB: [0, -7] }
+    ]
+  },
+  { ground: shapeRows(96, 4, (x, y) => (y ? 's' : 'f')) });
+
+// Flag: a cloth pinned to a pole, rippling in the wind.
+const flag = bodiesSource('flag', 64, 48,
+  { k: '#14141c', s: '#4a5068', b: '#1a2433', r: '#b23a48', R: '#e06c5a', w: '#f2e6c9', g: '#d7b56d' },
+  {
+    frames: 60, duration: 40, gravity: [0, 0.08], background: 'b',
+    bodies: [{ name: 'pole', shape: 'box', size: [2, 38], at: [16, 24], fixed: true, fill: 'g', outline: 'k' }],
+    cloths: [{
+      name: 'flag', at: [18, 10], size: [25, 15], cell: 1, fill: ['r', 'R', 'w'], outline: 'k', light: [0, -1],
+      wind: [1.4, 0], gust: 0.9, slack: 0.2, stiffness: 0.5, shear: 0.5, bend: 0.2, tear: 4,
+      pins: [{ at: [0, 0], x: 17, y: 10 }, { at: [0, 14], x: 17, y: 24 }]
+    }]
+  });
+
+// Cape: a walking figure (a fixed body) and a cloth pinned to its back, trailing as it moves.
+const heroRows = ['...kkkk...', '..kwwwwk..', '..kwwwwk..', '...kkkk...', '..kcccck..', '.kcccccck.', '.kcccccck.', '.kcccccck.', '..kcccck..', '..kcccck..', '...kkkk...', '..kk..kk..', '..kk..kk..', '..kk..kk..', '..kk..kk..', '..kk..kk..', '..kk..kk..', '..kk..kk..'];
+const cape = bodiesSource('cape', 80, 64,
+  { k: '#14141c', s: '#4a5068', f: '#6f7896', w: '#e8d8c0', c: '#3a6ea5', d: '#27496d', r: '#c0392b', R: '#e06c5a', g: '#7fb3d5' },
+  {
+    frames: 120, duration: 40, gravity: [0, 0.08], walls: ['left', 'right'],
+    obstacles: [{ symbol: 'ground', x: 0, y: 60 }],
+    bodies: [{ name: 'hero', shape: 'box', size: [10, 18], at: [42, 47], fixed: true, velocity: [0.16, 0], symbol: 'hero' }],
+    cloths: [{
+      name: 'cape', at: [22, 37], size: [15, 18], cell: 1, fill: ['d', 'c', 'g'], outline: 'k', light: [0, -1],
+      wind: [0.5, 0], gust: 0.6, slack: 0.12, stiffness: 0.5, shear: 0.45, bend: 0.2, tear: 4, draw: 'under',
+      pins: [{ at: [14, 0], to: 'hero', point: [-5, -8] }, { at: [14, 17], to: 'hero', point: [-5, 8] }]
+    }]
+  },
+  { ground: shapeRows(80, 4, (x, y) => (y ? 's' : 'f')), hero: heroRows });
+
+export const bodiesPresets = { 'ring-escape': ringEscape, 'bouncing-pixel': bouncingPixel, 'spinning-hoop': spinningHoop, 'crate-topple': finer(crateTopple, 2), territory, 'blade-bloom': bladeBloom, 'crate-smash': crateSmash,
+  'rope-bridge': ropeBridge, 'wrecking-ball': wreckingBall, ragdoll, flag, cape };

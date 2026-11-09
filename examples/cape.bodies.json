@@ -1,0 +1,89 @@
+{
+  "format": "pixelforge-bodies",
+  "version": 1,
+  "name": "cape",
+  "width": 80,
+  "height": 64,
+  "palette": {
+    "k": "#14141c",
+    "s": "#4a5068",
+    "f": "#6f7896",
+    "w": "#e8d8c0",
+    "c": "#3a6ea5",
+    "d": "#27496d",
+    "r": "#c0392b",
+    "R": "#e06c5a",
+    "g": "#7fb3d5"
+  },
+  "symbols": {
+    "ground": [
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+      "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+      "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+    ],
+    "hero": [
+      "...kkkk...",
+      "..kwwwwk..",
+      "..kwwwwk..",
+      "...kkkk...",
+      "..kcccck..",
+      ".kcccccck.",
+      ".kcccccck.",
+      ".kcccccck.",
+      "..kcccck..",
+      "..kcccck..",
+      "...kkkk...",
+      "..kk..kk..",
+      "..kk..kk..",
+      "..kk..kk..",
+      "..kk..kk..",
+      "..kk..kk..",
+      "..kk..kk..",
+      "..kk..kk.."
+    ]
+  },
+  "effects": {
+    "cape": {
+      "frames": 120,
+      "duration": 40,
+      "gravity": [0, 0.08],
+      "walls": ["left", "right"],
+      "obstacles": [{ "symbol": "ground", "x": 0, "y": 60 }],
+      "bodies": [
+        {
+          "name": "hero",
+          "shape": "box",
+          "size": [10, 18],
+          "at": [42, 47],
+          "fixed": true,
+          "velocity": [0.16, 0],
+          "symbol": "hero"
+        }
+      ],
+      "cloths": [
+        {
+          "name": "cape",
+          "at": [22, 37],
+          "size": [15, 18],
+          "cell": 1,
+          "fill": ["d", "c", "g"],
+          "outline": "k",
+          "light": [0, -1],
+          "wind": [0.5, 0],
+          "gust": 0.6,
+          "slack": 0.12,
+          "stiffness": 0.5,
+          "shear": 0.45,
+          "bend": 0.2,
+          "tear": 4,
+          "draw": "under",
+          "pins": [
+            { "at": [14, 0], "to": "hero", "point": [-5, -8] },
+            { "at": [14, 17], "to": "hero", "point": [-5, 8] }
+          ]
+        }
+      ]
+    }
+  }
+}

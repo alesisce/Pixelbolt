@@ -15,6 +15,7 @@ export { compileCrystals, CRYSTAL_HABITS } from './crystal.js';
 export { compilePowder, createLivePowder, POWDER_STATES, POWDER_INPUTS, SANDBOX, sandboxSource, packStrokes, unpackStrokes, replayStrokes, applyStroke } from './powder.js';
 export { compileFluid, createLiveFluid, FLUID_KINDS, FLUID_FIELDS, FLUID_WALLS } from './fluid.js';
 export { compileBodies, bodiesFrames, MATCH_FRAMES, BODY_SHAPES, BODY_WALLS } from './bodies.js';
+export { JOINT_TYPES } from './constraints.js';
 export { DITHER_PATTERNS, EASINGS, ease, ditherThreshold, cleanupIds, rotateRows, draftTurn, ruleVariants, rewriteIds } from './craft.js';
 export { BLOB_MASKS, CARDINAL_MASKS, neighbourMask, quadrantPieces, templatePiece } from './autotile.js';
 export { readTerrain, drawTerrain, terrainTemplate, templateSeams, seamWarnings, testMapRecipe, testMapScale, TEST_MAP } from './terrain.js';

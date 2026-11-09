@@ -608,7 +608,8 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
     diagnostics: { type: 'boolean', description: 'Advisory evidence: duplicate and empty frames, stray pixels, palette, loop joins, timing, cleanup counts.' },
     maxCells: { type: 'integer', minimum: 1, maximum: 256, description: 'Show at most this many evenly spaced cells; step and offset pick positions instead.' },
     step: { type: 'integer', minimum: 1, maximum: 1024, description: 'Keep every step-th cell from offset; step 2 shows the A frames of an A/B strobe.' },
-    offset: { type: 'integer', minimum: 0, maximum: 2047 }
+    offset: { type: 'integer', minimum: 0, maximum: 2047 },
+    every: { type: 'integer', minimum: 10, maximum: 60000, description: 'With animation: a cell per this many ms of playback, so holds and pacing show.' }
   } };
   const patchInput = { ...projectInput, properties: {
     ...source,

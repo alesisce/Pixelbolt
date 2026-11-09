@@ -26,6 +26,9 @@ Short checklists by subject, for the pixel art skill: read the one section the j
 - Water, fire and crystal need different behaviour, not the same shape recoloured.
 - Inspect with `--native --diagnostics`, then `--view silhouette` and `--view grayscale`; use `--animation <name> --view onion` for the poses either side of each frame, and read exact pixels with `--grid --region x,y,w,h` before you change them. Diagnostics are advice: intentional eyes, sparks and holds are fine. Record what reads and what fails, so the next change is deliberate.
 - To set one pixel, a patch file holds `[{"paint": "frames[blink]", "value": [{"x": 9, "y": 7, "color": "k"}]}]`; `"transparent"` erases. On paint, grid, move, recolor or cleanup changes, add `"scope": "frame"` when other frames must keep their pixels.
+- A hold needs no second drawing: `{"name": "shut-2", "from": "shut", "duration": 900}` is the same frame held for its own time.
+- A mirrored part keeps its light on one side with `flipX` and a `remap` that swaps its light and dark keys: `{"op": "stamp", "symbol": "leg", "x": 20, "y": 9, "flipX": true, "remap": {"L": "D", "D": "L"}}`.
+- Read pacing with `inspect <recipe> --animation <name> --every 100`: one cell per 100 ms of playback, so holds and quick steps show as they play, and `timing.entries` count the pixels each step changes (0 is a hold).
 - Judge motion in playback. A still sheet can't show weight. `pixelbolt preview <recipe> --open` plays it for the user in a local studio, on this machine only.
 
 ## Characters

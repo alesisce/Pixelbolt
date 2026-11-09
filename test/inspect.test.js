@@ -53,6 +53,22 @@ test('automatic layout picks the largest readable scale and enforces size limits
   assert.throws(() => inspectProject(big, { grid: true }), /inspect\.grid: grids are limited/);
   assert.equal(inspectProject(big, { grid: true, region: { x: 0, y: 0, w: 128, h: 128 } }).grids[0].rows.length, 128);
 });
+test('every draws a cell per stretch of playback and timing counts the pixels each step changes', () => {
+  const frames = [{ name: 'rest', duration: 300, ops: [{ op: 'pixel', color: '#000' }] }, { name: 'flash', duration: 100, ops: [{ op: 'rect', w: 2, h: 2, color: '#fff' }] }, { name: 'held', from: 'rest', duration: 200 }];
+  const project = renderProject({ version: 1, name: 'pace', width: 2, height: 2, frames, animations: { blink: { frames: ['rest', 'flash', 'held'] }, once: { frames: ['rest', 'flash'], loop: false } } });
+  const view = inspectProject(project, { animation: 'blink', every: 100 });
+  assert.deepEqual(view.cells.map(cell => cell.frame), ['rest', 'rest', 'rest', 'flash', 'held', 'held']);
+  assert.deepEqual([view.sampling.every, view.sampling.positions, view.sampling.method], [100, [0, 0, 0, 1, 2, 2], 'one cell per 100 ms of playback; a frame fills a cell for each 100 ms it is held']);
+  // The loop's first step is compared with its last frame; rest and held are one drawing.
+  assert.deepEqual(view.timing.entries.map(entry => entry.changed), [0, 4, 4]);
+  assert.deepEqual(inspectProject(project, { animation: 'once', diagnostics: true }).timing.entries.map(entry => entry.changed), [undefined, 4]);
+  // A step that is not a whole number of cells still ends the sheet inside the animation.
+  assert.deepEqual(inspectProject(project, { animation: 'blink', every: 250 }).sampling.positions, [0, 0, 2]);
+  assert.throws(() => inspectProject(project, { every: 100 }), /needs an animation/);
+  assert.throws(() => inspectProject(project, { animation: 'blink', every: 100, step: 2 }), /omit step and offset/);
+  const long = renderProject({ version: 1, name: 'long', width: 1, height: 1, frames: [{ name: 'a', duration: 60000 }, { name: 'b', duration: 60000 }] });
+  assert.throws(() => inspectProject(long, { animation: 'default', every: 100 }), /1200 cells; at most 256, so choose every 469 or more/);
+});
 test('a stride picks the A or B frames of a strobe that evenly spaced samples would mix', () => {
   // 192 frames alternate between an A pose and a B pose, as a strobe does.
   const frames = Array.from({ length: 192 }, (_, i) => ({ name: `${i % 2 ? 'b' : 'a'}-${i}`, ops: [{ op: 'pixel', color: i % 2 ? '#fff' : '#000' }] }));

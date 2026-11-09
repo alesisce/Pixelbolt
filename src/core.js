@@ -1412,7 +1412,7 @@ export function pictureSheet({ palette = {}, headings = [], rows: lines, scale =
 }
 
 export function inspectProject(project, options = {}) {
-  object(options, 'inspect', ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'view', 'native', 'diagnostics', 'maxCells', 'step', 'offset', 'guides']);
+  object(options, 'inspect', ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'view', 'native', 'diagnostics', 'maxCells', 'step', 'offset', 'every', 'guides']);
   const { width, height, frames } = project;
   if (options.frames !== undefined && options.animation !== undefined) fail('inspect', 'choose frames or animation, not both');
   let cells = frames.map((_, i) => i);
@@ -1459,6 +1459,17 @@ export function inspectProject(project, options = {}) {
   const step = options.step === undefined ? 1 : integer(options.step, 'inspect.step', 1, 1024);
   const offset = options.offset === undefined ? 0 : integer(options.offset, 'inspect.offset', 0, 2047);
   if (offset >= total) fail('inspect.offset', `the selection has ${total} position${total === 1 ? '' : 's'}, numbered from 0; choose an offset below ${total}`);
+  // A cell per `every` milliseconds of playback: a frame fills as many cells as it is held, so the sheet reads as
+  // the animation plays, holds and fast steps included.
+  const every = options.every === undefined ? undefined : integer(options.every, 'inspect.every', 10, 60000);
+  if (every !== undefined) {
+    if (options.animation === undefined) fail('inspect.every', 'every samples playback, so it needs an animation');
+    if (options.step !== undefined || options.offset !== undefined) fail('inspect.every', 'every picks positions by time; omit step and offset');
+    const a = project.animations[options.animation], count = Math.ceil(a.duration / every);
+    if (count > 256) fail('inspect.every', `${a.duration} ms at one cell per ${every} ms is ${count} cells; at most 256, so choose every ${Math.ceil(a.duration / 256)} or more`);
+    positions = Array.from({ length: count }, (_, n) => animationPosition(project, a, n * every));
+    methods.push(`one cell per ${every} ms of playback`);
+  }
   if (step > 1 || offset > 0) {
     positions = positions.filter(i => i >= offset && (i - offset) % step === 0);
     const suffix = step % 100 >= 11 && step % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][step % 10] ?? 'th';
@@ -1498,12 +1509,15 @@ export function inspectProject(project, options = {}) {
       if (native) view.nativeSheet = drawPartLegend(view.nativeSheet, parts.legend);
     }
   }
-  if (total !== cells.length) view.sampling = { total, shown: cells.length, omitted: total - cells.length, positions, ...((step > 1 || offset > 0) && { step, offset }), method: `${methods.join(', then ')}; durations are original, not playback timing` };
+  if (every !== undefined) view.sampling = { total, shown: cells.length, every, positions, method: `${methods.join(', then ')}; a frame fills a cell for each ${every} ms it is held` };
+  else if (total !== cells.length) view.sampling = { total, shown: cells.length, omitted: total - cells.length, positions, ...((step > 1 || offset > 0) && { step, offset }), method: `${methods.join(', then ')}; durations are original, not playback timing` };
   if (diagnostics) view.diagnostics = analyzeProject(project);
-  if (options.animation !== undefined && (diagnostics || mode === 'onion')) {
+  if (options.animation !== undefined && (diagnostics || mode === 'onion' || every !== undefined)) {
     const a = project.animations[options.animation], fps = animationFps(project, options.animation); let start = 0;
     view.timing = { animation: options.animation, duration: a.duration, loop: a.loop, ...(fps !== undefined && { fps }), entries: a.frames.map((index, position) => {
       const entry = { position, frame: frames[index].name, start, duration: frames[index].duration, ...animationNeighbors(a, position) };
+      // How many pixels this step changes: 0 is a hold, and a step far above its neighbours is a jump.
+      if (entry.previous !== null) entry.changed = changedPixels(frames[a.frames[entry.previous]].data, frames[index].data);
       start += entry.duration; return entry;
     }) };
   }
@@ -1523,6 +1537,11 @@ export function inspectProject(project, options = {}) {
   return view;
 }
 
+function changedPixels(a, b) {
+  let count = 0;
+  for (let at = 0; at < a.length; at += 4) if (a[at] !== b[at] || a[at + 1] !== b[at + 1] || a[at + 2] !== b[at + 2] || a[at + 3] !== b[at + 3]) count++;
+  return count;
+}
 // Positions refer to the expanded sequence, never the recipe's frame order.
 export function animationPosition(project, animation, time) {
   let cursor = animation.loop ? ((time % animation.duration) + animation.duration) % animation.duration : Math.max(0, Math.min(time, animation.duration));

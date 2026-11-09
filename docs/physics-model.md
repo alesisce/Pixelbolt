@@ -186,3 +186,51 @@ A bodies effect may lay a **territory** over its canvas: a grid of square cells,
 - **Breaking.** A body that `breaks` is knocked, at a point where something meets it, by the speed they meet at (with their bounce), shared out by how easily each side gives there (its inverse mass plus its inverse inertia times the square of its arm about the contact's normal): a body hitting a wall takes the whole of it, a pebble hitting a heavy vase almost none. The knock is read from the speed before the solve, not from the impulses the solve passes along a chain of touching bodies, which broke every crate in a row at once. At the end of a substep, each body knocked at or past its `at` breaks: seeded sites in its shape, drawn toward the point it was hit, cut it into the cells of their Voronoi diagram (each cell its outline cut by the bisectors with the other sites, so convex), and each pixel of its picture goes with the cell of the nearest site; a site whose cell would hold fewer pixels than the picture's share (at least 4) is dropped and the cut made again. Each piece is a convex polygon body placed on the half pixel nearest its centroid (the middle of its padded picture), with the body's density, its area and moment, the velocity its part had (velocity plus the turning about the body's centre) and a kick of `speed` away from the point hit; the body is gone, what rested on it wakes, and pieces never break again. The `break` power does the same at the end of a frame, about a pickup's place or the body's centre.
 - **Pivots.** A fixed body turns about its centre, or about a pivot of its own (a blade about its hilt): the pivot moves at the body's velocity, the body's centre goes round it, and the body's faces move at the pivot's velocity plus the turn about it, so what the blade sweeps is pushed as hard at its tip as a free body would be.
 - **Long matches.** A match may run past a recipe's 256 frames when it is written as numbered video frames: the same world stepped frame after frame, each frame drawn and kept as an image, never a recipe.
+
+## 14. Joints, ropes and cloth
+
+`pixelforge-bodies` also carries articulated constraints and cloth. They are optional fields of the same effect and use the same units, gravity, obstacles, walls, body records and one-shot compile. An effect may have bodies, cloths or both; `bodies` may be empty when `cloths` or `ropes` are present.
+
+### 14a. Joints
+
+A joint connects two named bodies, or a body and a fixed world point. Anchors are local to their body (`anchorA`, `anchorB`); a world end's anchor is the world point. Types:
+
+- **distance**: both ends stay `length` apart. The solver corrects both stretching and compression.
+- **rope**: only pulls. It is free while the distance is at most `max`, and becomes a distance constraint past it.
+- **spring**: a soft distance constraint with `stiffness` and `damping`.
+- **hinge**: the two anchors stay together; the bodies turn freely around them, optionally within a relative `limit` in degrees.
+- **weld**: the anchors and the relative angle stay fixed.
+
+Each substep, joints are solved by sequential impulses interleaved with contacts, then positions are corrected and the joints are checked for `break`. The impulse that breaks a joint is the larger of its linear and angular accumulators; the metadata reports each break with its frame and impulse. `collide: false` (the default) leaves the connected pair out of contact solving, so a ragdoll's neighbours or a rope's links pass through each other; `collide: true` keeps them touching.
+
+A sleeping body joined to a moving one wakes one link per substep. A joint whose end is asleep or fixed is solved as if that end had infinite mass, so a hanging chain settles and sleeps as a whole.
+
+### 14b. Ropes
+
+A rope is sugar for a chain of small hidden bodies between two anchors. It is read after the bodies and the user joints, and its links add to the effect's body count. `links` controls the chain, `slack` its extra length, `thickness` its drawn width and the link radius, `density` its mass, `break` the impulse that splits it. Adjacent links never collide. A rope draws each intact joint as a line (`look: "rope"`) or a link at each body (`look: "chain"`), under or over the bodies. Ropes may hang from two bodies, one body and the world, or two world points.
+
+### 14c. Cloth
+
+A cloth is a grid of particles at `at`, `size` particles across and down, `cell` pixels apart. A `mask` may cut holes (a cape, a banner, a net). Its constraints are structural (right and down), shear (both diagonals), and bend (two cells apart), each scaled by `stiffness`, `shear` and `bend`; `slack` lengthens every rest length, so a flag can billow instead of staying taut. `seed` orders gust variation.
+
+Pins hold particles to a fixed point, to `[frame, x, y]` keys (held before the first and after the last key), or to a named body's local point. Pinned particles move with their body and never react on it.
+
+Wind is an acceleration in pixels a frame². `gust` varies it in time and across the cloth and adds a perpendicular flap, so a flag pinned along one edge ripples rather than only stretching. Gravity is the effect's. A particle that enters an obstacle or a body is pushed out; a particle struck by a moving body takes half its velocity. Cloth pushes bodies in no direction in this version: the bodies push the cloth. `tear` breaks a constraint stretched past that multiple of its rest length; the cloth then hangs from the remaining constraints and the metadata counts the tears.
+
+Cloth is drawn as palette-shaded cells: the local edges against `light` choose a colour on the `fill` ramp, `back` colours a folded reverse face, and `outline` traces the silhouette. It is drawn under or over the bodies (`draw`), never interleaved per pixel.
+
+### 14d. Step order
+
+Each frame:
+
+1. Bodies' substeps: forces, contacts (with joint-connected pairs left out), joints, integration, joint position correction, contact relaxation, restitution, breaks.
+2. Fixed bodies are placed at the frame's end.
+3. Cloth substeps: gravity and wind, integration, pins, constraint iterations, collisions with the world and bodies, tearing.
+4. Drawing: turf, cloth under, ropes under, bodies, ropes over, cloth over.
+5. Bookkeeping: metadata, paths, rest.
+
+Cloth and bodies trade once a frame. Cloth collisions with bodies are one-way; cloth and fluid do not interact, and cloth does not enter a fluid's pressure solve.
+
+### 14e. Limits and compatibility
+
+Limits: at most 256 joints, 16 ropes of 2–64 links, 16 cloths and 4,096 cloth particles per effect. The source's work budget counts joint iterations, cloth particles, constraints and drawn cells. Existing sources are unchanged: no joints, ropes or cloths means no extra work and the same pixels. Cloth and joint fields are opt-in; goldens for existing bodies do not move.

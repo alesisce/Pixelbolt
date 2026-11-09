@@ -17,4 +17,6 @@ export function figureSnapshot(source) {
 }
 // The four-legged example as it ships (examples/fox.poses.json, written by scripts/generate-examples.js).
 const foxRig = () => JSON.parse(readFileSync(new URL('../examples/fox.poses.json', import.meta.url), 'utf8'));
-export const figureSources = { R1: skinkRig, R2: heroRig, R3: bossRig, plain: plainRig, fox: foxRig };
+// The stocky second build (examples/knight.poses.json): a shield arm outside rig.arms and a plume as its tail.
+const knightRig = () => JSON.parse(readFileSync(new URL('../examples/knight.poses.json', import.meta.url), 'utf8'));
+export const figureSources = { R1: skinkRig, R2: heroRig, R3: bossRig, plain: plainRig, fox: foxRig, knight: knightRig };

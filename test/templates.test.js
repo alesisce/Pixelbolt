@@ -342,3 +342,21 @@ test('a rig rest pose is a frame only when an animation plays it', async () => {
   const { rig, motions, ...plain } = expandPoses(hero);
   assert.equal(compilePoses(plain).recipe.frames.length, recipe.frames.length + 1);
 });
+
+test('an arm left out of rig.arms holds what it carries: the shield of the knight stays put while the sword arm swings', async () => {
+  const source = JSON.parse(await readFile(new URL('../examples/knight.poses.json', import.meta.url), 'utf8')), expanded = expandPoses(source);
+  const angle = (pose, name) => pose.parts.find(part => part.name === name).angle, rest = expanded.poses.find(pose => pose.name === source.rig.rest);
+  const generated = expanded.poses.filter(pose => pose !== rest);
+  assert.ok(generated.length >= 16);
+  for (const pose of generated) for (const name of ['shieldUpper', 'shieldFore']) assert.equal(angle(pose, name), angle(rest, name), `${pose.name} ${name}`);
+  for (const motion of ['walk', 'attack']) assert.ok(generated.filter(pose => pose.name.startsWith(motion)).some(pose => angle(pose, 'farUpper') !== angle(rest, 'farUpper')), `${motion} swings the sword arm`);
+  // The shield hangs from the arm, so in the drawing it moves only as the body does: never more than the walk's bob and sway.
+  const { recipe } = compilePoses(source), project = renderProject(recipe), gold = [217, 162, 58];
+  const boxes = project.animations.walk.frames.map(index => {
+    const { data } = project.frames[index]; let left = Infinity, right = -Infinity;
+    for (let p = 0; p < data.length; p += 4) if (data[p] === gold[0] && data[p + 1] === gold[1] && data[p + 2] === gold[2]) { const x = p / 4 % project.width; left = Math.min(left, x); right = Math.max(right, x); }
+    return [left, right];
+  });
+  // The sword's guard is gold too and passes the shield's right rim, so the left rim is the one that tells.
+  assert.ok(boxes.every(([left]) => Math.abs(left - boxes[0][0]) <= 1), JSON.stringify(boxes));
+});

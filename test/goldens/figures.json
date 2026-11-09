@@ -927,5 +927,82 @@
         "rgba": "ed7f299bc978488cb3d112491d7a474b5130b448e0f5f7a1f4f89a3fdff98564"
       }
     ]
+  },
+  "knight": {
+    "compiled": "dc94d9bdf6b46e2899159142664bc650fb85aae77e997851797e926601939e0e",
+    "frames": [
+      {
+        "name": "idle-rest",
+        "rgba": "59c494758544bbedc71c82ed9d23d2c8ffcc379e5e58c380ae0bbefc5fd9cafe"
+      },
+      {
+        "name": "idle-inhale",
+        "rgba": "7561309c8e0a77ba35ec510333e90800630a5b2c492d4512f81e46b50546fdcb"
+      },
+      {
+        "name": "idle-settle",
+        "rgba": "59c494758544bbedc71c82ed9d23d2c8ffcc379e5e58c380ae0bbefc5fd9cafe"
+      },
+      {
+        "name": "idle-exhale",
+        "rgba": "2571519f9e2033691fa072df54821f2b91a717eefe94e00774ec22924673f110"
+      },
+      {
+        "name": "walk-contact-a",
+        "rgba": "2e62929d27f79d6c118269c88d367be2afe4c35c4b0e36cf44472ffa0a81a5e0"
+      },
+      {
+        "name": "walk-down-a",
+        "rgba": "a9eecd9a2b3c2afe7114970785e766202a9429d0b1823a4e0fa82b3b26f98e31"
+      },
+      {
+        "name": "walk-passing-a",
+        "rgba": "cab60a401c269c457a26cf7b8723e8099d59511dc8ec4cebe578546e97b41ff6"
+      },
+      {
+        "name": "walk-up-a",
+        "rgba": "245c06e68f41456731727eb063b58a6b8d6a627015fab7001c14e53bc4eaf671"
+      },
+      {
+        "name": "walk-contact-b",
+        "rgba": "877ed469e7d21f2150624ecfc2e6f2442682360d9c83355acef3178eca13289a"
+      },
+      {
+        "name": "walk-down-b",
+        "rgba": "598c8e8b30ad037861a761e826f7be328d969d237e2879f1a5f4215bd47e0199"
+      },
+      {
+        "name": "walk-passing-b",
+        "rgba": "70c79fe03dd43c51037e8401b2a0fb71b95711fe64d21c7bf7b48e1f4e097a16"
+      },
+      {
+        "name": "walk-up-b",
+        "rgba": "829876558638c214f40ec814beb71c89f1eca0bfa958bad0b6080b6300d9492a"
+      },
+      {
+        "name": "attack-anticipation",
+        "rgba": "b056b076a828f879d7805217d6b9fc003eabb6c05043fa44a3eccccefb34b43e"
+      },
+      {
+        "name": "attack-strike",
+        "rgba": "7e15131fb0ae6f69ca936fd63631e8ce7e511075945f8257ce4fec317298ff82"
+      },
+      {
+        "name": "attack-follow-through",
+        "rgba": "1c98a386f2c68f93e75dc137f14a0dc1e64dd5d3e7c03ad6d9d81dafd673e9af"
+      },
+      {
+        "name": "attack-recover",
+        "rgba": "9aeeea8eb55f284dea02fe41ceb808169521f6b73ad329872bc8629a601263df"
+      },
+      {
+        "name": "hurt-recoil",
+        "rgba": "7c0f2d1153387e74e28f53eda35d74d0d433bce8077c2dfa82b99cc96b19b6b9"
+      },
+      {
+        "name": "hurt-recover",
+        "rgba": "ecbf6152452b2e295709c599acb2c2db0949a9f13de25b1c6a64757ea72b0815"
+      }
+    ]
   }
 }

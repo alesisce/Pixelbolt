@@ -246,6 +246,57 @@ const heroSword = { ...hero, name: 'hero-sword', width: 40,
     ? [{ name: 'sword', part: 'sword', attach: { part: 'nearFore', point: 'end' }, angle: -45 }, part] : [part]) }],
   motions: { idle: hero.motions.idle, walk: hero.motions.walk, attack: hero.motions.attack } };
 
+// A second build on the same rig roles, so a new character has more than one figure to start from: a stocky knight in
+// plate (brief: examples/knight.brief.md). Where the hero is slim bones in cloth, the knight is three blocks that read
+// apart: a steel helmet as wide as the chest, a gold-rimmed shield and steel legs, with a red tabard and plume between
+// them. The shield hangs from the near arm, which is left out of rig.arms, so no template swings it and the shield stays
+// where it is held; the far arm carries the sword and does the swinging and the striking. The plume is rig.tail and
+// follows through. The shins end flat and no wider than the sabatons, and the thighs hang a little apart, so two legs
+// show at rest instead of one block.
+const knightBone = (length, width, ramp, base, caps = ['round', 'round'], points = {}) => ({ bone: { length, width, ramp, base, outline: 'k', caps }, points: { end: 'end', ...points } });
+const knightLimb = (name, part, on, point, angle, at) => ({ name, part, attach: { part: on, point }, ...(at && { at }), angle });
+const knight = { format: 'pixelforge-poses', version: 1, name: 'knight', width: 32, height: 32,
+  palette: { k: '#1b1724', A: '#3e4763', B: '#6c7896', C: '#a3aec6', D: '#e6ebf5', r: '#5a1e30', s: '#a8323e', t: '#e2614b', g: '#8a5a1c', G: '#d9a23a', H: '#f6dc7a', c: '#5c3a2c', w: '#8a5a3c' },
+  ramps: [['A', 'B', 'C', 'D'], ['r', 's', 't'], ['g', 'G', 'H']], light: 225,
+  parts: {
+    hips: { mass: { size: [8, 5], ramp: 1, base: 0, outline: 'k' }, points: { hip: [0, 1], waist: [0, -1] } },
+    chest: knightBone(5, [7, 8], 1, 1, ['flat', 'round'], { shoulder: [4, 0], neck: [5, 0], crest: [13, -2] }),
+    head: { rows: ['..kkkkk...', '.kCDDDCk..', 'kBCDDCCBk.', 'kBCCCCCBBk', 'kACkkkkkkk', 'kABCCCCCBk', 'kABCkCkCk.', '.kABBBBk..', '..kkkkk...'], anchor: [4, 8] },
+    plume: knightBone(3, [3, 2], 1, 1, ['socket', 'round']), plumeTip: knightBone(3, [2, 1], 1, 1, ['socket', 'point']),
+    thigh: knightBone(4, [4, 3], 0, 1), shin: knightBone(4, [3, 3], 0, 2, ['socket', 'flat']),
+    farThigh: knightBone(4, [4, 3], 0, 0), farShin: knightBone(4, [3, 3], 0, 1, ['socket', 'flat']),
+    upper: knightBone(4, [3, 3], 0, 2), fore: knightBone(3, [3, 2], 0, 2, ['socket', 'round']),
+    farUpper: knightBone(4, [3, 3], 0, 1), farFore: knightBone(3, [3, 2], 0, 1, ['socket', 'round']),
+    pauldron: { rows: ['.kkkk.', 'kCDDCk', 'kBCCBk', '.kkkk.'], anchor: [2, 1] },
+    farHand: { rows: ['.kk.', 'kBBk', 'kAAk', '.kk.'], anchor: [1, 1] },
+    boot: { rows: ['kCCCk..', 'kBBCCCk', 'kkkkkkk'], anchor: [2, 1] },
+    farBoot: { rows: ['kBBBk..', 'kAABBBk', 'kkkkkkk'], anchor: [2, 1] },
+    shield: { rows: ['.kkkkkkk.', 'kHGGGGGGk', 'kGDDCCCGk', 'kGDCssCGk', 'kGCsttCGk', 'kGCCssBGk', '.kGCCBGk.', '..kGGgk..', '...kkk...'], anchor: [4, 4] },
+    sword: { rows: ['...k.........', '..kGk........', '..kGkkkkkkkk.', 'kwcGDDDDDDDCk', '..kGkkkkkkkk.', '..kGk........', '...k.........'], anchor: [1, 3] }
+  },
+  // Listed far side first, as they are drawn: the sword arm and far leg, the plume, the body, the near leg, the head,
+  // then the shield arm, its shield and the pauldron over the shoulder. The chest stands at 270 (up) and each attached
+  // angle is added to its parent's, so the sword arm at -200 points forward and down (70) and its forearm on from there.
+  poses: [{ name: 'stand', duration: 200, origin: [16, 31], parts: [
+    knightLimb('farUpper', 'farUpper', 'chest', 'shoulder', -200), knightLimb('farFore', 'farFore', 'farUpper', 'end', -60),
+    { name: 'sword', part: 'sword', attach: { part: 'farFore', point: 'end' }, angle: -40 },
+    { name: 'farHand', part: 'farHand', attach: { part: 'farFore', point: 'end' } },
+    knightLimb('farThigh', 'farThigh', 'hips', 'hip', 90, [2, 0]), knightLimb('farShin', 'farShin', 'farThigh', 'end', 0),
+    { name: 'farBoot', part: 'farBoot', attach: { part: 'farShin', point: 'end' } },
+    knightLimb('plume', 'plume', 'chest', 'crest', -120), knightLimb('plumeTip', 'plumeTip', 'plume', 'end', 30),
+    { name: 'hips', part: 'hips', at: [0, -12] },
+    knightLimb('chest', 'chest', 'hips', 'waist', 270),
+    knightLimb('nearThigh', 'thigh', 'hips', 'hip', 90, [-1, 0]), knightLimb('nearShin', 'shin', 'nearThigh', 'end', 0),
+    { name: 'nearBoot', part: 'boot', attach: { part: 'nearShin', point: 'end' } },
+    { name: 'head', part: 'head', attach: { part: 'chest', point: 'neck' } },
+    knightLimb('shieldUpper', 'upper', 'chest', 'shoulder', -190), knightLimb('shieldFore', 'fore', 'shieldUpper', 'end', -80),
+    { name: 'shield', part: 'shield', attach: { part: 'shieldFore', point: 'end' } },
+    { name: 'pauldron', part: 'pauldron', attach: { part: 'chest', point: 'shoulder' } }
+  ] }],
+  rig: { body: 'hips', head: 'head', ground: 29, rest: 'stand', legs: [['nearThigh', 'nearShin'], ['farThigh', 'farShin']], arms: [['farUpper', 'farFore']], tail: ['plume', 'plumeTip'] },
+  motions: { idle: { template: 'idle' }, walk: { template: 'walk', speed: 20, stride: 8, lift: 2, bob: 1 }, attack: { template: 'attack' }, hurt: { template: 'hurt' } },
+  sheet: { columns: 8 } };
+
 // The quick start's slime at 32 × 32, breathing in a gentle squash and stretch: a flat mass keeps its base on its
 // anchor row, and the idle template's squash keeps the outline's lowest row on rig.ground in every frame. The rest pose
 // is named idle-0, the loop's first generated pose, so it stands in for that pose and the sheet holds just the loop.
@@ -817,7 +868,7 @@ const fluids = { campfire, 'smoke-puff': smokePuff, explosion, 'steam-vent': ste
 
 await mkdir(new URL('../examples/', import.meta.url), { recursive: true });
 // Authored sources are pretty-printed; compiled recipes use the CLI's compact formatting.
-const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'fox.poses': fox, 'slime-idle.poses': slimeIdle, 'hermit-chest.poses': hermitChest, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
+const authored = { 'forest-spirit': forest, ember, coin, shrine, caption, 'effects.fx': effects, 'hero-magic.fx': heroMagic, 'swing-trail.fx': swingTrail, 'fluid-blast.fx': fluidBlast, 'swing.poses': swing, 'hero.poses': hero, 'hero-sword.poses': heroSword, 'knight.poses': knight, 'fox.poses': fox, 'slime-idle.poses': slimeIdle, 'hermit-chest.poses': hermitChest, 'forest-spirit.normals': spiritNormals, 'forest-spirit-lit.scene': litSpirit, ...Object.fromEntries(Object.entries(fluids).map(([name, source]) => [`${name}.fluid`, source])), ...Object.fromEntries(Object.entries(wavePresets).map(([name, source]) => [`${name}.wave`, source])), ...Object.fromEntries(Object.entries(spellPresets).map(([name, source]) => [`${name}.fx`, source])), ...Object.fromEntries(Object.entries(spellLibrary).map(([element, source]) => [`${element}-spells.fx`, source])) };
 // Autotile sets drawn from terrain descriptions (scripts/terrain-presets.mjs).
 Object.assign(authored, terrainPresets);
 // Electric gases: arcs, lightning and plasma (scripts/plasma-presets.mjs).

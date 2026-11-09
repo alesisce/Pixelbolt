@@ -4,6 +4,11 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### A second character to start from, and how to make a new one
+
+- `examples/knight.poses.json` (preset `knight`, brief `examples/knight.brief.md`) is a stocky knight in plate on the hero's rig roles: idle, walk, attack and hurt at 32 × 32. Its shield hangs from an arm left out of `rig.arms`, so no template swings it and the shield stays where it is held; the far arm swings and strikes with the sword, and a plume follows as `rig.tail`. A first-time agent asked for a knight had recoloured the slim hero and got a thin column.
+- The craft notes' Characters section says how to make another character: redesign in three blocks instead of recolouring, which way angles turn (0 right, 90 down, added to the parent's), that parts draw in list order far side first, how to carry something still, and how to keep thick limbs from merging.
+
 ### Fix: searching the presets for a character finds the rigs
 
 - `presets --find character` (MCP `pixel_help` `find`) listed 27 liquids, because each of their lines says "not a character", and none of the rigs. It now lists the rigs: a poses preset's line starts "A character rig" or "A four-legged animal rig", and a liquid's disclaimer no longer counts as a match.

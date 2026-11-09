@@ -89,7 +89,7 @@ const quarryBlast = (() => {
       { material: 'water', rect: [8, 64, 26, 12] }
     ],
     inputs: [{ frame: 12, burst: { x: 66, y: 66, radius: 16, strength: 5 } }],
-    clips: { 'quarry-blast': { frames: 60, every: 3 } }
+    clips: { 'quarry-blast': { frames: 32, every: 3 } }
   });
 })();
 

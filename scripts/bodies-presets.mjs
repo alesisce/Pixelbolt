@@ -56,7 +56,7 @@ const FLOOR = 45;
 const crateTopple = bodiesSource('crate-topple', 112, 48,
   { o: '#3b2414', h: '#c98c4f', c: '#a5683a', d: '#6e4223', m: '#b4bdd8', k: '#14141c', s: '#4a5068', f: '#6f7896' },
   {
-    frames: 190, duration: 40, gravity: [0, 0.14], walls: ['left', 'right'],
+    frames: 140, duration: 40, gravity: [0, 0.14], walls: ['left', 'right'],
     obstacles: [{ symbol: 'ground', x: 0, y: FLOOR }],
     bodies: [
       { name: 'ball', shape: 'circle', radius: 4, at: [6, 30], velocity: [3.4, -1.3], density: 6, bounce: 0.2, friction: 0.6, fill: 'm', outline: 'k' },
@@ -154,7 +154,7 @@ const smashCrate = (at, extra) => ({ shape: 'box', size: [8, 8], at, asleep: tru
 const crateSmash = bodiesSource('crate-smash', 112, 64,
   { o: '#3b2414', h: '#c98c4f', c: '#a5683a', d: '#6e4223', m: '#b4bdd8', k: '#14141c', s: '#4a5068', b: '#1b1d2a', g: '#2c3047', w: '#e8f4ff', p: '#6fc3e6', q: '#b9e6f7' },
   {
-    frames: 180, duration: 40, gravity: [0, 0.2], background: 'b', walls: ['left', 'right'],
+    frames: 152, duration: 40, gravity: [0, 0.2], background: 'b', walls: ['left', 'right'],
     obstacles: [{ symbol: 'ground', x: 0, y: SMASH_FLOOR }],
     bodies: [
       { name: 'ball', shape: 'circle', radius: 4, at: [6, 46], velocity: [5.5, -0.8], density: 20, bounce: 0.2, friction: 0.6, fill: 'm', outline: 'k' },

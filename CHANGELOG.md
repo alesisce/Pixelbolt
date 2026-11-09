@@ -4,6 +4,11 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Presets: drawn props and no dead tails
+
+- The floating bodies in `water-wheel`, `crate-splash` and `sand-slide` are drawn as things: a paddle wheel of boards on spokes with a hub (it was a grey cross), a rubber duck, crates of planks with a brace, a rounded stone and a ball with a highlight. Each is a `symbol` on the body; the shapes that collide are the same, so the water moves as it did.
+- Five one-shots ended in a long still: `crate-topple` runs 140 frames (was 190), `crate-smash` 152 (180), `plank-tip` 80 (110), `sand-slide` 56 (110) and `quarry-blast` 32 (60). Each still ends at rest, with the crates' `rest` frame in the metadata as before.
+
 ### Fix: no bright line where smoke leaves the picture
 
 - A gas look's `light` and `shadow` layers read the smoke past an open canvas edge as empty, so smoke that reached the top or left edge got a bright line along it (a dark one along the bottom or right). They now read the edge itself there, so smoke that leaves the picture is lit only on its own rim. Against a closed edge (`walls`) it is lit as before. Of the shipped presets only the steam vent changes: one pixel on two frames, where a puff leaves the top.

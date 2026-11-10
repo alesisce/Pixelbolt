@@ -272,12 +272,14 @@ test('compile --size and pixel_compile size put a preset on the canvas asked for
   const cli = (...args) => spawnSync(process.execPath, [path.join(root, 'bin/pixelbolt.js'), ...args], { encoding: 'utf8' });
   const out = path.join(dir, 'fire.json'), meta = path.join(dir, 'fire.meta.json');
   const made = cli('compile', '--preset', 'campfire', '--size', '32x32', '--out', out, '--metadata', meta), reply = JSON.parse(made.stdout);
-  assert.deepEqual([reply.ok, reply.width, reply.height, reply.resized.from, reply.resized.offset], [true, 32, 32, [32, 48], [0, 16]]);
+  // The reply has the new size and, in words, what the cut left out; the numbers go with the metadata.
+  assert.deepEqual([reply.ok, reply.width, reply.height, reply.resized], [true, 32, 32, undefined]);
   assert.match(reply.warnings.at(-1), /^The 32×32 canvas leaves out /);
   const recipe = JSON.parse(await readFile(out, 'utf8'));
   assert.deepEqual(recipe, resizeRecipe(await preset('campfire'), '32x32').recipe);
   // The metadata keeps the source's coordinates and says where the new canvas starts in them.
-  assert.deepEqual(JSON.parse(await readFile(meta, 'utf8')).resized, reply.resized);
+  const kept = JSON.parse(await readFile(meta, 'utf8')).resized;
+  assert.deepEqual([kept.from, kept.offset], [[32, 48], [0, 16]]);
   for (const [args, pattern] of [
     [['--preset', 'campfire', '--size', 'small'], /--size: expected a canvas size such as \\"32x32\\"/],
     [['--preset', 'shrine', '--size', '32x32'], /--size: .* is \\"dither\\", which reads the whole canvas/],
@@ -296,7 +298,7 @@ test('compile --size and pixel_compile size put a preset on the canvas asked for
   await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'resize-test', version: '1' } });
   const compile = async args => (await call('tools/call', { name: 'pixel_compile', arguments: args })).result;
   const sized = JSON.parse((await compile({ preset: 'campfire', size: '32x32', metadata: true })).content[0].text);
-  assert.deepEqual([sized.ok, sized.width, sized.height, sized.resized, sized.metadata.resized], [true, 32, 32, reply.resized, reply.resized]);
+  assert.deepEqual([sized.ok, sized.width, sized.height, sized.resized, sized.metadata.resized], [true, 32, 32, undefined, kept]);
   assert.ok(sized.warnings.some(warning => /^The 32×32 canvas leaves out /.test(warning)));
   // Without size a preset compiles as it always has.
   const whole = JSON.parse((await compile({ preset: 'campfire' })).content[0].text);
@@ -308,7 +310,7 @@ test('compile --size and pixel_compile size put a preset on the canvas asked for
 
   // frames thins the preset the same way from both, before the canvas moves.
   const thin = JSON.parse((await compile({ preset: 'campfire', size: '32x32', frames: 8, metadata: true })).content[0].text);
-  assert.deepEqual([thin.frames, thin.kept, thin.metadata.kept, thin.animationFps, thin.resized.offset], [8, { campfire: '8 of 24' }, { campfire: '8 of 24' }, { campfire: 4.76 }, [0, 16]]);
+  assert.deepEqual([thin.frames, thin.kept, thin.metadata.kept, thin.animations.campfire, thin.metadata.resized.offset], [8, { campfire: '8 of 24' }, { campfire: '8 of 24' }, { frames: 8, duration: 1680, loop: true, fps: 4.76 }, [0, 16]]);
   const thinOut = path.join(dir, 'thin.json'), shell = JSON.parse(cli('compile', '--preset', 'campfire', '--size', '32x32', '--frames', '8', '--out', thinOut).stdout);
   assert.deepEqual(shell.kept, thin.kept);
   assert.deepEqual(JSON.parse(await readFile(thinOut, 'utf8')), resizeRecipe(keepFrames(await preset('campfire'), 8).recipe, '32x32').recipe);

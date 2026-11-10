@@ -158,7 +158,7 @@ export function resizeRecipe(recipe, size, path = 'size') {
 export function resizeWarning({ from, cut }, [width, height]) {
   if (!cut) return null;
   const share = cut < 0.01 ? 'under 1%' : `${Math.round(cut * 100)}%`;
-  return `The ${width}×${height} canvas leaves out ${share} of what the ${from[0]}×${from[1]} drawing draws (cut, not scaled): inspect it before delivering, and say so if it shows.`;
+  return `The ${width}×${height} canvas leaves out ${share} of what the ${from[0]}×${from[1]} drawing draws (cut, not scaled): look at it before delivering, and say so if it shows.`;
 }
 
 // A recipe whose animations play at most `count` frames: of an animation that lists more, evenly spaced ones are kept

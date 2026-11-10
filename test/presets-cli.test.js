@@ -102,7 +102,8 @@ test('gif --preset makes the GIF that compile then gif make, with a sheet of its
   assert.deepEqual([whole.name, whole.width, whole.height, whole.resized, whole.sheet], ['campfire', 64, 96, undefined, undefined]);
   assert.deepEqual(await readFile(at('whole.gif')), await readFile(at('whole.two.gif')));
   const cut = JSON.parse((await run('gif', '--preset', 'campfire', '--size', '32x32', '--out', at('cut.gif'), '--sheet', at('cut.png'))).stdout);
-  assert.deepEqual([cut.width, cut.height, cut.resized.from, cut.resized.offset, cut.sheet], [32, 32, [32, 48], [0, 16], at('cut.png')]);
+  assert.deepEqual([cut.width, cut.height, cut.resized, cut.sheet], [32, 32, undefined, at('cut.png')]);
+  assert.match(cut.warnings.join(' '), /The 32×32 canvas leaves out .* of what the 32×48 drawing draws/);
   assert.deepEqual(await readFile(at('cut.gif')), await readFile(at('cut.two.gif')));
   assert.equal((await readFile(at('cut.png'))).subarray(1, 4).toString(), 'PNG');
   // The cut is said once: the clipping it causes is not listed as a second problem.

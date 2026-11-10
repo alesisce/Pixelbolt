@@ -206,7 +206,7 @@ test('MCP handshake, discovery, help, errors and render work over stdio', async 
   assert.equal(render.content[1].mimeType, 'image/png');
   const written = JSON.parse(render.content[0].text); assert.ok(written.directory.startsWith(dir + path.sep));
   assert.ok((await readFile(path.join(written.directory, written.files[0]))).length > 0);
-  assert.equal(written.frames.count, 1); assert.ok(!written.files.some(file => file.startsWith('frames/')));
+  assert.equal(written.folders.frames, 1); assert.ok(!written.files.some(file => file.startsWith('frames/')));
   assert.equal(results[4].result.isError, true); assert.match(results[5].result.content[0].text, /Pixelbolt/);
   assert.equal(results[6].error.code, -32601); assert.equal(results[7].error.code, -32700);
 });

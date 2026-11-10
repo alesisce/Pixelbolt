@@ -9,7 +9,7 @@ import { compilePowder } from '../src/powder.js';
 import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery, briefCheck } from '../src/check.js';
 import { resizeRecipe, resizeWarning, keepFrames } from '../src/resize.js';
-import { embedBundleRecipe, sameFiles, outputSummary, withRates } from '../src/export.js';
+import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
 import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
@@ -68,8 +68,9 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            Compile a shipped preset (smoke-puff, campfire, fire-spells, hero...) as
                                            its examples/ file compiles; --expand for a poses preset. --size (any
                                            compile) puts the drawing on a canvas of that size: cut to the window
-                                           holding the most of it or given margins, never scaled; the reply says
-                                           where the window starts and what share of the drawing it cuts
+                                           holding the most of it or given margins, never scaled; a warning says
+                                           what share of the drawing a cut leaves out (--metadata keeps where the
+                                           window starts)
                                            --frames (any compile) keeps that many evenly spaced frames of each
                                            animation that has more, playing as long as before: the way to fewer
                                            frames (lowering frames in a source cuts the effect short instead)
@@ -352,7 +353,7 @@ const print = value => console.log(rowsJSON(value));
 const shown = file => { const from = path.relative(process.cwd(), file); return from && !from.startsWith('..') && !path.isAbsolute(from) ? from.split(path.sep).join('/') : file; };
 // --frames 8: how many frames each animation keeps.
 const frameCount = value => { if (!/^\d{1,3}$/.test(value)) throw new Error('--frames expects how many frames each animation keeps, such as --frames 8'); return Number(value); };
-const summary = (project, recipe) => ({ name: project.name, width: project.width, height: project.height, frames: project.frames.length, animations: Object.keys(project.animations), ...withRates(project, recipe), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }) });
+const summary = (project, recipe) => ({ name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }) });
 const referenced = input => input.resolution.files.length ? { resolved: input.resolution.files.map(shown) } : {};
 const engineVersion = async () => JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 // `presets [name] [--full]`, and `help presets [--full]` or `help preset <name>`: every preset, a line each or in full,
@@ -536,7 +537,7 @@ try {
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry. The
       // hint to save it comes only where a next step reads it: a rig's motion review, a tile set's masks, an import.
       const reviewed = command !== 'compile' || ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format);
-      print({ ok: true, ...written, ...(kept && { kept }), ...(resized && { width: value.width, height: value.height, resized }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
+      print({ ok: true, ...written, ...(kept && { kept }), ...(resized && { width: value.width, height: value.height }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');
@@ -628,7 +629,7 @@ try {
       const sheet = options.sheet !== undefined ? inspectProject(project, { animation: gif.animation }).sheet : null;
       const written = await writeOutputs({ file: [options.out, data, '--out'], ...(sheet && { sheet: [options.sheet, encodePNG(sheet.data, sheet.width, sheet.height), '--sheet'] }) }, options.force, inputsOf(input));
       // The cut is already said once: the clipping it causes is not a second problem.
-      print({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(kept && { kept }), ...(resized && { resized }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) });
+      print({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(kept && { kept }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) });
     } else if (command === 'gif-frames') {
       if (!positional[0] || positional[0] === '-') throw new Error('gif-frames requires a folder of numbered PNG frames');
       if (!options.out || !/\.gif$/i.test(options.out)) throw new Error('gif-frames requires --out <new.gif>');

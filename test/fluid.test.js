@@ -1481,7 +1481,7 @@ test('MCP pixel_compile builds fluid sources and pixel_help serves their schema'
   assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt fluid effects');
   const source = (await example('torch')).source, compiled = await request('tools/call', { name: 'pixel_compile', arguments: { source, metadata: true } });
   const info = JSON.parse(compiled.result.content[0].text);
-  assert.deepEqual([info.ok, info.frames, info.animations, info.metadata.format], [true, 16, ['torch'], 'pixelforge-fluid-metadata']);
+  assert.deepEqual([info.ok, info.frames, Object.keys(info.animations), info.metadata.format], [true, 16, ['torch'], 'pixelforge-fluid-metadata']);
   assert.match(info.revision, /^[a-f0-9]{12}$/);
   assert.equal(compiled.result.content[1].type, 'image');
   assert.deepEqual(info.warnings, []);

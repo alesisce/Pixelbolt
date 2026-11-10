@@ -5,7 +5,9 @@ import { PassThrough } from 'node:stream';
 import os from 'node:os';
 import path from 'node:path';
 import { renderProject, inspectProject, animationFps } from '../src/core.js';
-import { createBundle, withRates } from '../src/export.js';
+import { createBundle, describeAnimations } from '../src/export.js';
+// The rates a reply carries: each animation's fps, where it has one.
+const rates = (project, spec) => Object.fromEntries(Object.entries(describeAnimations(project, spec).animations).filter(([, entry]) => entry.fps !== undefined).map(([key, entry]) => [key, entry.fps]));
 import { compileAutotile } from '../src/authoring.js';
 import { startMCP } from '../src/mcp.js';
 import { GODOT_TILE_SOURCES } from '../scripts/verify-godot.mjs';
@@ -25,10 +27,10 @@ test('animationFps gives an evenly timed animation its frames per second, and no
   assert.equal(animationFps(varied, 'idle'), undefined);
   assert.equal(animationFps(varied, 'bounce'), 10, 'pingpong repeats frames of the same duration');
   assert.equal(animationFps(varied, 'still'), undefined, 'a rate means nothing for a single frame');
-  assert.deepEqual(withRates(project, torch), { animationFps: { burn: 14.29 } });
-  assert.deepEqual(withRates(varied, mixed), { animationFps: { bounce: 10 } });
+  assert.deepEqual(describeAnimations(project, torch), { animations: { burn: { frames: 24, duration: 1680, loop: true, fps: 14.29 } } });
+  assert.deepEqual(rates(varied, mixed), { bounce: 10 });
   const idleOnly = { ...mixed, animations: { idle: mixed.animations.idle } };
-  assert.deepEqual(withRates(renderProject(idleOnly), idleOnly), {}, 'no field when no animation has a rate');
+  assert.deepEqual(Object.keys(describeAnimations(renderProject(idleOnly), idleOnly).animations.idle), ['frames', 'duration', 'loop'], 'no rate where the frames differ in length');
 });
 
 test('a slow animation keeps three significant figures, and a still tile set has no rate or timing', async () => {
@@ -38,25 +40,25 @@ test('a slow animation keeps three significant figures, and a still tile set has
   // A tile set with no animations of its own has only the flipbook of every tile, which createBundle doesn't animate.
   const meadow = compileAutotile(JSON.parse(await readFile(new URL('../examples/meadow.autotile.json', import.meta.url), 'utf8'))).recipe;
   assert.equal(meadow.animations, undefined);
-  assert.deepEqual(withRates(renderProject(meadow), meadow), {});
+  assert.deepEqual(rates(renderProject(meadow), meadow), {});
   assert.doesNotMatch((await createBundle(meadow)).files.get('README.txt').toString(), /Timing|fps/);
   // One terrain mixing mask modes gets no Godot TileSet, so its frames export as an animation, and are timed as one.
   const mixedModes = structuredClone(meadow), tile = mixedModes.frames.find(frame => frame.ops?.some(op => op.op === 'autotile'));
   for (const op of tile.ops) if (op.op === 'autotile') op.mode = op.mode === 'cardinal' ? 'blob' : 'cardinal';
   const broken = await createBundle(mixedModes);
   assert.ok(broken.files.has('meadow.tres') && !broken.files.has('meadow.tileset.tres'), 'the bundle is not a still tile set');
-  assert.deepEqual(withRates(renderProject(mixedModes), mixedModes), { animationFps: { default: 10 } });
+  assert.deepEqual(rates(renderProject(mixedModes), mixedModes), { default: 10 });
   assert.match(broken.files.get('README.txt').toString(), /\nTiming:\ndefault: \d+ frames of 100 ms \(10 fps\)\n/);
   // Animated tiles keep theirs.
   const surf = compileAutotile(GODOT_TILE_SOURCES[2]).recipe, readme = (await createBundle(surf)).files.get('README.txt').toString();
   assert.match(readme, /\nTiming:\nsurf-\d+: 3 frames of 90 to 250 ms, 460 ms in all\n/);
 });
 
-test('a reply lists at most 16 rates; README.txt still times every animation', async () => {
+test('a reply describes at most 16 animations and names the rest; README.txt still times every animation', async () => {
   const many = { ...torch, frames: frames(2, 50), animations: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`a${i}`, { frames: ['f0', 'f1'] }])) };
-  const rates = withRates(renderProject(many), many).animationFps;
-  assert.equal(Object.keys(rates).length, 16);
-  assert.deepEqual(Object.keys(rates).slice(0, 2), ['a0', 'a1']);
+  const described = describeAnimations(renderProject(many), many);
+  assert.equal(Object.keys(described.animations).length, 16);
+  assert.deepEqual([Object.keys(described.animations).slice(0, 2), described.moreAnimations], [['a0', 'a1'], ['a16', 'a17', 'a18', 'a19']]);
   const readme = (await createBundle(many)).files.get('README.txt').toString();
   assert.match(readme, /\na19: 2 frames of 50 ms \(20 fps\)\n/);
 });
@@ -89,11 +91,13 @@ test('MCP validate, inspect and render replies carry fps beside the animations',
   try {
     await request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     const validated = await call('pixel_validate', { project: torch });
-    assert.deepEqual(validated.animationFps, { burn: 14.29 });
-    assert.deepEqual((await call('pixel_inspect', { revision: validated.revision })).animationFps, { burn: 14.29 });
+    // Every reply describes the animations one way.
+    const burn = { burn: { frames: 24, duration: 1680, loop: true, fps: 14.29 } };
+    assert.deepEqual([validated.frames, validated.animations], [24, burn]);
+    assert.deepEqual((await call('pixel_inspect', { revision: validated.revision })).animations, burn);
     const rendered = await call('pixel_render', { revision: validated.revision });
-    assert.deepEqual(rendered.animationFps, { burn: 14.29 });
+    assert.deepEqual([rendered.frames, rendered.animations, rendered.folders], [24, burn, { frames: 24, animations: 1 }]);
     assert.match(await readFile(path.join(rendered.directory, 'README.txt'), 'utf8'), /burn: 24 frames of 70 ms \(14\.29 fps\)/);
-    assert.equal('animationFps' in (await call('pixel_validate', { project: { ...mixed, animations: { idle: mixed.animations.idle } } })), false);
+    assert.equal('fps' in (await call('pixel_validate', { project: { ...mixed, animations: { idle: mixed.animations.idle } } })).animations.idle, false);
   } finally { input.end(); await running; }
 });

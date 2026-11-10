@@ -286,7 +286,7 @@ test('MCP compiles particle effects, explains the fx topic and previews cleanup 
     effects: { pop: { frames: 4, seed: 5, emitters: [{ at: [8, 8], burst: 5, speed: [1, 2], life: 4, shapes: ['hot', 'cool'], trail: { color: 'o', length: 1 } }] } } };
   const compiled = await mcp.call('pixel_compile', { source, metadata: true });
   assert.ok(!compiled.result.isError, JSON.stringify(compiled.info));
-  assert.deepEqual([compiled.info.frames, compiled.info.animations, compiled.info.metadata.effects.pop.emitters[0].spawned], [4, ['pop'], 5]);
+  assert.deepEqual([compiled.info.frames, Object.keys(compiled.info.animations), compiled.info.metadata.effects.pop.emitters[0].spawned], [4, ['pop'], 5]);
   assert.equal(compiled.result.content[1].mimeType, 'image/png');
   const topic = (await mcp.request('tools/call', { name: 'pixel_help', arguments: { topic: 'fx' } })).result;
   assert.equal(JSON.parse(topic.content[0].text).title, 'Pixelbolt particle effects');

@@ -202,13 +202,14 @@ function stillTileSet(spec, project) {
   }
   return true;
 }
-// A reply's `animationFps`: the frame rate of each animation whose frames all last the same (animationFps), by name,
-// for the first 16 such animations (README.txt times every animation of two or more frames); no field when none has
-// one, or for a still tile set. `spec` is the recipe the project was rendered from.
-export function withRates(project, spec) {
-  if (stillTileSet(spec, project)) return {};
-  const rates = Object.keys(project.animations).map(key => [key, animationFps(project, key)]).filter(([, fps]) => fps !== undefined).slice(0, 16);
-  return rates.length ? { animationFps: Object.fromEntries(rates) } : {};
+// What a reply says about a project's animations, the same from every command and tool: by name, how many frames each
+// plays, how long that takes, whether it loops and, where its frames all last the same (and it is not a still tile
+// set), its frame rate, which Godot, Unity, Aseprite and video editors ask for. Past 16 animations the rest are named
+// in `moreAnimations`. `spec` is the recipe the project was rendered from.
+export function describeAnimations(project, spec) {
+  const names = Object.keys(project.animations), still = stillTileSet(spec, project);
+  const entry = key => { const { frames, duration, loop } = project.animations[key], fps = still ? undefined : animationFps(project, key); return [key, { frames: frames.length, duration, loop, ...(fps !== undefined && { fps }) }]; };
+  return { animations: Object.fromEntries(names.slice(0, 16).map(entry)), ...(names.length > 16 && { moreAnimations: names.slice(16) }) };
 }
 const popcount = mask => { let bits = 0; for (let m = mask; m; m &= m - 1) bits++; return bits; };
 // The frame and animation PNGs an export wrote, as its atlas metadata names them. Anything else lists nothing.
@@ -391,7 +392,7 @@ export function outputSummary(out, files, listFiles) {
   const support = file => !file.includes('/') && (file.endsWith('.js') || file === 'README.txt');
   return {
     files: listFiles ? relative : relative.filter(file => !file.startsWith('frames/') && !(file.startsWith('animations/') && animations > 16) && !support(file)),
-    frames: { directory: 'frames', count: count('frames') }, animations: { directory: 'animations', count: animations },
+    folders: { frames: count('frames'), animations },
     ...(files.removed && { removed: files.removed.map(file => path.relative(out, file).split(path.sep).join('/')) })
   };
 }

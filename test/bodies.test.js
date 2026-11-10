@@ -169,6 +169,18 @@ test('the bodies schema lists exactly the fields the compiler reads, and the pac
     for (const key of Object.keys(properties)) { const source = base(); set(source, key); assert.ok(!unknown(source, `${where}.${key}`), `${where}.${key} is in the schema but the compiler refuses it`); }
     const source = base(); set(source, 'notAField'); assert.ok(unknown(source, `${where}.notAField`), `${where} accepts a field the schema doesn't list`);
   }
+  // The articulated fields: joints, ropes, cloths and pins.
+  const named = () => scene({ bodies: [{ name: 'a', shape: 'circle', radius: 2, at: [8, 8], fill: 'k' }] });
+  const extra = [
+    [effect.properties.joints.items.properties, (s, key) => { s.effects.e.joints = [{ type: 'distance', a: 'a', b: 'world', [key]: 0 }]; }, 'bodies.effects.e.joints[0]'],
+    [effect.properties.ropes.items.properties, (s, key) => { s.effects.e.ropes = [{ from: { at: [0, 0] }, to: { at: [8, 8] }, fill: 'k', [key]: 0 }]; }, 'bodies.effects.e.ropes[0]'],
+    [effect.properties.cloths.items.properties, (s, key) => { s.effects.e.cloths = [{ at: [0, 0], size: [4, 4], fill: 'k', [key]: 0 }]; }, 'bodies.effects.e.cloths[0]'],
+    [effect.properties.cloths.items.properties.pins.items.properties, (s, key) => { s.effects.e.cloths = [{ at: [0, 0], size: [4, 4], fill: 'k', pins: [{ at: [0, 0], [key]: 0 }] }]; }, 'bodies.effects.e.cloths[0].pins[0]']
+  ];
+  for (const [properties, set, where] of extra) {
+    for (const key of Object.keys(properties)) { const source = named(); set(source, key); assert.ok(!unknown(source, `${where}.${key}`), `${where}.${key} is in the schema but the compiler refuses it`); }
+    const source = named(); set(source, 'notAField'); assert.ok(unknown(source, `${where}.notAField`), `${where} accepts a field the schema doesn't list`);
+  }
   const files = await packageFiles();
   assert.ok(files.includes('bodies.schema.json') && files.includes('src/bodies.js'));
   for (const name of BODIES_SHOWCASE) assert.ok(files.includes(`examples/${name}.bodies.json`), name);

@@ -4,6 +4,14 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Joints, ropes and cloth for rigid bodies
+
+Contributed by alesisce in #124.
+
+- A `pixelforge-bodies` effect takes `joints` (distance, rope, spring, hinge and weld, between two bodies or a body and the world, with anchors, angle limits and a `break` impulse), `ropes` (a chain of small hidden links between two anchors, drawn as a rope or a chain, that sags and can break) and `cloths` (a grid pinned to points, keys over time or bodies, with wind, gusts, collisions and tearing, drawn in palette shades). Existing sources compile to the same pixels: the seven earlier bodies goldens did not move.
+- Five presets: `rope-bridge`, `wrecking-ball`, `ragdoll`, `flag` and `cape`.
+- Changed on the way in: a rope's links are given the weight to hold what hangs from it unless the source sets `density`. With the default a ball two thousand times a link's weight stretched the rope and fell to the floor, so the wrecking ball stopped beside its pyramid; it now swings through it, as on a rigid joint. The presets were retuned and looked at (the bridge hangs clear of the ground, the ragdoll's still tail is cut, the flag is loose enough to ripple, the cape hangs from the shoulders), and the new modules read numbers with the shared helpers.
+
 ### Which keys colour what, labelled comparisons, a level from rows
 
 - `inspect <recipe> --palette` (MCP `pixel_inspect` `palette: true`) lists each palette key with its colour, its pixels and the layers or pose parts it colours, a ramp's keys together dark to light: for the fox, `R r o y` on the chest, hips and head, `v w` on the tail tip and bib. Two agents asked for a colour variant rendered the sheet and guessed which keys were the fur.

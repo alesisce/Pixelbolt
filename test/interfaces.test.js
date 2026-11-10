@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMCP } from '../src/mcp.js';
-import { startStudio, STUDIO_PATHS } from '../src/server.js';
+import { startStudio, STUDIO_PATHS, REFUSED_PORTS } from '../src/server.js';
 import { renderProject, inspectProject } from '../src/core.js';
 import { encodePNG } from '../src/png.js';
 import { createSequence } from '../src/sequence.js';
@@ -350,6 +350,16 @@ test('CLI inspect prints cells and grids, and writes a PNG only when asked', asy
   assert.match(JSON.parse(run('--region', '1,2').stderr).error, /x,y,w,h/);
   assert.equal(JSON.parse(run('--frames', 'missing').stderr).path, 'inspect.frames[0]');
 });
+test('a studio on any free port never takes one a browser refuses to open', async t => {
+  // The list is what fetch refuses before it connects: nothing listens on these.
+  for (const port of REFUSED_PORTS) await assert.rejects(fetch(`http://127.0.0.1:${port}/`), error => error.cause?.message === 'bad port', `${port}`);
+  // Where the system's free ports start at 1024 it hands these out too, in order, so a run of studios crosses them.
+  const servers = [];
+  t.after(() => { for (const server of servers) { server.closeAllConnections(); server.close(); } });
+  for (let i = 0; i < 12; i++) servers.push(await startStudio({ port: 0, quiet: true }));
+  assert.deepEqual(servers.map(server => server.address().port).filter(port => REFUSED_PORTS.has(port)), []);
+});
+
 test('studio serves only its assets and exports ZIP over same-origin requests', async t => {
   const server = await startStudio({ port: 0, quiet: true });
   t.after(() => { server.closeAllConnections(); server.close(); });

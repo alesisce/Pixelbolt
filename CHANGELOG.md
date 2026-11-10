@@ -9,6 +9,7 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - `pixelbolt help quickstart` gives a shell its commands (`validate`, `inspect`, `patch`, `render`, `gif`, `compile`, `scene`, `import`, with their options) where it gave the MCP tools and one line saying the commands were the same. MCP `pixel_help` still gives the tools. Patch changes and source formats are one section both read.
 - The npm package and `pixelbolt skill install` leave out `examples/quality/`, the quality lab's files that no guide starts from: 16 fewer files and 300 KB less in each.
 - The plugin evals' mock server answers with the real server's tool listing again (three tools had changed since it was captured), its reply shapes match, and a test keeps the listing current (`node scripts/eval-mock.mjs`).
+- Fix: a studio that takes any free port (`preview` when 4747 is in use) no longer takes one a browser refuses to open. Windows with WSL or Hyper-V hands out free ports from 1024 up, in order, so about one start in three thousand landed on 6665 to 6669 or another refused port and the page would not load.
 - Inside: the validators that eighteen modules each defined (`fail`, `isObject`, and the source formats' `number`, `integer`, `pair` and `range`) and the table of compilers kept in three places are each defined once. No output changes.
 
 ### Isometric art to start from

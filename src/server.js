@@ -65,6 +65,8 @@ const routes = new Map([
 // Every path the studio answers with GET, for checks that walk the whole allowlist.
 export const STUDIO_PATHS = [...routes.keys(), '/scene.json', '/scene-source.json', '/project.json', '/shared-palette.json'];
 export const STUDIO_PORT = 4747;
+// The ports from 1024 up that browsers refuse to open (the Fetch standard's bad ports).
+export const REFUSED_PORTS = new Set([1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
 // The most the studio sends back as one ZIP of frames; longer or larger clips belong on the command line.
 const SEQUENCE_ZIP_BYTES = 512 * 1048576;
 // The program and arguments that hand an address to the system's default browser, without a shell to quote for.
@@ -145,7 +147,17 @@ export async function startStudio({ port = STUDIO_PORT, fallback = false, projec
     } catch (error) { reply(400, 'application/json', JSON.stringify({ error: error.message })); }
   });
   const listen = number => new Promise((resolve, reject) => { server.once('error', reject); server.listen(number, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
-  await listen(port).catch(error => { if (!fallback || error.code !== 'EADDRINUSE') throw error; return listen(0); });
+  // Any free port, but not one a browser (and fetch) refuses to open: the system hands those out too where its range
+  // of free ports starts low, as on Windows with WSL or Hyper-V (from 1024), and it hands them out in order, so the
+  // next try is the next port.
+  const anyPort = async () => {
+    for (let tries = 0; ; tries++) {
+      await listen(0);
+      if (!REFUSED_PORTS.has(server.address().port) || tries === 8) return;
+      await new Promise(resolve => server.close(resolve));
+    }
+  };
+  await (port === 0 ? anyPort() : listen(port).catch(error => { if (!fallback || error.code !== 'EADDRINUSE') throw error; return anyPort(); }));
   // One write, so anything reading the output sees the whole message at once.
   if (!quiet) console.log(`Pixelbolt studio: http://127.0.0.1:${server.address().port}\n${port && server.address().port !== port ? `Port ${port} is in use, so this studio has another address. A draft kept at the usual address is not shown here.\n` : ''}Press Ctrl+C to stop.`);
   return server;

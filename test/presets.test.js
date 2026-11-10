@@ -74,6 +74,12 @@ before(async () => {
 test('the presets listing covers every source and looping recipe in examples/, measured from the files themselves', async t => {
   const directory = await temp(t, 'presets-list'), mcp = session(t, { directory, root: examples });
   await mcp.init();
+  // The server measures for 20 seconds a call and keeps what it measured in the export directory. A busy machine
+  // measures few presets in that time, so after the server's first listing the rest are measured here with no budget,
+  // as a shell measures them, into the same folder: the listings after it give every preset's facts on any machine.
+  const first = reply(await mcp.call('pixel_help', { topic: 'presets', full: true })).presets;
+  const kept = path.join(directory, '.presets'), written = (await readdir(kept)).filter(name => /^[0-9a-f]{64}\.json$/.test(name));
+  await listPresets({ budget: Infinity, cache: kept });
   const { guide, presets } = reply(await mcp.call('pixel_help', { topic: 'presets', full: true }));
   // What an agent reads by default, on every effect request: a line per preset, from the measurements just kept.
   const brief = reply(await mcp.call('pixel_help', { topic: 'presets' }));
@@ -114,8 +120,10 @@ test('the presets listing covers every source and looping recipe in examples/, m
   const sword = presets.find(entry => entry.name === 'hero-sword');
   if (sword && !sword.unmeasured) assert.match(sword.for, /idle, walk, attack, with sword in hand\.$/);
   // The measurements are kept in the export directory for the next listing (presets-cache.test.js), so pixel_help
-  // writes files and must not tell clients it is read-only (P-074): some run read-only tools without asking.
-  assert.equal((await readdir(path.join(directory, '.presets'))).filter(name => /^[0-9a-f]{64}\.json$/.test(name)).length, 1);
+  // writes files and must not tell clients it is read-only (P-074): some run read-only tools without asking. Its
+  // first listing wrote the file, and what was measured here went into the same one.
+  assert.equal(written.length, 1);
+  assert.deepEqual((await readdir(kept)).filter(name => /^[0-9a-f]{64}\.json$/.test(name)), written);
   assert.deepEqual(help.annotations, { title: 'Pixelbolt guide and schema', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
   assert.match(guide, /pixel_compile \{"preset": "<name>"\}/);
   assert.deepEqual(presets.map(entry => entry.file.slice('examples/'.length)).sort(), [...sources, ...recipes].sort());
@@ -123,10 +131,13 @@ test('the presets listing covers every source and looping recipe in examples/, m
   // A busy machine may pass the listing's time budget: presets not started by then are named, not measured (the
   // command line, with no budget, measures all of them; see presets-cli.test.js). Measured in parallel, the skipped
   // ones need not be the last ones, so they are picked by their flag.
-  const measured = presets.filter(entry => !entry.unmeasured), skipped = presets.filter(entry => entry.unmeasured);
-  assert.ok(measured.length > 0 && skipped.every(entry => entry.unmeasured && Object.keys(entry).join() === 'name,kind,file,unmeasured'));
+  const skipped = first.filter(entry => entry.unmeasured);
+  assert.ok(skipped.length < first.length && skipped.every(entry => Object.keys(entry).join() === 'name,kind,file,unmeasured'));
   if (skipped.length) t.diagnostic(`${skipped.length} presets listed past the time budget`);
-  for (const entry of measured) {
+  // What the server measured is what it lists from then on, and with the rest measured above no preset is left out.
+  for (const entry of first) if (!entry.unmeasured) assert.deepEqual(presets.find(listed => listed.name === entry.name), entry);
+  assert.deepEqual(presets.filter(entry => entry.unmeasured).map(entry => entry.name), []);
+  for (const entry of presets) {
     assert.equal(entry.error, undefined, `${entry.name} compiles`);
     const { project, colors, liquid } = compiled.get(entry.file.slice('examples/'.length)), loops = Object.values(project.animations).map(item => item.loop);
     assert.deepEqual([entry.size, entry.frames, entry.colors, entry.plays], [`${project.width}x${project.height}`, project.frames.length, colors, loops.every(Boolean) ? 'loop' : loops.some(Boolean) ? 'loops and one-shots' : 'one-shot'], entry.name);
@@ -135,6 +146,12 @@ test('the presets listing covers every source and looping recipe in examples/, m
     // A liquid simulation reads as an effect, never as a character's idle.
     if (entry.kind === 'fluid' && liquid) assert.match(entry.for, /liquid, not a character/);
   }
+});
+
+// A listed preset has colours only if it draws something, and the renders above count each one's.
+test('every shipped preset draws something', () => {
+  assert.ok(compiled.size > 0);
+  for (const [file, { colors }] of compiled) assert.ok(colors > 0, `${file} draws no pixel`);
 });
 
 test('pixel_compile with a preset is byte-identical to compiling its file', async t => {

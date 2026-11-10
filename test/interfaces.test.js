@@ -444,9 +444,11 @@ test('CLI replies stay small: render names its folder once, compile keeps metada
   // A rig's metadata runs to a hundred kilobytes: it goes to --metadata or nowhere.
   await writeFile(path.join(dir, 'hero.poses.json'), await readFile(path.join(root, 'examples', 'hero.poses.json')));
   const compiled = cli('compile', 'hero.poses.json', '--out', 'hero.json');
-  assert.equal(compiled.status, 0, compiled.stderr); assert.ok(compiled.stdout.length < 400, compiled.stdout);
+  assert.equal(compiled.status, 0, compiled.stderr); assert.ok(compiled.stdout.length < 1200, compiled.stdout);
   // warnings is always there, empty when there are none, so a clean compile reads as checked.
-  assert.deepEqual(Object.keys(JSON.parse(compiled.stdout)), ['ok', 'recipe', 'warnings', 'hint']);
+  // And it says what it made: the size, the frames, each animation.
+  assert.deepEqual(Object.keys(JSON.parse(compiled.stdout)), ['ok', 'recipe', 'name', 'width', 'height', 'frames', 'animations', 'warnings', 'hint']);
+  assert.deepEqual([JSON.parse(compiled.stdout).width, Object.keys(JSON.parse(compiled.stdout).animations).includes('walk')], [32, true]);
   // Forty clipped operations: the warning counts them, the list keeps the first 16.
   const over = { version: 1, name: 'over', width: 4, height: 4, palette: { r: '#f00' }, frames: [{ name: 'a', ops: Array.from({ length: 40 }, (_, i) => ({ op: 'pixel', x: 4 + i, y: 0, color: 'r' })) }] };
   await writeFile(path.join(dir, 'over.json'), JSON.stringify(over));

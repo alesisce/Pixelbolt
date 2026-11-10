@@ -174,6 +174,27 @@ function asksForHelp(args) {
   }
   return false;
 }
+// The notes under the usage list, by the words each starts with, and the commands each is about (null: every one).
+const NOTES = [['Options:', null], ['--embed-recipe on render', ['render', 'scene']], ['render and scene reply', ['render', 'scene', 'compile', 'autotile', 'import']],
+  ['Palette references', null], ['Inspect:', ['inspect']], ['Patch accepts', ['patch']], ['GIF keeps', ['gif', 'render']], ['gif-frames reads', ['gif-frames']],
+  ['Sequence writes', ['sequence']], ['Command results', null]];
+// One command's help: its usage lines and the notes about it. The whole help is 11 KB, which every `<command> --help`
+// used to print; a name that is no command gets all of it.
+function commandHelp(command) {
+  const lines = HELP.split('\n'), notesAt = lines.findIndex(line => line.startsWith('Options:')), usage = [], notes = [];
+  let mine = false, about = null;
+  for (const line of lines.slice(1, notesAt)) {
+    if (line.startsWith('  pixelbolt ')) mine = line.startsWith(`  pixelbolt ${command} `) || line.trimEnd() === `  pixelbolt ${command}`;
+    if (mine && line.trim()) usage.push(line);
+  }
+  if (!usage.length) return HELP;
+  for (const line of lines.slice(notesAt)) {
+    const start = NOTES.find(([words]) => line.startsWith(words));
+    if (start) about = start[1];
+    if (line.trim() && (about === null || about.includes(command))) notes.push(line);
+  }
+  return [lines[0], '', ...usage, '', ...notes, 'pixelbolt help lists every command.', ''].join('\n');
+}
 function parseArgs(args) {
   const positional = [], options = {};
   for (let i = 0; i < args.length; i++) {
@@ -391,10 +412,12 @@ async function helpTopic([topic, ...words]) {
 }
 try {
   const [command = 'help', ...rest] = process.argv.slice(2);
-  // `<command> --help` shows the same help, which lists every command's options (the quick start points agents there).
-  // An option's value is never that request, so `--name -h` names something -h and `--find -h` looks for it.
+  // `<command> --help` shows that command's lines of the help and the notes about it (the quick start points agents
+  // there for options); `help` alone shows all of it. An option's value is never that request, so `--name -h` names
+  // something -h and `--find -h` looks for it.
   if (command === 'help' && rest.length && !asksForHelp(rest)) process.stdout.write(await helpTopic(rest));
-  else if (['help', '--help', '-h'].includes(command) || asksForHelp(rest)) process.stdout.write(HELP);
+  else if (['help', '--help', '-h'].includes(command)) process.stdout.write(HELP);
+  else if (asksForHelp(rest)) process.stdout.write(commandHelp(command));
   else {
     const { positional, options } = parseArgs(rest);
     if (positional.length > 1) throw new Error('Too many positional arguments');
@@ -491,7 +514,7 @@ try {
       print({ ok: true, ...await writeOutputs({ recipe: [options.out, formatJSON(recipe), '--out'] }, options.force, filesRead(positional[0])), embedded: { version, kind } });
     } else if (['compile', 'autotile', 'overlay', 'import'].includes(command)) {
       if (!options.out || !/\.json$/i.test(options.out)) throw new Error(`${command} requires --out <new.json>`);
-      let value, metadata, input, warnings, preview, resized, kept;
+      let value, metadata, input, warnings, preview, resized, kept, made;
       if (command === 'compile' || command === 'autotile') {
         input = await readResolved(positional[0]);
         // A preset may be a plain recipe, which compiles to itself.
@@ -516,6 +539,10 @@ try {
           // The metadata keeps the source's own coordinates; this says where the new canvas starts in them.
           if (metadata) metadata = { ...metadata, resized };
         }
+        // A compile says what it made, as MCP pixel_compile does: the size, the frames and each animation by name, which
+        // the next step (a scene instance, a render's expect) needs and an agent otherwise ran validate or a script for.
+        const project = renderProject(compiled.recipe);
+        made = { name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, compiled.recipe) };
         value = linkPalette(compiled.recipe, input, options.out);
       } else if (command === 'overlay') {
         if (!options.changes) throw new Error('overlay requires --changes <edits.json>');
@@ -539,7 +566,7 @@ try {
       const reviewed = command !== 'compile' || ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format);
       // A tile set comes with how a map names its tiles: the legend entry to paste into a tilemap.
       const tilemap = preview ? tilemapEntry(value) : null;
-      print({ ok: true, ...written, ...(kept && { kept }), ...(resized && { width: value.width, height: value.height }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
+      print({ ok: true, ...written, ...made, ...(kept && { kept }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');

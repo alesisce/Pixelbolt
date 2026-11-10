@@ -69,6 +69,14 @@ test('every command shows the help with --help or -h, as the quick start says', 
   for (const args of [['validate', '--help'], ['render', 'sprite.json', '-h'], ['skill', 'install', '--help']]) {
     const result = spawnSync(process.execPath, [path.join(root, 'bin', 'pixelbolt.js'), ...args], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /^Pixelbolt — text to pixels/);
-    assert.ok(result.stdout.includes('pixelbolt validate <file.json|->'));
+    // A command's own lines and the notes about it, not the whole help.
+    assert.ok(result.stdout.includes(`  pixelbolt ${args[0]} `) && result.stdout.includes('Errors exit with code 1.') && result.stdout.endsWith('pixelbolt help lists every command.\n'), args.join(' '));
+    assert.equal(result.stdout.includes('  pixelbolt sequence '), false, args.join(' '));
+    assert.ok(result.stdout.length < 3000, `${args.join(' ')}: ${result.stdout.length} characters`);
   }
+  const all = spawnSync(process.execPath, [path.join(root, 'bin', 'pixelbolt.js'), 'help'], { encoding: 'utf8' }).stdout;
+  assert.ok(all.includes('  pixelbolt sequence ') && all.includes('  pixelbolt validate ') && all.length > 9000);
+  // Every note under the usage list belongs to a command or to all of them, so none is lost from the full help.
+  const inspect = spawnSync(process.execPath, [path.join(root, 'bin', 'pixelbolt.js'), 'inspect', '--help'], { encoding: 'utf8' }).stdout;
+  assert.ok(inspect.includes('--view color|silhouette') && inspect.includes('--motion name') && !inspect.includes('GIF keeps exact colours'));
 });

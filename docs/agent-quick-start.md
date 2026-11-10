@@ -54,7 +54,7 @@ The tool list you loaded says what each tool takes. This is the order to use the
 
 ## The commands
 
-Run each as `node bin/pixelbolt.js <command>`; `--help` lists every option. Replies are JSON, a recipe is a file, and no command writes over an existing file without `--force`: save each edit and each export under a new name.
+Run each as `node bin/pixelbolt.js <command>`; `<command> --help` lists that command's options. Replies are JSON, a recipe is a file, and no command writes over an existing file without `--force`: save each edit and each export under a new name.
 
 1. **`validate <recipe.json>`** checks a recipe without images: its size, frames and animations, or every error with its path.
 2. **`inspect <recipe.json> --out <sheet.png>`** writes a PNG contact sheet of every frame to look at. Options: `--animation <name>` (playback order), `--frames a,b`, `--region x,y,w,h` to zoom, `--grid` for exact palette-key rows with rulers, `--view silhouette|grayscale|onion|tile|parts` (parts colours each pixel by the part that drew it), `--native` (a 1× sheet beside it), `--diagnostics` and `--guides` (a horizon, vanishing points or an isometric grid drawn over the image).

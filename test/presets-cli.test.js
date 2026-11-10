@@ -60,7 +60,7 @@ test('pixelbolt presets lists every preset and measures each however long that t
   const first = picked[0].name;
   assert.equal((await find(first)).presets[first], briefListing(listing).presets[first]);
   assert.match((await find('no-such-thing-zz')).guide, /^No preset matches/);
-  for (const args of [['presets', first, '--find', 'x'], ['presets', '--find', 'x', '--full']]) {
+  for (const args of [['presets', '--find', 'x', '--full']]) {
     const refused = await runScript([], path.join(copy, 'bin', 'pixelbolt.js'), ...args).then(() => null, error => error);
     assert.ok(refused, args.join(' ')); assert.match(refused.stdout + refused.stderr, /--find goes on its own/);
   }

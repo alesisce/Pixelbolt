@@ -74,7 +74,10 @@ export async function createBundle(spec) {
   const still = Boolean(tiles) && spec.animations === undefined;
   const godot = still ? null : spriteFrames(atlas.metadata);
   if (godot) files.set(`${name}.tres`, Buffer.from(godot.text));
-  if (godot?.approximate.length) project.warnings.push(`${name}.tres: the frame times of ${godot.approximate.length === 1 ? 'animation' : 'animations'} ${godot.approximate.slice(0, 8).join(', ')}${godot.approximate.length > 8 ? ', …' : ''} share no step of 9 ms or more, so Godot gets fractional frame durations, kept as 32-bit floats: each frame plays within a ten-millionth of its length. Frame times in multiples of 10 ms are exact.`);
+  // Frame times Godot holds as fractions play within a ten-millionth of their length: a fact for whoever opens the
+  // .tres, written in README.txt and kept in `notes`, not a warning for every reply to carry.
+  const notes = [];
+  if (godot?.approximate.length) notes.push(`${name}.tres: the frame times of ${godot.approximate.length === 1 ? 'animation' : 'animations'} ${godot.approximate.slice(0, 8).join(', ')}${godot.approximate.length > 8 ? ', …' : ''} share no step of 9 ms or more, so Godot gets fractional frame durations, kept as 32-bit floats: each frame plays within a ten-millionth of its length. Frame times in multiples of 10 ms are exact.`);
   files.set(`${name}.pixel.json`, Buffer.from(json(spec)));
   if (!still) files.set(`${name}.css`, Buffer.from(generateCSS(project, atlas)));
   const scaledFrames = frames.map(f => ({ ...f, data: scalePixels(f.data, width, height, sheet.scale) }));
@@ -91,11 +94,11 @@ export async function createBundle(spec) {
   if (raised.size) project.warnings.push(`${raised.size} frame${raised.size === 1 ? '' : 's'} of 10 ms or less (${[...raised].slice(0, 8).join(', ')}${raised.size > 8 ? ', …' : ''}) last 11 ms in the animated PNGs: browsers play such short frames at 100 ms. The atlas, CSS and player keep the exact durations.`);
   if (!still) files.set('player.js', await readFile(new URL('./runtime.js', import.meta.url)));
   files.set('preview.html', Buffer.from(still ? sheetHTML(project) : previewHTML(project)));
-  files.set('README.txt', Buffer.from(tiles ? tilesetReadme(project, tiles, still) : spriteReadme(project)));
+  files.set('README.txt', Buffer.from((tiles ? tilesetReadme(project, tiles, still) : spriteReadme(project)) + notes.map(note => `\nGodot: ${note}\n`).join('')));
   // A forced export over an earlier export of this recipe removes the frame and animation PNGs that export's atlas
   // lists and this one no longer has. Another recipe's export in the same folder keeps its PNGs, and so does a PNG
   // put in frames/ by hand.
-  return { project, atlas, files, owns: { marker: `${name}.atlas.json`, folders: ['frames', 'animations'], match: /^(?:frames|animations)\/[^/]+\.png$/, listed: atlasFiles, peers: /\.atlas\.json$/, resources: bundleResources(name) } };
+  return { project, atlas, files, notes, owns: { marker: `${name}.atlas.json`, folders: ['frames', 'animations'], match: /^(?:frames|animations)\/[^/]+\.png$/, listed: atlasFiles, peers: /\.atlas\.json$/, resources: bundleResources(name) } };
 }
 // The top-level files an export writes only sometimes (a tile set's TileSet and Tiled tileset; an animated recipe's
 // SpriteFrames, CSS and player), each with how to tell that an export of this recipe wrote it: the text Pixelbolt writes

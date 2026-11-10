@@ -427,6 +427,8 @@ try {
   else if (asksForHelp(rest)) process.stdout.write(commandHelp(command));
   else {
     const { positional, options } = parseArgs(rest);
+    // presets --find water splash: the words after the first belong to the search, quoted or not.
+    if (command === 'presets' && typeof options.find === 'string' && positional.length) options.find = [options.find, ...positional.splice(0)].join(' ');
     if (positional.length > 1) throw new Error('Too many positional arguments');
     if (!Object.hasOwn(OPTIONS, command)) throw new Error(`Unknown command: ${command}. Run pixelbolt help.`);
     for (const key of Object.keys(options)) if (!OPTIONS[command].includes(key)) throw new Error(`--${key} is not supported by ${command}`);

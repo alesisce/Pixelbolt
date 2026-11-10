@@ -162,7 +162,7 @@ test('a trimmed sheet keeps every frame the canvas size: margins put the visible
   assert.deepEqual([byName.flicker.speed, byName.flicker.frames.map(frame => frame.duration)], [1000 / 33, [1, 34 / 33]]);
   assert.deepEqual([byName.strobe.speed, byName.strobe.loop, byName.strobe.frames.map(frame => frame.duration)], [120, false, [0.6, 12]]);
   // The fractional durations are reported once, naming the animations.
-  assert.deepEqual(bundle.project.warnings.filter(text => text.startsWith('godot-trim.tres')), ['godot-trim.tres: the frame times of animations flicker, strobe, hold share no step of 9 ms or more, so Godot gets fractional frame durations, kept as 32-bit floats: each frame plays within a ten-millionth of its length. Frame times in multiples of 10 ms are exact.']);
+  assert.deepEqual(bundle.notes.filter(text => text.startsWith('godot-trim.tres')), ['godot-trim.tres: the frame times of animations flicker, strobe, hold share no step of 9 ms or more, so Godot gets fractional frame durations, kept as 32-bit floats: each frame plays within a ten-millionth of its length. Frame times in multiples of 10 ms are exact.']);
 });
 
 test('sub-resource ids are what Godot accepts: hyphens become underscores, a clash gets a number, valid names keep theirs', async () => {

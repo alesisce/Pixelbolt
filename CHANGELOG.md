@@ -9,6 +9,8 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 Three more kinds of work went to fresh agents on the current build, with the rig and MCP tasks again (4 commands and 4 calls, no failures in either).
 
 - `compile --animation impact` (MCP `pixel_compile` `animation`) keeps only the animations named, with the frames they play. An agent asked for one spell's impact out of a preset of thirteen animations wrote a script to delete the other twelve from the source.
+- A SpriteFrames whose frame times Godot holds as fractions is no longer a warning in every reply: the timing is within a ten-millionth, and the fact is in the export's README.txt. Three agents had read it as something to fix.
+- `presets --find water splash` works without quotes.
 - `import` names the recipe after its file (`coin.png` becomes `coin`), not `imported`, unless `--name` says otherwise.
 - `patch --help` lists the changes a patch takes. The change format was only in the quick start.
 - The skill has a row for video frames (`sequence`), says that `frames` in `expect` counts what each animation plays, and that a preset's colour is changed with a patch of its palette.

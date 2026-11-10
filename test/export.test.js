@@ -46,7 +46,8 @@ test('animated PNGs give frames of 10 ms or less 11 ms, which browsers play as w
   assert.deepEqual(delays, [11, 11, 11]);
   assert.deepEqual(Object.values(JSON.parse(bundle.files.get('sample.atlas.json')).frames).map(frame => frame.duration), [5, 11]);
   // 5 and 11 ms share no step of 9 ms or more, so the Godot SpriteFrames says its durations are fractional.
-  assert.deepEqual(bundle.project.warnings, ['sample.tres: the frame times of animation once share no step of 9 ms or more, so Godot gets fractional frame durations, kept as 32-bit floats: each frame plays within a ten-millionth of its length. Frame times in multiples of 10 ms are exact.', '1 frame of 10 ms or less (a) last 11 ms in the animated PNGs: browsers play such short frames at 100 ms. The atlas, CSS and player keep the exact durations.']);
+  assert.deepEqual(bundle.project.warnings, ['1 frame of 10 ms or less (a) last 11 ms in the animated PNGs: browsers play such short frames at 100 ms. The atlas, CSS and player keep the exact durations.']); assert.match(bundle.files.get('README.txt').toString(), /\nGodot: sample\.tres: the frame times of animation once share no step/);
+  assert.deepEqual(bundle.notes, ['sample.tres: the frame times of animation once share no step of 9 ms or more, so Godot gets fractional frame durations, kept as 32-bit floats: each frame plays within a ten-millionth of its length. Frame times in multiples of 10 ms are exact.']);
   assert.deepEqual((await createBundle(tiny)).project.warnings, []);
 });
 test('bundle emits CSS for variable duration and multi-row atlas', async () => {

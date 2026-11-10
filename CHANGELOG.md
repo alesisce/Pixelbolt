@@ -14,7 +14,7 @@ Three tasks were given to fresh agents on the checkout from before this work and
 - A patch's report writes a colour the palette no longer names as its hex (`"from": "#d9a566"`), where it wrote `"0"` and explained it in a `legend`.
 - The quick start says that `from` copies a frame as it was finally drawn, its `pixels` corrections too.
 - `render --look` writes `look.png` into the export folder: the frames enlarged as a contact sheet. Agents were judging the art from the sprite sheet, which is at game size (a 256 x 32 strip). `render --gif` writes a GIF of each animation into `gifs/` (`--gif-scale 4` enlarges them), as MCP `pixel_render`'s `gif` does, and the check covers them: two of three agents on the older build had typed `render --gif` and been turned away. The skill's loop is now validate, inspect, patch, and one render that shows and exports everything.
-- A patch that recolours a palette key reports each frame in a line (`"transitions": [{"from": "#d9a566", "to": "c", "pixels": 8}]`) where it listed every pixel, and the quick start shows the change: `{"set": "palette.c", "value": "#8a5a2c"}`.
+- A patch that recolours a palette key reports each frame in a line (`"transitions": [{"from": "#d9a566", "to": "#8a5a2c (c)", "pixels": 8}]`) where it listed every pixel, and the quick start shows the change: `{"set": "palette.c", "value": "#8a5a2c"}`.
 - `hold`, `delay`, `time`, `ms` and `length` on a frame are answered with `did you mean "duration"?`, and the ellipse hint says how a centre and radius become its box.
 - A render's or a scene's `files` lists what to deliver. The preview page's scripts and README.txt are in the folder but not in the list (a lit scene listed 13 of them); `--list-files` (MCP `listFiles`) still lists every file.
 

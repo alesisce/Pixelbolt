@@ -118,7 +118,7 @@ test('comparison reports changed, inherited, added and retimed frames with exact
 test('comparison crops to the change, summarizes recolors and reports resized canvases', () => {
   const big = { version: 1, name: 'big', width: 32, height: 32, palette: { k: '#000', w: '#fff' }, frames: [{ name: 'a', ops: [{ op: 'rect', x: 4, y: 4, w: 20, h: 10, color: 'k' }] }, { name: 'b', ops: [{ op: 'pixel', color: 'w' }] }] };
   const recolor = compareProjects(renderProject(big), renderProject(patchRecipe(big, [{ set: 'palette.k', value: '#123456' }]).recipe));
-  assert.deepEqual(recolor.frames, { changed: [{ frame: 'a', pixels: 200, box: { x: 4, y: 4, w: 20, h: 10 }, transitions: [{ from: '#000000', to: 'k', pixels: 200 }] }], unchanged: ['b'] });
+  assert.deepEqual(recolor.frames, { changed: [{ frame: 'a', pixels: 200, box: { x: 4, y: 4, w: 20, h: 10 }, transitions: [{ from: '#000000', to: '#123456 (k)', pixels: 200 }] }], unchanged: ['b'] });
   // A colour the palette no longer names is written as its hex, so the report needs no legend.
   // Four or more pixels that all make one change are summed up; fewer, or a mix, are listed one by one.
   const few = { ...big, frames: [{ name: 'a', ops: [{ op: 'rect', x: 0, y: 0, w: 4, h: 1, color: 'k' }, { op: 'pixel', x: 0, y: 2, color: 'k' }] }] };

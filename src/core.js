@@ -1822,8 +1822,14 @@ export function compareProjects(before, after) {
   }
   // A colour with no one-letter palette key is written out where it is reported: its palette name, or its hex. Only
   // "?" (more colours than there are symbols) still needs a legend.
+  // Beside a hex the other side is a hex too, with its key: a recoloured key reads "#d9a566" to "#8a5a2c (c)", not
+  // a colour turning into a letter.
   const legend = namer.legend(), written = symbol => (symbol !== '?' && own(legend, symbol) ? legend[symbol].palette ?? legend[symbol].color : symbol);
-  for (const frame of changed) for (const item of frame.changes ?? frame.transitions ?? []) { item.from = written(item.from); item.to = written(item.to); }
+  const hex = value => value.startsWith('#'), keyed = key => (own(after.palette, key) ? `${toHex(parseColor(after.palette[key]))} (${key})` : key);
+  for (const frame of changed) for (const item of frame.changes ?? frame.transitions ?? []) {
+    const from = written(item.from), to = written(item.to);
+    item.from = hex(to) && !hex(from) ? keyed(from) : from; item.to = hex(from) && !hex(to) ? keyed(to) : to;
+  }
   if (own(legend, '?')) report.legend = { '?': legend['?'] };
   return report;
 }

@@ -39,7 +39,7 @@ export function readJoints(list, path, { bodies, byName }) {
       const body = byName.get(value.toLowerCase());
       if (!body) {
         const known = [...byName.values()].map(other => other.name).filter(Boolean);
-        fail(where, `unknown body ${JSON.stringify(value)}${known.length ? `; the bodies are ${known.join(', ')}` : ''}`);
+        fail(where, `unknown body ${JSON.stringify(value)}; a joint names a body by its name${known.length ? ` (this effect names ${known.join(', ')})` : ', and no body of this effect has one'}`);
       }
       const index = bodies.indexOf(body);
       if (index < 0) fail(where, `body ${JSON.stringify(value)} is not part of this effect`);
@@ -47,6 +47,7 @@ export function readJoints(list, path, { bodies, byName }) {
     };
     const first = reference(entry.a, `${at}.a`), second = reference(entry.b, `${at}.b`);
     if (first.index < 0 && second.index < 0) fail(`${at}.b`, 'a joint needs at least one body; both ends are the world');
+    if (first.index === second.index) fail(`${at}.b`, 'a joint joins two bodies, or a body and the world; both ends are the same body');
     const la = entry.anchorA === undefined ? [0, 0] : pair(entry.anchorA, `${at}.anchorA`, -4096, 4096);
     const lb = entry.anchorB === undefined ? [0, 0] : pair(entry.anchorB, `${at}.anchorB`, -4096, 4096);
     const pa = readPoint(first.body, la), pb = readPoint(second.body, lb);
@@ -63,7 +64,7 @@ export function readJoints(list, path, { bodies, byName }) {
     }
     let limit = null;
     if (entry.limit !== undefined) {
-      if (type !== 'hinge' && type !== 'weld') fail(`${at}.limit`, 'an angle limit goes with a hinge or a weld');
+      if (type !== 'hinge') fail(`${at}.limit`, type === 'weld' ? 'a weld holds the angle its bodies start at; an angle limit goes with a hinge' : 'an angle limit goes with a hinge');
       limit = pair(entry.limit, `${at}.limit`, -3600, 3600);
       if (limit[0] > limit[1]) fail(`${at}.limit`, 'expected [smallest, largest] angle in degrees');
     }
@@ -73,6 +74,7 @@ export function readJoints(list, path, { bodies, byName }) {
       names.add(entry.name.toLowerCase());
       return entry.name;
     })();
+    if (entry.stiffness !== undefined && type === 'rope') fail(`${at}.stiffness`, 'a rope pulls only when it is taut and has no stiffness to set; a spring or a distance joint has');
     const stiffness = type === 'spring' && entry.stiffness === undefined ? 0.4 : number(entry.stiffness ?? 1, `${at}.stiffness`, 0.05, 1);
     const damping = number(entry.damping ?? 0, `${at}.damping`, 0, 1);
     const breaks = entry.break === undefined ? null : number(entry.break, `${at}.break`, 0.01, 1000000);

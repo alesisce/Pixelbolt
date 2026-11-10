@@ -4,12 +4,22 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Found by the review before this release
+
+- A patch summary's colour changes left out the frames that changed sixteen pixels or fewer: recolouring the knight's plume reported 15 of its 45 pixels.
+- A scene image at a scale that passes what one PNG holds says which scale fits; it said "Invalid PNG dimensions". The scale runs from 1 to 16, as the option's own error said, not 8 as the help did.
+- `inspect --beside` names the recipe that lacks the frame or animation asked for, and `--palette` says its counts are over every frame whatever the view shows.
+- MCP `pixel_import` with a `path` names the recipe after the file, as the command line does.
+- `compile` of a tile set with `--size` says what `autotile` says; a PNG given where a recipe is expected is told so.
+- The command-line help names `inspect`'s `--layers` and `--reference`. The skill no longer says `sequence` takes a preset, and the craft notes no longer run `--motion` and `--view parts` together.
+
 ### Joints, ropes and cloth for rigid bodies
 
 Contributed by alesisce in #124.
 
 - A `pixelforge-bodies` effect takes `joints` (distance, rope, spring, hinge and weld, between two bodies or a body and the world, with anchors, angle limits and a `break` impulse), `ropes` (a chain of small hidden links between two anchors, drawn as a rope or a chain, that sags and can break) and `cloths` (a grid pinned to points, keys over time or bodies, with wind, gusts, collisions and tearing, drawn in palette shades). Existing sources compile to the same pixels: the seven earlier bodies goldens did not move.
 - Five presets: `rope-bridge`, `wrecking-ball`, `ragdoll`, `flag` and `cape`.
+- Found by a review before the release and fixed: a cloth pin with two or more `keys` crashed the compiler; a rope of many links hung stretched (73.7 pixels for 50 at 64 links, now 52), which a solver pass for each link of its longest chain cures; a `limit` on a weld, `stiffness` on a rope joint, a joint or rope with both ends on one body, a pin given two ways of being placed and a second pin on one particle were accepted and ignored, and are now refused by name.
 - Changed on the way in: a rope's links are given the weight to hold what hangs from it unless the source sets `density`. With the default a ball two thousand times a link's weight stretched the rope and fell to the floor, so the wrecking ball stopped beside its pyramid; it now swings through it, as on a rigid joint. The presets were retuned and looked at (the bridge hangs clear of the ground, the ragdoll's still tail is cut, the flag is loose enough to ripple, the cape hangs from the shoulders), and the new modules read numbers with the shared helpers.
 
 ### Which keys colour what, labelled comparisons, a level from rows

@@ -696,7 +696,7 @@ const joint = object({
   damping: num(0, 1, 'Velocity lost along the joint. Default 0.'),
   break: num(0.01, 1000000, 'Impulse that breaks it; omitted, it never breaks.'),
   collide: { type: 'boolean', description: 'Whether the two bodies still collide. Default false, so a ragdoll\'s neighbours or a rope\'s links pass through each other.' },
-  limit: { ...pairOf(num(-3600, 3600)), description: 'Hinge or weld: the allowed relative angle [smallest, largest] in degrees.' }
+  limit: { ...pairOf(num(-3600, 3600)), description: 'Hinge: the allowed relative angle [smallest, largest] in degrees.' }
 }, ['a', 'b', 'type']);
 const ropeAnchor = object({
   body: { type: 'string', description: 'A named body to hang this end from.' },

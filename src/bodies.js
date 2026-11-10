@@ -379,6 +379,7 @@ function readRopes(list, path, { bodies, byName, palette, joints }) {
     if (!isObject(entry)) fail(at, 'expected a rope');
     fields(entry, ROPE_FIELDS, at);
     const from = end(entry.from, `${at}.from`), to = end(entry.to, `${at}.to`);
+    if (from.body && from.body === to.body) fail(`${at}.to`, 'a rope hangs between two bodies, or a body and a point; both ends are the same body');
     const links = integer(entry.links ?? 12, `${at}.links`, 2, 64);
     if (bodies.length + links > LIMITS.bodies) fail(`${at}.links`, `the ropes and bodies make ${bodies.length + links} bodies, more than ${LIMITS.bodies}`);
     const slack = number(entry.slack ?? 0.15, `${at}.slack`, 0, 2);
@@ -752,6 +753,7 @@ export function createBodyWorld(effect, context) {
     return { ...joint, a, b, aIndex: a ? a.index : -1, bIndex: b ? b.index : -1, accN: 0, accA: 0, broken: false };
   });
   const ropes = (effect.ropes ?? []).map(rope => ({ ...rope, links: rope.linkIndices.map(index => bodies[index]), joints: rope.jointIndices.map(index => joints[index]) }));
+  const chain = Math.max(0, ...ropes.map(rope => rope.links.length));
   const cloths = (effect.cloths ?? []).map(definition => createCloth(definition, { bodies }));
   // A cloth's solid test reads the live world grid, which a fluid may replace when its obstacles move.
   const solidAt = (x, y) => {
@@ -1176,6 +1178,9 @@ export function createBodyWorld(effect, context) {
     }
     resetJoints(joints);
     for (let k = 0; k < iterations; k++) { solve(contacts, true); solveJoints(joints, dt, 1); }
+    // A pull travels along a chain one joint a pass, so a rope of many links gets as many more passes as its longest
+    // chain has links: without them each link stays a little stretched and a rope of 64 hangs half as long again.
+    if (chain) solveJoints(joints, dt, chain);
     // Positions, at no more than the speed limit (bodies started on top of each other were thrown at twice it).
     for (const b of bodies) {
       if (!dynamic(b) || b.asleep) continue;

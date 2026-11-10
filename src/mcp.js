@@ -379,7 +379,10 @@ export function createToolRunner({ directory, root, version }) {
           if (beside !== undefined) {
             if (inspection.native || inspection.grid) throw new PixelError('beside', 'beside draws several recipes in one sheet; native and grid read one recipe at a time');
             const others = [];
-            for (const id of beside) { const other = renderProject(await read(id), layers === undefined ? {} : { layers }); others.push({ ...inspectProject(other, inspection), name: `${other.name} ${id}` }); }
+            for (const id of beside) {
+              const other = renderProject(await read(id), layers === undefined ? {} : { layers });
+              try { others.push({ ...inspectProject(other, inspection), name: `${other.name} ${id}` }); } catch (error) { throw new PixelError(error.path ?? 'beside', `revision ${id} (${other.name}): ${error.message}`); }
+            }
             view = stackViews([{ ...view, name: project.name }, ...others]);
           }
         }
@@ -509,14 +512,16 @@ export function createToolRunner({ directory, root, version }) {
         return { content: [textContent(summary), imageContent(image)], ...(preview && preview({ width: frame.width, height: frame.height, frames: [{ name: document.name, duration: 100, data: sceneImage(frame, { mode: args.view ?? 'color', guides: args.guides }).data }], animations: {} })) };
       } else if (name === 'pixel_import') {
         if ((args.data === undefined) === (args.path === undefined)) throw new PixelError('arguments', 'send either data (base64 PNG) or path');
-        let bytes;
+        let bytes, fileName;
         if (args.data !== undefined) bytes = Buffer.from(args.data, 'base64');
         else {
           const file = path.resolve(root, args.path);
           await assertInside(file, root, 'path');
           bytes = await readFile(file);
+          // As the command line does: coin.png becomes "coin" where that is a name a recipe can have.
+          fileName = path.basename(file).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[^A-Za-z]+/, '').slice(0, 64) || undefined;
         }
-        const imported = importPNG(bytes, { ...(args.name !== undefined && { name: args.name }), ...(args.atlas !== undefined && { atlas: args.atlas }), ...(args.frame !== undefined && { frame: readSize(args.frame, 'frame') }), ...(args.padding !== undefined && { padding: args.padding }) });
+        const imported = importPNG(bytes, { ...(args.name !== undefined ? { name: args.name } : fileName && { name: fileName }), ...(args.atlas !== undefined && { atlas: args.atlas }), ...(args.frame !== undefined && { frame: readSize(args.frame, 'frame') }), ...(args.padding !== undefined && { padding: args.padding }) });
         const project = renderProject(imported.recipe), view = inspectProject(project, { maxCells: 256 });
         return { content: [textContent({ ok: true, revision: await remember(imported.recipe), name: project.name, width: project.width, height: project.height, frames: project.frames.length, provenance: imported.provenance, preview: viewSummary(view) }), imageContent(view.sheet)], ...(preview && preview(project)) };
       }

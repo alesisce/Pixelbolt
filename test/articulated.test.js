@@ -126,3 +126,31 @@ test('a heavy ball on a rope swings as it does on a rigid joint, where a rope of
   // A density the source gives is kept, and at 0.6 the rope stretches until the ball is on the floor.
   assert.ok(light.low >= 57, JSON.stringify(light));
 });
+
+test('what a joint, a rope or a pin cannot use is refused by name, and a pin with several keys compiles', () => {
+  const box = (name, x) => ({ name, shape: 'box', size: [4, 4], at: [x, 10], fill: 'k' });
+  const source = effect => ({ format: 'pixelforge-bodies', version: 1, name: 'checks', width: 48, height: 32, palette: { k: '#14141c', r: '#d7b56d' }, effects: { e: { frames: 8, bodies: [box('a', 10), box('b', 30)], ...effect } } });
+  const refused = (effect, path, message) => assert.throws(() => compileBodies(source(effect)), error => error.path === path && message.test(error.message), `${path}`);
+  refused({ joints: [{ type: 'weld', a: 'a', b: 'b', limit: [30, 60] }] }, 'bodies.effects.e.joints[0].limit', /a weld holds the angle its bodies start at; an angle limit goes with a hinge/);
+  refused({ joints: [{ type: 'rope', a: 'a', b: 'b', stiffness: 0.5 }] }, 'bodies.effects.e.joints[0].stiffness', /a rope pulls only when it is taut/);
+  refused({ joints: [{ type: 'hinge', a: 'a', b: 'a' }] }, 'bodies.effects.e.joints[0].b', /both ends are the same body/);
+  refused({ joints: [{ type: 'hinge', a: 'a', b: 'body1' }] }, 'bodies.effects.e.joints[0].b', /unknown body "body1"; a joint names a body by its name \(this effect names a, b\)/);
+  refused({ ropes: [{ from: { body: 'a' }, to: { body: 'a', point: [2, 0] }, fill: 'r' }] }, 'bodies.effects.e.ropes[0].to', /both ends are the same body/);
+  const cloth = pins => ({ cloths: [{ at: [10, 4], size: [4, 4], fill: 'r', pins }] });
+  refused(cloth([{ at: [0, 0], to: 'a', x: 3 }]), 'bodies.effects.e.cloths[0].pins[0].x', /to already places this one/);
+  refused(cloth([{ at: [0, 0] }, { at: [0, 0], x: 12, y: 5 }]), 'bodies.effects.e.cloths[0].pins[1].at', /particle \[0, 0\] already has a pin/);
+  refused(cloth([{ at: [0, 0], keys: [[0, 10, 4], [0, 12, 4]] }]), 'bodies.effects.e.cloths[0].pins[0].keys[1][0]', /frames increase strictly/);
+  // Two keys crashed the compiler before any of that was checked.
+  assert.equal(compileBodies(source(cloth([{ at: [0, 0], keys: [[0, 10, 4], [6, 14, 4]] }, { at: [3, 0] }]))).recipe.frames.length, 8);
+});
+
+test('a rope hangs at its length however many links it is made of', () => {
+  const hang = links => {
+    const made = compileBodies({ format: 'pixelforge-bodies', version: 1, name: 'hang', width: 64, height: 128, palette: { k: '#14141c', r: '#d7b56d' },
+      effects: { e: { frames: 160, gravity: [0, 0.3], bodies: [{ name: 'a', shape: 'box', size: [6, 6], at: [32, 10], fixed: true, fill: 'k' }, { name: 'b', shape: 'box', size: [10, 10], at: [32, 60], density: 8, drag: 0.3, fill: 'k' }],
+        ropes: [{ from: { body: 'a' }, to: { body: 'b' }, links, slack: 0, fill: 'r' }] } } });
+    return made.metadata.effects.e.paths.b.at(-1)[1] - 10;
+  };
+  // 50 pixels from anchor to load. With one solver pass a joint, 64 links hung at 73.7.
+  for (const links of [12, 40, 64]) { const length = hang(links); assert.ok(length > 49 && length < 53.5, `${links} links hang ${length.toFixed(1)} long`); }
+});

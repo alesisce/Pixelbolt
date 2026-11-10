@@ -863,6 +863,8 @@ const depthTint = t => {
 export function sceneImage(view, { mode = 'color', scale = 1, guides } = {}) {
   if (!['color', 'grayscale', 'depth'].includes(mode)) fail('scene.view', 'expected color, grayscale or depth');
   const { width, height } = view, s = scale, w = width * s, h = height * s;
+  if (!Number.isInteger(s) || s < 1 || s > 16) fail('scale', 'expected a whole number from 1 to 16');
+  if (w * h > MAX_PLANE) fail('scale', `at ${s} times its size the ${width}×${height} scene is ${w}×${h}, more pixels than one image holds; ${Math.floor(Math.sqrt(MAX_PLANE / (width * height)))} or less fits`);
   const checked = guides === undefined || guides === null ? null : readGuides(guides, 'guides');
   let native = mode === 'grayscale' ? reviewPixels(view.data, 'grayscale') : view.data, out;
   if (mode === 'depth') {

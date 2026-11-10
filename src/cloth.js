@@ -97,6 +97,8 @@ export function readCloths(list, path, { bodies, byName, palette }) {
         if (!nodes[index].present) fail(`${pp}.at`, 'that particle is a hole in the mask');
         let bodyIndex = -1, keys = null, x = nodes[index].x, y = nodes[index].y;
         if (pin.to !== undefined && pin.keys !== undefined) fail(`${pp}.keys`, 'a pin follows a body or keys, not both');
+        for (const key of ['x', 'y']) if (pin[key] !== undefined && (pin.to !== undefined || pin.keys !== undefined)) fail(`${pp}.${key}`, `a pin is held at x and y, follows a body (to) or follows keys: ${pin.to !== undefined ? 'to' : 'keys'} already places this one`);
+        if (pins.some(other => other.index === index)) fail(`${pp}.at`, `particle [${u}, ${v}] already has a pin`);
         if (pin.point !== undefined && pin.to === undefined) fail(`${pp}.point`, 'point goes with a body');
         if (pin.to !== undefined) {
           if (typeof pin.to !== 'string') fail(`${pp}.to`, 'expected a body name');
@@ -116,7 +118,7 @@ export function readCloths(list, path, { bodies, byName, palette }) {
           keys = pin.keys.map((value, j) => {
             if (!Array.isArray(value) || value.length !== 3) fail(`${pp}.keys[${j}]`, 'expected [frame, x, y]');
             const frame = integer(value[0], `${pp}.keys[${j}][0]`, 0, 18000);
-            if (j && frame <= keys[j - 1][0]) fail(`${pp}.keys[${j}][0]`, 'frames increase strictly');
+            if (j && frame <= pin.keys[j - 1][0]) fail(`${pp}.keys[${j}][0]`, 'frames increase strictly');
             return [frame, number(value[1], `${pp}.keys[${j}][1]`, -4096, 4096), number(value[2], `${pp}.keys[${j}][2]`, -4096, 4096)];
           });
         }

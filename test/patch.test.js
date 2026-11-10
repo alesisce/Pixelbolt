@@ -144,6 +144,10 @@ test('a change to many frames is one summary in a reply, and a change to a few s
   assert.deepEqual(brief.frames.changed, { count: 20, frames: 'every frame', pixels, box: { x: 0, y: 0, w: 7, h: 6 }, transitions: [{ from: '#ff0000', to: '#00ff00 (a)', pixels }],
     most: [{ frame: 'f-3', pixels: 42, box: { x: 0, y: 0, w: 7, h: 6 } }, { frame: 'f-7', pixels: 42, box: { x: 0, y: 0, w: 7, h: 6 } }, { frame: 'f-11', pixels: 42, box: { x: 0, y: 0, w: 7, h: 6 } }] });
   assert.ok(JSON.stringify(brief).length * 4 < JSON.stringify(full).length);
+  // Frames with few changed pixels list each one; the summary's colour changes count those pixels too.
+  const dots = (count, color) => ({ ...strip(count, '#ff0000'), frames: strip(count, '#ff0000').frames.map(frame => ({ ...frame, ops: [...frame.ops, { op: 'pixel', x: 0, y: 7, color }] })) });
+  const few_ = briefComparison((({ image: _, ...rest }) => rest)(compareProjects(renderProject(dots(12, 'a')), renderProject(dots(12, 'b')))));
+  assert.deepEqual([few_.frames.changed.pixels, few_.frames.changed.transitions], [12, [{ from: 'a', to: 'b', pixels: 12 }]]);
   // Some frames changed and some did not: both are named, numbered runs written as runs.
   const before = strip(30, '#ff0000'), after = { ...before, frames: before.frames.map((frame, i) => (i < 12 ? { ...frame, ops: [...frame.ops, { op: 'pixel', x: 0, y: 7, color: 'b' }] } : frame)) };
   const partly = briefComparison(compareProjects(renderProject(before), renderProject(after)));

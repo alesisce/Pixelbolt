@@ -47,7 +47,7 @@ Short checklists by subject, for the pixel art skill: read the one section the j
 - In a side view, draw far limbs a ramp step darker (not the darkest step, which merges with the outline) and give paired legs the same rest angles. Near limbs stay in front for the whole cycle.
 - For a four-legged animal, start from `examples/fox.poses.json`: `rig.fore` and `rig.hind` take the place of `legs`, and the templates `walk`, `trot` and `run` set the gait.
 - Start any turned part (boots, hands, held weapons, a tilted head) from a draft, never from nothing: `pixelbolt compile <source.poses.json> --draft-views boot:15,345 --preview <drafts.png>` (MCP `pixel_compile` with `draftViews`) prints the turned rows to correct by eye and paste into `parts.<name>.views`.
-- Review the silhouette, the difference between key poses, planted contacts, the loop join and the gait with `pixelbolt inspect <source> --motion run --speed 48`, and `--view parts` to name the part behind a stray pixel. Don't infer contact quality from a still sheet. More in `help workflow "Authored poses, attachments and cues"`.
+- Review the silhouette, the difference between key poses, planted contacts, the loop join and the gait with `pixelbolt inspect <source> --motion run --speed 48`, and in a run of its own `inspect <recipe> --view parts` to name the part behind a stray pixel. Don't infer contact quality from a still sheet. More in `help workflow "Authored poses, attachments and cues"`.
 
 ## Colour variants
 

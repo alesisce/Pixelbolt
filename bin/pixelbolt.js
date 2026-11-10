@@ -85,7 +85,7 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            Build a 47-tile blob or 16-tile cardinal set from template rows or a
                                            terrain description; --preview draws every tile over a test map
   pixelbolt scene <scene.json> --out dir   Export a bounded scene review and aligned material passes
-  pixelbolt scene <scene.json> --image view.png [--time ms] [--view color|grayscale|depth] [--scale 1-8]
+  pixelbolt scene <scene.json> --image view.png [--time ms] [--view color|grayscale|depth] [--scale 1-16]
                     [--guides json]        One enlarged view at one time; depth lists who covers whom
   pixelbolt overlay <recipe.json> --changes edits.json --out fixes.json [--selections regions.json]
   pixelbolt import <image.png> --out recipe.json [--atlas atlas.json | --frame 24x24 [--padding 1]] [--name imported]
@@ -108,6 +108,8 @@ each animation, and what the preview page runs on (its scripts, README.txt); --l
 Palette references ({"$ref": "palette.json"}), scene asset files and a normals source's recipe resolve from the
 input file's folder.
 Inspect: --frames a,b or --animation name picks cells (* and ? in a name match frames: --frames 'flash-*');
+--layers body,head draws only those named layers; --reference earlier.json compares with another recipe (a
+before/after image beside --out, and the pixels that changed);
 --step n [--offset k] keeps every nth cell from position k (0 is the first); --region x,y,w,h crops;
 --animation name --every 100 draws a cell per 100 ms of playback, so holds and quick steps show as they play,
 and lists the pixels each step changes;
@@ -267,7 +269,9 @@ async function readProject(file, input = INPUT_FILE) {
   let source;
   if (file === '-') { takeStdin(input); const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); source = Buffer.concat(chunks).toString('utf8'); }
   else source = await readFile(file, 'utf8');
-  return JSON.parse(source.replace(/^﻿/, ''));
+  try { return JSON.parse(source.replace(/^﻿/, '')); } catch (error) {
+    throw new Error(`${file === '-' ? 'stdin' : file} is not JSON (${source.startsWith('\u0089PNG') || source.startsWith('\ufffdPNG') ? 'it is a PNG image: import turns one into a recipe' : error.message}); expected a recipe or source file`);
+  }
 }
 // Reads a document and inlines its references relative to its own folder (stdin: the working directory).
 async function readResolved(file, input = INPUT_FILE) {
@@ -554,7 +558,7 @@ try {
         }
         // --size: the compiled drawing on a canvas of another size (cut or given margins, never scaled).
         if (options.size !== undefined) {
-          if (command === 'autotile') throw new Error('--size goes with compile: a tile set\'s size is its tile, set in the source');
+          if (command === 'autotile' || compile === compileAutotile) throw new Error('--size: a tile set\'s size is its tile, set in the source');
           const { recipe, resized: moved } = resizeRecipe(compiled.recipe, options.size, '--size'), cut = resizeWarning(moved, [recipe.width, recipe.height]);
           compiled.recipe = recipe; resized = moved;
           if (cut) warnings.push(cut);
@@ -636,7 +640,9 @@ try {
         const others = [];
         for (const file of besideFiles) {
           const { document } = await readResolved(file, '--beside'), other = renderProject(Object.hasOwn(COMPILERS, document?.format ?? '') ? COMPILERS[document.format](document).recipe : document, layerOptions);
-          others.push({ ...inspectProject(other, inspectOptions(options)), name: path.basename(file) });
+          let view;
+          try { view = inspectProject(other, inspectOptions(options)); } catch (error) { throw Object.assign(new Error(`--beside ${file}: ${error.message}`), { path: error.path }); }
+          others.push({ ...view, name: path.basename(file) });
         }
         drawn = stackViews([{ ...view, name: positional[0] === '-' ? project.name : path.basename(positional[0]) }, ...others]);
       }

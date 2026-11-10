@@ -111,3 +111,11 @@ test('a starter material given only new colours is told that it replaced the tab
   assert.throws(() => compilePowder(source({ gold: { colors: ['#f2c14e'] } })), /powder\.materials\.gold\.state: expected one of powder, liquid, gas, solid, fire$/);
   assert.equal(compilePowder(source({ sand: { state: 'powder', density: 16, colors: ['#f2c14e'] } })).recipe.frames.length, 4);
 });
+
+test('a scene image larger than one PNG holds says which scale fits', async () => {
+  const { sceneImage } = await import('../src/scene.js');
+  const view = renderScene(prepareScene({ format: 'pixelforge-scene', version: 1, name: 'wide', width: 1024, height: 256, assets: {}, instances: [] }), { lit: false });
+  assert.throws(() => sceneImage(view, { scale: 9 }), /scale: at 9 times its size the 1024×256 scene is 9216×2304, more pixels than one image holds; 8 or less fits/);
+  assert.throws(() => sceneImage(view, { scale: 17 }), /scale: expected a whole number from 1 to 16/);
+  assert.equal(sceneImage(view, { scale: 8 }).width, 8192);
+});

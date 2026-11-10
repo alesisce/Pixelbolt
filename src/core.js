@@ -1503,7 +1503,7 @@ export function paletteUse(project) {
   };
   const ramps = (project.ramps ?? []).map(ramp => ramp.filter(key => use.has(key))).filter(ramp => ramp.length), ramped = new Set(ramps.flat());
   const others = [...use.keys()].filter(key => !ramped.has(key)).sort((a, b) => use.get(b).pixels - use.get(a).pixels), twins = new Set(same.map(text => text.split(' ')[0])), unused = Object.keys(project.palette).filter(key => !use.has(key) && !twins.has(key));
-  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(same.length && { same }), ...(unused.length && { unused }), ...(blended && { blended }), layers: project.ownerNames.join(', ') };
+  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(same.length && { same }), ...(unused.length && { unused }), ...(blended && { blended }), layers: project.ownerNames.join(', '), counted: `every pixel of ${project.frames.length === 1 ? 'the one frame' : `all ${project.frames.length} frames`}, whatever the view shows` };
 }
 
 // The same view of several recipes as one image, each sheet under the one before and left-aligned, with its name
@@ -1813,7 +1813,9 @@ export function briefComparison(report) {
   const brief = list => (list.length <= COMPARED * 2 ? list : { count: list.length, frames: nameRuns(list).join(', ') });
   if (changed.length <= COMPARED) return { ...report, frames: { changed, unchanged: brief(unchanged), ...rest } };
   const measured = changed.filter(entry => entry.box), sums = new Map();
-  for (const entry of changed) for (const { from, to, pixels } of entry.transitions ?? []) { const key = `${from}\n${to}`; sums.set(key, (sums.get(key) ?? 0) + pixels); }
+  // A frame with few changed pixels lists each one; a frame with many, its colour changes. Both are counted.
+  const add = (from, to, pixels) => { const key = `${from}\n${to}`; sums.set(key, (sums.get(key) ?? 0) + pixels); };
+  for (const entry of changed) { for (const { from, to, pixels } of entry.transitions ?? []) add(from, to, pixels); for (const { from, to } of entry.changes ?? []) add(from, to, 1); }
   const box = measured.reduce((all, { box: b }) => (all ? { x: Math.min(all.x, b.x), y: Math.min(all.y, b.y), x2: Math.max(all.x2, b.x + b.w), y2: Math.max(all.y2, b.y + b.h) } : { x: b.x, y: b.y, x2: b.x + b.w, y2: b.y + b.h }), null);
   const transitions = [...sums].sort((a, b) => b[1] - a[1]).slice(0, COMPARED).map(([key, pixels]) => ({ from: key.split('\n')[0], to: key.split('\n')[1], pixels }));
   return { ...report, frames: {

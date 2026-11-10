@@ -464,15 +464,18 @@ export function layeredTestMapRecipe(recipe, layers, { background } = {}) {
 }
 // A one-frame recipe that draws a compiled set's templates over the test map (variants with templates of their own
 // mixed in by position, as often as `weights` say), on `background` when given. With `slopes` (see slopeTiles), the
-// slopes' map below it, in the slope-<slope> symbols, the ground going on past its sides and bottom.
-export function testMapRecipe(recipe, { templates, weights, mode = 'blob', background, slopes }) {
-  const tile = recipe.width, width = Math.max(TEST_MAP[0].length, slopes ? SLOPE_MAP[0].length : 0) * tile, height = (TEST_MAP.length + (slopes ? SLOPE_MAP.length : 0)) * tile;
+// slopes' map below it, in the slope-<slope> symbols, the ground going on past its sides and bottom. With `rows`, that
+// map alone in place of both: a level of the caller's own.
+export function testMapRecipe(recipe, { templates, weights, mode = 'blob', background, slopes, rows }) {
+  const tile = recipe.width, width = (rows ? rows[0].length : Math.max(TEST_MAP[0].length, slopes ? SLOPE_MAP[0].length : 0)) * tile, height = (rows ? rows.length : TEST_MAP.length + (slopes ? SLOPE_MAP.length : 0)) * tile;
   const names = [...templates, ...(slopes ?? []).flatMap(slope => [`slope-${slope.key}`, ...(slope.foot ? [`slope-${slope.key}-foot`] : [])])];
   const symbols = Object.fromEntries(names.map(name => [name, recipe.symbols[name]]));
   const set = templates.length === 1 ? { template: templates[0], autotile: mode } : { templates, ...(weights && { weights }), autotile: mode };
-  const hills = slopes ? [{ op: 'tilemap', y: TEST_MAP.length * tile, tile: [tile, tile], rows: [...SLOPE_MAP], outside: 'match', legend: slopeLegend(slopes, set, key => ({ symbol: `slope-${key}` })) }] : [];
+  const legend = slopes ? slopeLegend(slopes, set, key => ({ symbol: `slope-${key}` })) : { '#': set };
+  const maps = rows ? [{ op: 'tilemap', tile: [tile, tile], rows: [...rows], outside: 'match', legend }]
+    : [{ op: 'tilemap', tile: [tile, tile], rows: [...TEST_MAP], legend: { '#': set } }, ...(slopes ? [{ op: 'tilemap', y: TEST_MAP.length * tile, tile: [tile, tile], rows: [...SLOPE_MAP], outside: 'match', legend }] : [])];
   return { version: 1, name: testMapName(recipe.name), width, height, palette: recipe.palette, ...(recipe.ramps && { ramps: recipe.ramps }), symbols,
-    frames: [{ name: 'test-map', ops: [...(background !== undefined ? [{ op: 'rect', x: 0, y: 0, w: width, h: height, color: background }] : []), { op: 'tilemap', tile: [tile, tile], rows: [...TEST_MAP], legend: { '#': set } }, ...hills] }] };
+    frames: [{ name: 'test-map', ops: [...(background !== undefined ? [{ op: 'rect', x: 0, y: 0, w: width, h: height, color: background }] : []), ...maps] }] };
 }
 // The enlargement that shows a test map at about 768 pixels across, as scene views are.
 export const testMapScale = recipe => Math.max(1, Math.min(8, Math.floor(768 / Math.max(recipe.width, recipe.height))));

@@ -4,6 +4,12 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Which keys colour what, labelled comparisons, a level from rows
+
+- `inspect <recipe> --palette` (MCP `pixel_inspect` `palette: true`) lists each palette key with its colour, its pixels and the layers or pose parts it colours, a ramp's keys together dark to light: for the fox, `R r o y` on the chest, hips and head, `v w` on the tail tip and bib. Two agents asked for a colour variant rendered the sheet and guessed which keys were the fur.
+- The rows of `inspect --beside` carry their names in the image, above each sheet.
+- A tile template draws a level of your own: `"preview": {"rows": [...]}` (`#` terrain, `.` nothing, the set's slope characters) is drawn by `--preview` in place of the test map, up to 4096 pixels a side, so a level strip needs no scene file. A fresh agent asked for one wrote a script to build the scene JSON.
+
 ### Help that answers with a page, not a book; five more cold runs
 
 Five more kinds of work went to fresh agents: a platformer tile set with slopes, a jump and a run added to the knight, a title banner in the pixel font, three team colours of the hero, and a torch over MCP. All five delivered; these are what they tripped on.

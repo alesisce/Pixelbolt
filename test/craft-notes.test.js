@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { compileAutotile } from '../src/authoring.js';
 import { tilemapEntry, tilemapOf } from '../src/autotile.js';
+import { renderProject } from '../src/core.js';
 import { compileFluid } from '../src/fluid.js';
 import { compileEffects } from '../src/fx.js';
 import { compileBodies } from '../src/bodies.js';
@@ -79,4 +80,25 @@ test('a symbol or grid with a miscounted row names the row and both widths, in e
   assert.throws(() => compileBodies({ ...drop, symbols: { ...drop.symbols, bad: rows } }), { path: 'bodies.symbols.bad[1]', message: said });
   const coin = await example('coin.json');
   assert.throws(() => patchRecipe(coin, [{ grid: `frames[${coin.frames[0].name}]`, value: { x: 0, y: 0, rows } }]), { message: said });
+});
+
+test('a template draws a level of its own rows in place of the test map, as a scene draws the same map', async () => {
+  const ground = await example('ground.autotile.json'), meadow = await example('meadow.autotile.json');
+  const rows = ['............................', '..../##\\........uU####Dd....', '.../####\\.....uU########Dd..', '################...#########', '################...#########'];
+  const made = compileAutotile({ ...ground, preview: { background: '#8fd3ff', rows } }), level = made.preview;
+  assert.deepEqual([level.width, level.height, level.frames.length, level.frames[0].ops.at(-1).rows], [28 * 16, 5 * 16, 1, rows]);
+  // The set itself is what it is without the rows: they change the picture, never the tiles.
+  assert.deepEqual(made.recipe, compileAutotile(ground).recipe);
+  // 448 pixels wide: one scene, drawn from the reply's tilemap with the same rows, shows the same level.
+  const drawn = renderProject(level).frames[0].data;
+  const scene = renderScene(prepareScene({ format: 'pixelforge-scene', version: 1, name: 'level', width: 448, height: 80, background: '#8fd3ff', assets: { ground: made.recipe },
+    instances: [{ asset: 'ground', at: [0, 0], tilemap: { ...tilemapOf(made.recipe, made.metadata), rows, outside: 'match' } }] }), { lit: false });
+  assert.deepEqual(scene.data, drawn);
+  // A set without slopes takes # and . alone, and every mistake is named where it is.
+  assert.equal(compileAutotile({ ...meadow, preview: { rows: ['.##.', '####'] } }).preview.width, 64);
+  assert.throws(() => compileAutotile({ ...meadow, preview: { rows: ['.#/.', '####'] } }), /autotile\.preview\.rows\[0\]: character "\/" at column 2 is not one this set draws: # \. \(a set with slopes has a character for each\)/);
+  assert.throws(() => compileAutotile({ ...ground, preview: { rows: ['.#x.'] } }), /character "x" at column 2 is not one this set draws: # \. \/ \\ u U D d$/);
+  assert.throws(() => compileAutotile({ ...ground, preview: { rows: ['####', '###'] } }), /autotile\.preview\.rows\[1\]: all rows must be 4 characters wide, as row 0 is: row 1 has 3/);
+  assert.throws(() => compileAutotile({ ...ground, preview: { rows: ['#'.repeat(257)] } }), /257 by 1 tiles of 16 pixels is more than one picture holds/);
+  assert.throws(() => compileAutotile({ ...ground, preview: { rows: [] } }), /autotile\.preview\.rows: expected 1–256 equal-width text rows of # \. \//);
 });

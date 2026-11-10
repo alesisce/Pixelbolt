@@ -1,5 +1,5 @@
 // Optional authoring compilers. All output is ordinary, editable version-1 recipe data.
-import { PixelError, CANVAS_SIDE, parseColor, renderProject, describeStampRecipe, readRows, pictureSheet, fail } from './core.js';
+import { PixelError, CANVAS_SIDE, parseColor, renderProject, describeStampRecipe, readRows, pictureSheet, fail, sameWidth } from './core.js';
 import { AUTOTILE_MODES, MODE_MASKS, MODE_BITS, tilePieces, templatePiece } from './autotile.js';
 import { terrainTemplate, mergeTerrain, normalTerrain, readTerrain, templateSeams, seamWarnings, testMapRecipe, layeredTestMapRecipe } from './terrain.js';
 import { slopeTiles, slopeCollision, slopeLegend, SLOPE_MAP } from './slopes.js';
@@ -813,7 +813,7 @@ export function compileAutotile(source) {
   });
   if (source.animation !== undefined && (typeof source.animation !== 'string' || !source.animation.includes('{mask}'))) fail('autotile.animation', 'expected an animation name template containing {mask}');
   if (source.preview !== undefined) {
-    fields(source.preview, ['background'], 'autotile.preview');
+    fields(source.preview, ['background', 'rows'], 'autotile.preview');
     if (source.preview.background !== undefined) parseColor(source.preview.background, palette, 'autotile.preview.background');
   }
   const shape = terrain === undefined ? undefined : readTerrain(terrain, { tile, palette, path: 'autotile.terrain' }), box = collisionBox(source.collision, { tile, mode, terrain: shape });
@@ -856,7 +856,17 @@ export function compileAutotile(source) {
   const share = new Map();
   for (const variant of variants) share.set(symbolOf(variant), (share.get(symbolOf(variant)) ?? 0) + (variant.weight ?? 1));
   const most = Math.max(...share.values()), weighted = variants.some(variant => (variant.weight ?? 1) !== 1);
-  const preview = testMapRecipe(recipe, { templates: [...share.keys()], ...(weighted && { weights: [...share.values()].map(sum => Math.max(1, Math.round(sum * Math.min(1, 1000 / most)))) }), mode, background: source.preview?.background, ...(slopes && { slopes }) });
+  // preview.rows: a map of the caller's own drawn in place of the test map, so a level laid out in characters is one
+  // picture from the template alone: # for the terrain, . for nothing, and the set's slope characters.
+  const level = source.preview?.rows;
+  if (level !== undefined) {
+    const known = `#.${(slopes ?? []).map(slope => slope.char).join('')}`, said = [...known].join(' ');
+    if (!Array.isArray(level) || !level.length || level.length > 256 || level.some(row => typeof row !== 'string') || !level[0].length) fail('autotile.preview.rows', `expected 1–256 equal-width text rows of ${said}`);
+    sameWidth(level, 'autotile.preview.rows');
+    level.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (!known.includes(row[x])) fail(`autotile.preview.rows[${y}]`, `character ${JSON.stringify(row[x])} at column ${x} is not one this set draws: ${said}${slopes ? '' : ' (a set with slopes has a character for each)'}`); });
+    if (level[0].length * tile > 4096 || level.length * tile > 4096 || level[0].length * level.length * tile * tile > 4194304) fail('autotile.preview.rows', `${level[0].length} by ${level.length} tiles of ${tile} pixels is more than one picture holds (4096 a side, 4,194,304 pixels)`);
+  }
+  const preview = testMapRecipe(recipe, { ...(level && { rows: level }), templates: [...share.keys()], ...(weighted && { weights: [...share.values()].map(sum => Math.max(1, Math.round(sum * Math.min(1, 1000 / most)))) }), mode, background: source.preview?.background, ...(slopes && { slopes }) });
   // For maps with slopes: a scene legend that draws the set (# its terrain, a foot under each slope that has one) and the
   // slopes by their characters, and a map holding every slope.
   const setEntry = source.variants === undefined ? { frame: source.frame } : { frames: variants.map(variant => source.frame.replaceAll('{variant}', variant.name)), ...(variants.some(variant => (variant.weight ?? 1) !== 1) && { weights: variants.map(variant => variant.weight ?? 1) }) };

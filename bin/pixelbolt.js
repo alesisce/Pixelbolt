@@ -12,7 +12,7 @@ import { resizeRecipe, resizeWarning, resizeMargins, keepFrames, keepAnimations 
 import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
-import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, briefComparison, errorReply, tilemapOf, stackViews, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
+import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, briefComparison, errorReply, tilemapOf, stackViews, paletteUse, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 // A reader that stops early (`| head -1`) closes the pipe: stop quietly, as other command-line tools do. Commands print
 // their reply after writing their files, so only the rest of the reply is lost.
@@ -111,6 +111,8 @@ Inspect: --frames a,b or --animation name picks cells (* and ? in a name match f
 and lists the pixels each step changes;
 --grid adds palette-key rows; --scale 1-16 and --background color style the sheet.
 --view color|silhouette|grayscale|onion|tile|parts (each pixel coloured by the layer or pose part that drew it);
+--palette lists each palette key with its colour, its pixels and the layers or pose parts it colours (ramps
+together, dark to light): which keys to change for a colour variant;
 --beside b.json,c.json draws the same view of up to eight more recipes under this one, in the one image, to compare
 variants (the reply's stack says where each starts);
 --native adds a 1x PNG; --diagnostics adds advisory evidence (past 8 frames, totals and the three frames with the
@@ -144,11 +146,11 @@ Checkout: node bin/pixelbolt.js <command>. Portable build folder: .\\pixelbolt (
 
 // The options each command takes: the one place an option is listed. One named in FLAGS takes no value; every other
 // takes the argument after it.
-const FLAGS = new Set(['force', 'grid', 'native', 'diagnostics', 'open', 'expand', 'embed-recipe', 'embedded', 'project', 'list-files', 'full', 'gif', 'look']);
+const FLAGS = new Set(['force', 'grid', 'native', 'diagnostics', 'palette', 'open', 'expand', 'embed-recipe', 'embedded', 'project', 'list-files', 'full', 'gif', 'look']);
 const OPTIONS = {
   init: ['force'],
   validate: ['fps'],
-  inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'beside', 'guides', 'motion', 'speed', 'ground', 'metadata'],
+  inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'beside', 'palette', 'guides', 'motion', 'speed', 'ground', 'metadata'],
   patch: ['changes', 'out', 'image', 'force'],
   render: ['out', 'force', 'expect', 'animation', 'list-files', 'embed-recipe', 'gif', 'gif-scale', 'look'],
   gif: ['out', 'animation', 'scale', 'background', 'force', 'preset', 'size', 'frames', 'sheet'],
@@ -611,11 +613,11 @@ try {
       const layerOptions = options.layers === undefined ? {} : { layers: options.layers.split(',') };
       if (!options.motion && ['speed', 'ground', 'metadata'].some(key => options[key] !== undefined)) throw new Error('--speed, --ground and --metadata require --motion');
       if (options.full && !options.diagnostics) throw new Error('--full goes with --diagnostics: it lists the counts of every frame');
-      if (options.motion) for (const key of ['frames', 'animation', 'region', 'grid', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'beside', 'guides']) if (options[key] !== undefined) throw new Error(`--${key} cannot be combined with --motion`);
+      if (options.motion) for (const key of ['frames', 'animation', 'region', 'grid', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'beside', 'palette', 'guides']) if (options[key] !== undefined) throw new Error(`--${key} cannot be combined with --motion`);
       const input = await readResolved(positional[0]), compiled = input.document.format === 'pixelforge-poses' ? compilePoses(input.document) : input.document.format === 'pixelforge-wave' ? compileWaves(input.document) : null;
       if (input.document.format === 'pixelforge-wave' && options.motion) throw new Error('--motion reviews character poses; inspect a wave without --motion');
       if (compiled && options.metadata) throw new Error('A pose source supplies its own metadata; omit --metadata');
-      const recipe = compiled?.recipe ?? input.document, project = renderProject(recipe, { ...layerOptions, ...(options.view === 'parts' && { owners: true }) });
+      const recipe = compiled?.recipe ?? input.document, project = renderProject(recipe, { ...layerOptions, ...((options.view === 'parts' || options.palette) && { owners: true }) });
       const comparison = options.reference ? compareProjects(renderProject((await readResolved(options.reference, '--reference')).document, layerOptions), project) : undefined;
       const { image: referenceImage, ...comparisonReport } = comparison ?? {};
       const view = options.motion ? inspectMotion(project, { animation: options.motion, metadata: compiled?.metadata ?? (options.metadata ? await readProject(options.metadata, '--metadata') : undefined),
@@ -639,7 +641,7 @@ try {
       const written = await writeOutputs(options.out ? { image: [options.out, encodePNG(data, sheet.width, sheet.height), '--out'], ...(view.nativeSheet && { nativeImage: [options.out.replace(/\.png$/i, '.native.png'), encodePNG(view.nativeSheet.data, view.nativeSheet.width, view.nativeSheet.height), 'The --native sheet beside --out'] }), ...(referenceImage && { referenceImage: [options.out.replace(/\.png$/i, '.reference.png'), encodePNG(referenceImage.sheet.data, referenceImage.sheet.width, referenceImage.sheet.height), 'The --reference comparison beside --out'] }) } : {}, options.force, [...inputsOf(input), ...filesRead(options.reference, options.metadata, ...besideFiles)]);
       if (view.diagnostics && !options.full) view.diagnostics = briefDiagnostics(view.diagnostics);
       // Grid rows line up for reading; a short row of a table (a cell, a frame's counts, a box) stays on one line.
-      print({ ok: true, ...summary(project, recipe), ...drawn, cells: briefCells(view.cells), warnings: [...(compiled?.warnings ?? []), ...project.warnings], sheet, nativeSheet: view.nativeSheet ? { ...view.nativeSheet, data: undefined } : undefined, ...(comparison && { comparison: briefComparison(comparisonReport) }), ...written, ...referenced(input) });
+      print({ ok: true, ...summary(project, recipe), ...drawn, cells: briefCells(view.cells), warnings: [...(compiled?.warnings ?? []), ...project.warnings], sheet, nativeSheet: view.nativeSheet ? { ...view.nativeSheet, data: undefined } : undefined, ...(options.palette && { palette: paletteUse(project) }), ...(comparison && { comparison: briefComparison(comparisonReport) }), ...written, ...referenced(input) });
     } else if (command === 'patch') {
       if (!options.changes) throw new Error('patch requires --changes <file.json|->');
       if (options.out && !/\.json$/i.test(options.out)) throw new Error('patch --out must name a .json file');

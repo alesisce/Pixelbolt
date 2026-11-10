@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import os from 'node:os';
-import { PixelError, MAX_REQUEST_BYTES, errorReply, renderProject, inspectProject, stackViews, compareProjects, briefDiagnostics, briefCells, briefComparison } from './core.js';
+import { PixelError, MAX_REQUEST_BYTES, errorReply, renderProject, inspectProject, stackViews, paletteUse, compareProjects, briefDiagnostics, briefCells, briefComparison } from './core.js';
 import { patchRecipe } from './patch.js';
 import { createRevisionStore } from './revisions.js';
 import { inspectMotion } from './motion.js';
@@ -357,14 +357,14 @@ export function createToolRunner({ directory, root, version }) {
         const { recipe, resolved, sources } = await recipeFrom(spec, revision), project = renderProject(recipe);
         return { content: [textContent(withResolved({ ok: true, revision: await keep(recipe, sources), width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), timing: briefCells(project.frames.map(({ name, duration }) => ({ name, duration }))), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }), ...(options.fps !== undefined && { frameGrid: frameGrid(project, options.fps) }) }, resolved))] };
       } else if (name === 'pixel_inspect') {
-        const { layers, reference, beside, source: poseSource, metadata: suppliedMetadata, speed, ground, ...inspection } = options;
+        const { layers, reference, beside, palette, source: poseSource, metadata: suppliedMetadata, speed, ground, ...inspection } = options;
         let recipe, resolved, sources, metadata = suppliedMetadata, poseWarnings = [];
         if (poseSource !== undefined) {
           if (spec !== undefined || revision !== undefined || suppliedMetadata !== undefined) throw new PixelError('arguments', 'source replaces project, revision and metadata');
           const input = await resolveReferences(poseSource, { baseDir: root, root });
           ({ recipe, metadata, warnings: poseWarnings = [] } = compilePoses(input.document)); resolved = sources = relativeToRoot(input.files);
         } else ({ recipe, resolved, sources } = await recipeFrom(spec, revision));
-        const project = renderProject(recipe, { ...(layers !== undefined && { layers }), ...(inspection.view === 'parts' && { owners: true }) });
+        const project = renderProject(recipe, { ...(layers !== undefined && { layers }), ...((inspection.view === 'parts' || palette === true) && { owners: true }) });
         let view;
         if (inspection.view === 'motion') {
           if (layers !== undefined || reference !== undefined || beside !== undefined) throw new PixelError('arguments', 'motion review uses the complete animation; omit layers, reference and beside');
@@ -383,7 +383,7 @@ export function createToolRunner({ directory, root, version }) {
           }
         }
         const comparison = reference === undefined ? null : compareProjects(renderProject(await read(reference), layers === undefined ? {} : { layers }), project);
-        const content = [textContent(withResolved({ ok: true, revision: await keep(recipe, sources), name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), ...viewSummary(view), warnings: [...poseWarnings, ...project.warnings] }, resolved)), imageContent(view.sheet)];
+        const content = [textContent(withResolved({ ok: true, revision: await keep(recipe, sources), name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), ...viewSummary(view), ...(palette === true && { palette: paletteUse(project) }), warnings: [...poseWarnings, ...project.warnings] }, resolved)), imageContent(view.sheet)];
         if (view.nativeSheet) content.push(imageContent(view.nativeSheet));
         if (view.grids) content.push(textContent(gridText(view)));
         if (reference !== undefined) {
@@ -613,6 +613,7 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
     background: { type: 'string', description: 'checker (default), transparent, a palette name or a hex color.' },
     view: { enum: ['color', 'silhouette', 'grayscale', 'onion', 'tile', 'parts', 'motion'], description: 'onion and motion need animation; motion reports foot slide, ground error and loop joins and traces limb arcs (source or metadata adds contacts); parts colours each pixel by the layer or pose part that drew it; tile repeats each frame 3x3.' },
     native: { type: 'boolean', description: 'Also return a 1x contact sheet.' },
+    palette: { type: 'boolean', description: 'Also list each palette key with its colour, pixels and the parts it colours.' },
     diagnostics: { type: 'boolean', description: 'Advisory evidence: duplicate and empty frames, stray pixels, palette, loop joins, timing, cleanup counts.' },
     maxCells: { type: 'integer', minimum: 1, maximum: 256, description: 'Show at most this many evenly spaced cells; step and offset pick positions instead.' },
     step: { type: 'integer', minimum: 1, maximum: 1024, description: 'Keep every step-th cell from offset; step 2 shows the A frames of an A/B strobe.' },

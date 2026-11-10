@@ -870,6 +870,15 @@
         "background": {
           "type": "string",
           "description": "Palette name, transparent, or #RGB/#RGBA/#RRGGBB/#RRGGBBAA."
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "description": "A map of your own drawn in place of the test map: # terrain, . nothing, and the slope characters."
         }
       },
       "required": [],

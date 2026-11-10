@@ -8,21 +8,27 @@ import { PassThrough } from 'node:stream';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderProject, inspectProject, stackViews, decodePNG } from '../src/index.js';
+import { renderProject, inspectProject, stackViews, paletteUse, decodePNG } from '../src/index.js';
 import { startMCP } from '../src/mcp.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sprite = (name, color, width = 4) => ({ version: 1, name, width, height: 4, palette: { a: color }, frames: [{ name: 'one', ops: [{ op: 'rect', x: 0, y: 0, w: width, h: 4, color: 'a' }] }, { name: 'two', ops: [{ op: 'pixel', x: 1, y: 1, color: 'a' }] }] });
 const pixel = (sheet, x, y) => [...sheet.data.subarray((y * sheet.width + x) * 4, (y * sheet.width + x) * 4 + 4)];
 
-test('stacked views keep every sheet whole, each under the one before', () => {
+test('stacked views keep every sheet whole, each under the one before and under its name', () => {
   const views = [sprite('red', '#ff0000'), sprite('blue', '#0000ff', 8)].map(recipe => ({ ...inspectProject(renderProject(recipe), { scale: 2 }), name: recipe.name }));
   const [red, blue] = views.map(view => view.sheet), stacked = stackViews(views);
-  assert.deepEqual([stacked.sheet.width, stacked.sheet.height], [Math.max(red.width, blue.width), red.height + blue.height]);
-  assert.deepEqual(stacked.stack, [{ name: 'red', y: 0, height: red.height }, { name: 'blue', y: red.height, height: blue.height }]);
+  // A band above each sheet holds its name.
+  const band = stacked.stack[0].y;
+  assert.ok(band >= 9 && band <= 16, `${band}`);
+  assert.deepEqual([stacked.sheet.width, stacked.sheet.height], [Math.max(red.width, blue.width), red.height + blue.height + 2 * band]);
+  assert.deepEqual(stacked.stack, [{ name: 'red', y: band, height: red.height }, { name: 'blue', y: 2 * band + red.height, height: blue.height }]);
   // Every pixel of each sheet is where the stack says, and what the narrower sheet leaves is the sheet's background.
-  for (const [sheet, top] of [[red, 0], [blue, red.height]]) for (let y = 0; y < sheet.height; y++) for (let x = 0; x < sheet.width; x++) assert.deepEqual(pixel(stacked.sheet, x, top + y), pixel(sheet, x, y));
-  assert.deepEqual(pixel(stacked.sheet, stacked.sheet.width - 1, 0), pixel(red, 0, 0));
+  for (const [sheet, top] of [[red, band], [blue, 2 * band + red.height]]) for (let y = 0; y < sheet.height; y++) for (let x = 0; x < sheet.width; x++) assert.deepEqual(pixel(stacked.sheet, x, top + y), pixel(sheet, x, y));
+  assert.deepEqual(pixel(stacked.sheet, stacked.sheet.width - 1, band), pixel(red, 0, 0));
+  // The names are written in the bands, in a light colour on the sheet's background, and nowhere else in them.
+  const lit = top => { let count = 0; for (let y = top; y < top + band; y++) for (let x = 0; x < stacked.sheet.width; x++) if (pixel(stacked.sheet, x, y)[0] > 200) count++; return count; };
+  assert.ok(lit(0) > 12 && lit(band + red.height) > 16 && lit(band + red.height) > lit(0), `${lit(0)} ${lit(band + red.height)}`);
   assert.deepEqual([stacked.cells, stacked.name], [views[0].cells, undefined]);
 });
 
@@ -34,10 +40,11 @@ test('inspect --beside and pixel_inspect beside draw the variants in one image a
   const out = path.join(dir, 'all.png'), made = cli('inspect', 'red.json', '--beside', 'blue.json,green.json', '--frames', 'one', '--scale', '2', '--out', 'all.png');
   assert.equal(made.status, 0, made.stderr + made.stdout);
   const reply = JSON.parse(made.stdout), alone = inspectProject(renderProject(sprite('red', '#ff0000')), { frames: ['one'], scale: 2 }).sheet;
-  assert.deepEqual(reply.stack, ['red.json', 'blue.json', 'green.json'].map((name, index) => ({ name, y: index * alone.height, height: alone.height })));
-  assert.deepEqual([reply.sheet.width, reply.sheet.height, reply.cells], [alone.width, alone.height * 3, ['one: 100 ms']]);
-  const image = decodePNG(await readFile(out)), centre = index => pixel(image, alone.gap + 2, index * alone.height + alone.gap + 2);
-  assert.deepEqual([image.width, image.height, centre(0), centre(1), centre(2)], [alone.width, alone.height * 3, [255, 0, 0, 255], [0, 0, 255, 255], [0, 255, 0, 255]]);
+  const band = reply.stack[0].y;
+  assert.deepEqual(reply.stack, ['red.json', 'blue.json', 'green.json'].map((name, index) => ({ name, y: band + index * (band + alone.height), height: alone.height })));
+  assert.deepEqual([reply.sheet.height, reply.cells], [(band + alone.height) * 3, ['one: 100 ms']]);
+  const image = decodePNG(await readFile(out)), centre = index => pixel(image, alone.gap + 2, reply.stack[index].y + alone.gap + 2);
+  assert.deepEqual([image.width, image.height, centre(0), centre(1), centre(2)], [reply.sheet.width, (band + alone.height) * 3, [255, 0, 0, 255], [0, 0, 255, 255], [0, 255, 0, 255]]);
   // What reads one recipe at a time is refused, and a file that is not there is named.
   const said = (...args) => { const result = cli(...args); assert.equal(result.status, 1); return result.stdout + result.stderr; };
   assert.match(said('inspect', 'red.json', '--beside', 'blue.json', '--grid'), /--beside draws several recipes in one sheet/);
@@ -53,9 +60,38 @@ test('inspect --beside and pixel_inspect beside draw the variants in one image a
   const tool = async (name, args) => { const result = (await call('tools/call', { name, arguments: args })).result; return { ...result, info: JSON.parse(result.content[0].text) }; };
   const blue = (await tool('pixel_validate', { project: sprite('blue', '#0000ff') })).info.revision, green = (await tool('pixel_validate', { project: sprite('green', '#00ff00') })).info.revision;
   const both = await tool('pixel_inspect', { project: sprite('red', '#ff0000'), beside: [blue, green], frames: ['one'], scale: 2 });
-  assert.deepEqual(both.info.stack, [{ name: 'red', y: 0, height: alone.height }, { name: blue, y: alone.height, height: alone.height }, { name: green, y: alone.height * 2, height: alone.height }]);
+  assert.deepEqual(both.info.stack, [{ name: 'red', y: band, height: alone.height }, { name: blue, y: 2 * band + alone.height, height: alone.height }, { name: green, y: 3 * band + alone.height * 2, height: alone.height }]);
   const picture = decodePNG(Buffer.from(both.content.find(item => item.type === 'image').data, 'base64'));
-  assert.deepEqual(pixel(picture, alone.gap + 2, 2 * alone.height + alone.gap + 2), [0, 255, 0, 255]);
+  assert.deepEqual(pixel(picture, alone.gap + 2, both.info.stack[2].y + alone.gap + 2), [0, 255, 0, 255]);
   const refused = await tool('pixel_inspect', { project: sprite('red', '#ff0000'), beside: ['nosuchrevision'] });
   assert.equal(refused.isError, true);
+});
+
+test('the palette report says which keys colour which layers, ramps together, for a colour variant', async t => {
+  const figure = { version: 1, name: 'figure', width: 6, height: 6, palette: { k: '#101010', a: '#802020', b: '#c04040', s: '#e0b090', x: '#00ff00', glass: '#4080ff80' }, ramps: [['a', 'b']],
+    frames: [{ name: 'stand', layers: [
+      { name: 'coat', ops: [{ op: 'rect', x: 0, y: 2, w: 4, h: 4, color: 'a' }, { op: 'rect', x: 1, y: 3, w: 2, h: 2, color: 'b' }] },
+      { name: 'head', ops: [{ op: 'rect', x: 1, y: 0, w: 2, h: 2, color: 's' }, { op: 'pixel', x: 1, y: 0, color: 'k' }, { op: 'pixel', x: 2, y: 3, color: 'a' }] },
+      { name: 'visor', ops: [{ op: 'pixel', x: 2, y: 0, color: 'glass' }] }] }] };
+  const use = paletteUse(renderProject(figure, { owners: true }));
+  // The coat's ramp dark to light with the layers each key colours, most first; then the rest by pixels; then what
+  // draws nothing; a translucent key over another colour is a blend that no key names.
+  assert.deepEqual(use, { ramps: [['a #802020: 13 px on coat, head', 'b #c04040: 3 px on coat']], others: ['s #e0b090: 2 px on head', 'k #101010: 1 px on head'], unused: ['x', 'glass'], blended: 1 });
+  assert.throws(() => paletteUse(renderProject(figure)), /palette needs the project rendered with \{ owners: true \}/);
+  // A recipe without ramps lists its keys under `keys`.
+  assert.deepEqual(Object.keys(paletteUse(renderProject({ ...figure, ramps: undefined }, { owners: true }))), ['keys', 'unused', 'blended']);
+  // inspect --palette and pixel_inspect palette carry it.
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-palette-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(path.join(dir, 'figure.json'), JSON.stringify(figure));
+  const made = spawnSync(process.execPath, [path.join(root, 'bin/pixelbolt.js'), 'inspect', 'figure.json', '--palette'], { encoding: 'utf8', cwd: dir });
+  assert.deepEqual(JSON.parse(made.stdout).palette, use, made.stderr);
+  const input = new PassThrough(), output = new PassThrough(), waiting = new Map();
+  let buffer = '', id = 0;
+  output.on('data', chunk => { buffer += chunk; for (let end; (end = buffer.indexOf('\n')) !== -1; buffer = buffer.slice(end + 1)) { const message = JSON.parse(buffer.slice(0, end)); waiting.get(message.id)?.(message); } });
+  startMCP({ input, output, root: dir, directory: path.join(dir, 'output') }); t.after(() => input.end());
+  const call = (method, params) => new Promise(resolve => { waiting.set(++id, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+  await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'palette-test', version: '1' } });
+  const inspected = (await call('tools/call', { name: 'pixel_inspect', arguments: { project: figure, palette: true } })).result;
+  assert.deepEqual(JSON.parse(inspected.content[0].text).palette, use);
+  assert.equal(JSON.parse((await call('tools/call', { name: 'pixel_inspect', arguments: { project: figure } })).result.content[0].text).palette, undefined);
 });

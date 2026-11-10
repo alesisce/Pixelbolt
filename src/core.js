@@ -1473,15 +1473,46 @@ export function pictureSheet({ palette = {}, headings = [], rows: lines, scale =
   return { width, height, scale: s, data };
 }
 
-// The same view of several recipes as one image, each sheet under the one before and left-aligned: a hero in three
-// team colours, or a sprite before and after, compared with one look. `views` are inspectProject results with a
-// `name` each. Returns the first view with the taller sheet and `stack`, where each recipe's sheet starts.
+// Which palette keys colour what, over every frame: a line a key with its colour, its pixels and the layers (a rig's
+// parts) it colours most, so "the fur" or "the jacket" is a set of keys to change together. Keys of one ramp are
+// listed together, dark to light, then the rest by pixels; `unused` names keys that draw nothing and `blended` counts
+// pixels whose colour is no key's (two translucent colours over each other). The project is rendered with owners.
+export function paletteUse(project) {
+  if (!project.ownerNames) fail('inspect.palette', 'palette needs the project rendered with { owners: true }, which records the layer that drew each pixel');
+  const pack = (r, g, b, a) => ((r * 256 + g) * 256 + b) * 256 + a, keyOf = new Map(), use = new Map();
+  for (const [key, value] of Object.entries(project.palette)) { const color = parseColor(value); if (color[3] && !keyOf.has(pack(...color))) keyOf.set(pack(...color), key); }
+  let blended = 0;
+  for (const { data, owners } of project.frames) for (let i = 0; i < owners.length; i++) {
+    if (!data[i * 4 + 3]) continue;
+    const key = keyOf.get(pack(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]));
+    if (key === undefined) { blended++; continue; }
+    if (!use.has(key)) use.set(key, { pixels: 0, by: new Map() });
+    const entry = use.get(key);
+    entry.pixels++; entry.by.set(owners[i], (entry.by.get(owners[i]) ?? 0) + 1);
+  }
+  const line = key => {
+    const { pixels, by } = use.get(key), parts = [...by].filter(([id]) => id).sort((a, b) => b[1] - a[1]).map(([id]) => project.ownerNames[id - 1]);
+    return `${key} ${project.palette[key]}: ${pixels} px${parts.length ? ` on ${parts.slice(0, 4).join(', ')}${parts.length > 4 ? ` and ${parts.length - 4} more` : ''}` : ''}`;
+  };
+  const ramps = (project.ramps ?? []).map(ramp => ramp.filter(key => use.has(key))).filter(ramp => ramp.length), ramped = new Set(ramps.flat());
+  const others = [...use.keys()].filter(key => !ramped.has(key)).sort((a, b) => use.get(b).pixels - use.get(a).pixels), unused = Object.keys(project.palette).filter(key => !use.has(key));
+  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(unused.length && { unused }), ...(blended && { blended }) };
+}
+
+// The same view of several recipes as one image, each sheet under the one before and left-aligned, with its name
+// written above it: a hero in three team colours, or a sprite before and after, compared with one look. `views` are
+// inspectProject results with a `name` each. Returns the first view with the taller sheet and `stack`: where each
+// recipe's sheet starts, under its label.
 export function stackViews(views) {
-  const sheets = views.map(view => view.sheet), width = Math.max(...sheets.map(sheet => sheet.width)), height = sheets.reduce((sum, sheet) => sum + sheet.height, 0);
-  const data = new Uint8ClampedArray(width * height * 4), fill = sheets[0].data.slice(0, 4), stack = [];
-  for (let i = 0; i < data.length; i += 4) data.set(fill, i);
+  const sheets = views.map(view => view.sheet), t = Math.max(1, Math.min(2, Math.floor(sheets[0].scale / 2))), pad = 3 * t, band = (FONT_HEIGHT + 4) * t;
+  const labels = views.map(view => layoutText(String(view.name).replace(/[^\x20-\x7e]/g, '?'))), width = Math.max(...sheets.map(sheet => sheet.width), ...labels.map(text => text.width * t + 2 * pad));
+  const height = sheets.reduce((sum, sheet) => sum + band + sheet.height, 0), data = new Uint8ClampedArray(width * height * 4), stack = [];
+  for (let i = 0; i < data.length; i += 4) data.set(gutterColor, i);
   let y = 0;
   sheets.forEach((sheet, index) => {
+    const text = labels[index], top = y + 2 * t + text.top * t;
+    text.rows.forEach((cells, row) => { for (let x = 0; x < cells.length; x++) if (cells[x] === '#') for (let dy = 0; dy < t; dy++) for (let dx = 0; dx < t; dx++) data.set([230, 234, 238, 255], ((top + row * t + dy) * width + pad + x * t + dx) * 4); });
+    y += band;
     for (let row = 0; row < sheet.height; row++) data.set(sheet.data.subarray(row * sheet.width * 4, (row + 1) * sheet.width * 4), (y + row) * width * 4);
     stack.push({ name: views[index].name, y, height: sheet.height });
     y += sheet.height;

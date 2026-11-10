@@ -7,7 +7,7 @@ import path from 'node:path';
 import { renderProject, inspectProject, animationFps } from '../src/core.js';
 import { createBundle, describeAnimations } from '../src/export.js';
 // The rates a reply carries: each animation's fps, where it has one.
-const rates = (project, spec) => Object.fromEntries(Object.entries(describeAnimations(project, spec).animations).filter(([, entry]) => entry.fps !== undefined).map(([key, entry]) => [key, entry.fps]));
+const rates = (project, spec) => Object.fromEntries(Object.entries(describeAnimations(project, spec).animations ?? {}).filter(([, entry]) => entry.fps !== undefined).map(([key, entry]) => [key, entry.fps]));
 import { compileAutotile } from '../src/authoring.js';
 import { startMCP } from '../src/mcp.js';
 import { GODOT_TILE_SOURCES } from '../scripts/verify-godot.mjs';

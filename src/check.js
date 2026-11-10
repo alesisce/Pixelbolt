@@ -444,11 +444,12 @@ export function checkDelivery(project, { recipe, gifs, expect, animation } = {})
           : `render again with "gif": { "scale": ${k} }${k === 1 ? ' or "gif": {}' : ''}`;
     if (expect.gifScale !== undefined && !scoped.length) problems.push({ file: 'gifs/', asked: { width: wantW, height: wantH }, got: 'no GIF', fix: gifFix });
     const wrong = sized ? scoped.filter(gif => gif.width !== wantW || gif.height !== wantH) : [];
-    // GIFs a whole number of times the asked size were most likely enlarged on purpose, for posting: offer the
-    // gifScale that says so beside the fix that makes them the asked size.
-    const times = wrong.length && expect.gifScale === undefined && wrong[0].width % wantW === 0 && wrong[0].width / wantW === wrong[0].height / wantH ? wrong[0].width / wantW : 1;
-    const enlarged = times > 1 ? `; or, if the user asked for GIFs ${times} times the frame size, add "gifScale": ${times} to expect` : '';
-    if (wrong.length) problems.push({ file: gifFiles(wrong), asked: { width: wantW, height: wantH }, got: { width: wrong[0].width, height: wrong[0].height }, fix: gifFix + enlarged });
+    // GIFs a whole number of times the asked size were enlarged on purpose, by a scale the call itself gave, most
+    // often because the user asked for a larger one to post. That is not a mismatch, so it is a note: it says the size
+    // and how to have it checked, and how to get GIFs of the frames' own size if that was wanted.
+    const times = wrong.length && expect.gifScale === undefined && wantW === width * scale && wantH === height * scale && wrong.every(gif => gif.width === wrong[0].width && gif.height === wrong[0].height) && wrong[0].width % wantW === 0 && wrong[0].width / wantW === wrong[0].height / wantH ? wrong[0].width / wantW : 1;
+    if (times > 1) notes.push(`The GIFs are ${times} times the frame size (${wrong[0].width}×${wrong[0].height}), as the scale asked for makes them. If the user asked for GIFs that size, "gifScale": ${times} in expect checks it; if they asked for GIFs at the frames' own size, ${gifFix}.`);
+    else if (wrong.length) problems.push({ file: gifFiles(wrong), asked: { width: wantW, height: wantH }, got: { width: wrong[0].width, height: wrong[0].height }, fix: gifFix });
     // A GIF background blends every pixel onto one colour, so GIFs can miss a request the frames meet. (Opaque frames
     // always make an opaque GIF, so only the transparent side needs a GIF check.)
     const opaque = expect.transparent === true && clearOpen.length === open.length ? scoped.filter(gif => !gif.transparent) : [];

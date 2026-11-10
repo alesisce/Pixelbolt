@@ -419,7 +419,7 @@ test('CLI render --look writes the frames enlarged, and --gif a GIF of each anim
   assert.deepEqual(look, encodePNG(view.data, view.width, view.height));
   assert.ok(look.readUInt32BE(16) > (await readFile(path.join(dir, 'made', 'coin.png'))).readUInt32BE(16));
   assert.equal((await readFile(path.join(dir, 'made', 'gifs', 'spin.gif'))).subarray(0, 6).toString('latin1'), 'GIF89a');
-  // --gif alone is the frames' own size, and a GIF of another size than expect asks for is a problem with its fix.
+  // --gif alone is the frames' own size, and a GIF of another size than expect's gifScale asks for is a problem with its fix.
   const plain = JSON.parse(cli('render', coin, '--out', 'plain', '--gif', '--expect', '{"width":24,"height":24,"gifScale":4}').stdout);
   assert.deepEqual([plain.gifs, plain.look, plain.check.ok, plain.check.problems[0].file], [{ scale: 1, width: 24, height: 24 }, undefined, false, 'gifs/spin.gif']);
   // Without either, the folder and the reply are as they were.

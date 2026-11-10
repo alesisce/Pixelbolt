@@ -52,7 +52,8 @@ test('the render check passes a delivery that matches the request and names each
   // 32 is no whole multiple of 24, so the GIF waits for the frame size; an asked 24 needs scale 1.
   assert.match(miss.problems[1].fix, /fix the frame size first/);
   const native = check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24 } });
-  assert.match(native.problems[0].fix, /"gif": \{ "scale": 1 \} or "gif": \{\}/);
+  assert.deepEqual([native.ok, native.problems], [true, undefined]);
+  assert.match(native.notes.at(-1), /^The GIFs are 8 times the frame size \(192×192\).*"gif": \{ "scale": 1 \} or "gif": \{\}\.$/);
   // A GIF scale chosen on purpose is not a problem when the request names no size.
   assert.equal(check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { frames: 7 }, animation: 'idle' }).ok, true);
   // gifScale: GIFs at that multiple of the asked frame size, and a missing GIF when the command makes GIFs at all.
@@ -146,9 +147,13 @@ test('expect.frames takes a count per animation, and a count that only the whole
   assert.match(some.problems[0].fix, /; or, if the request was 4 frames for "walk" only, check per animation: "frames": \{"walk":4\}$/);
 });
 
-test('GIFs a whole number of times the asked size also offer gifScale', () => {
-  const project = renderProject(spirit), fix = check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24 }, animation: 'idle' }).problems[0].fix;
-  assert.equal(fix, 'render again with "gif": { "scale": 1 } or "gif": {}; or, if the user asked for GIFs 8 times the frame size, add "gifScale": 8 to expect');
+test('GIFs enlarged by the scale the call gave are noted, not failed, until expect says what size was asked for', () => {
+  const project = renderProject(spirit), enlarged = check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24 }, animation: 'idle' });
+  assert.deepEqual([enlarged.ok, enlarged.problems], [true, undefined]);
+  assert.equal(enlarged.notes.at(-1), 'The GIFs are 8 times the frame size (192×192), as the scale asked for makes them. If the user asked for GIFs that size, "gifScale": 8 in expect checks it; if they asked for GIFs at the frames\' own size, render again with "gif": { "scale": 1 } or "gif": {}.');
+  // Said to be another size, a GIF is a problem with its fix.
+  const other = check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24, gifScale: 2 }, animation: 'idle' });
+  assert.deepEqual([other.ok, other.problems[0].fix], [false, 'render again with "gif": { "scale": 2 }']);
   assert.equal(check(spirit, { gifs: [animationGIF(project, 'idle', { scale: 8 })], expect: { width: 24, gifScale: 8 }, animation: 'idle' }).ok, true);
 });
 
@@ -264,7 +269,9 @@ test('MCP pixel_render and CLI render carry the check, and a bad expect or anima
   assert.equal(result.status, 0, result.stderr);
   const [, rendered, refused] = result.stdout.trim().split('\n').map(line => JSON.parse(line).result);
   const info = JSON.parse(rendered.content[0].text);
-  assert.deepEqual([info.check.ok, info.check.delivered.gifs, info.check.problems.map(problem => problem.file)], [false, [192, 192], ['gifs/idle.gif, gifs/bob.gif, gifs/blink.gif']]);
+  // The frames are the 24 asked for, and the GIFs 8 times that by the scale the call gave: noted, not failed.
+  assert.deepEqual([info.check.ok, info.check.delivered.gifs, info.check.problems], [true, [192, 192], undefined]);
+  assert.match(info.check.notes.at(-1), /^The GIFs are 8 times the frame size \(192×192\)/);
   assert.deepEqual([refused.isError, JSON.parse(refused.content[0].text).path], [true, 'expect.width']);
   // Only the first render wrote a folder.
   assert.equal((await readdir(path.join(dir, 'mcp'))).filter(name => !name.startsWith('.')).length, 1);

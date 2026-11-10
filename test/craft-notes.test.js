@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { compileAutotile } from '../src/authoring.js';
 import { tilemapEntry } from '../src/autotile.js';
 import { prepareScene, renderScene } from '../src/scene.js';
+import { createBundle, describeAnimations } from '../src/export.js';
 import { findPreset, loadPreset, compilePreset } from '../src/presets.js';
 
 const example = async name => JSON.parse(await readFile(new URL(`../examples/${name}`, import.meta.url), 'utf8'));
@@ -20,6 +21,18 @@ test('a compiled tile set says how a map names its tiles, and a set of several m
   assert.deepEqual(tilemapEntry(compileAutotile(plain).recipe).legend, { frame: 'meadow-{mask}', autotile: 'blob' });
   assert.equal(tilemapEntry(compileAutotile(await example('shore.autotile.json')).recipe), null);
   assert.equal(tilemapEntry(await example('coin.json')), null);
+});
+
+test('the two-layer tile set the craft notes give to start from compiles: both plain tiles, every meeting, a Godot TileSet', async () => {
+  const notes = await readFile(new URL('../docs/agent-craft.md', import.meta.url), 'utf8');
+  const source = JSON.parse(/To start from: `(\{"format": "pixelforge-autotile".*?\})`\. An upper layer/s.exec(notes)[1]);
+  const { recipe, warnings = [], preview } = compileAutotile(source);
+  assert.deepEqual([recipe.frames.length, recipe.width, warnings, Boolean(preview)], [16, 16, [], true]);
+  const bundle = await createBundle(recipe);
+  assert.ok(bundle.files.has('snow.tileset.tres') && bundle.files.has('snow.tsx'));
+  assert.match(bundle.files.get('snow.tileset.tres').toString(), /terrain_set_0\/terrain_0\/name = "rock"[\s\S]*terrain_set_0\/terrain_1\/name = "snow"/);
+  // A still tile set has no animation to describe in a reply.
+  assert.deepEqual(describeAnimations(bundle.project, recipe), {});
 });
 
 test('the scene the craft notes give to start from draws: a floor from the tile set, a fire, a lit character', async () => {

@@ -208,6 +208,8 @@ function stillTileSet(spec, project) {
 // in `moreAnimations`. `spec` is the recipe the project was rendered from.
 export function describeAnimations(project, spec) {
   const names = Object.keys(project.animations), still = stillTileSet(spec, project);
+  // A still tile set's only animation is the flipbook of every tile, which no export animates: nothing to describe.
+  if (still && names.length === 1) return {};
   const entry = key => { const { frames, duration, loop } = project.animations[key], fps = still ? undefined : animationFps(project, key); return [key, { frames: frames.length, duration, loop, ...(fps !== undefined && { fps }) }]; };
   return { animations: Object.fromEntries(names.slice(0, 16).map(entry)), ...(names.length > 16 && { moreAnimations: names.slice(16) }) };
 }

@@ -120,6 +120,12 @@ test('comparison crops to the change, summarizes recolors and reports resized ca
   const recolor = compareProjects(renderProject(big), renderProject(patchRecipe(big, [{ set: 'palette.k', value: '#123456' }]).recipe));
   assert.deepEqual(recolor.frames, { changed: [{ frame: 'a', pixels: 200, box: { x: 4, y: 4, w: 20, h: 10 }, transitions: [{ from: '#000000', to: 'k', pixels: 200 }] }], unchanged: ['b'] });
   // A colour the palette no longer names is written as its hex, so the report needs no legend.
+  // Four or more pixels that all make one change are summed up; fewer, or a mix, are listed one by one.
+  const few = { ...big, frames: [{ name: 'a', ops: [{ op: 'rect', x: 0, y: 0, w: 4, h: 1, color: 'k' }, { op: 'pixel', x: 0, y: 2, color: 'k' }] }] };
+  const row = compareProjects(renderProject(few), renderProject(patchRecipe(few, [{ set: 'frames[a].ops[0].color', value: 'w' }]).recipe)).frames.changed[0];
+  assert.deepEqual([row.pixels, row.changes, row.transitions], [4, undefined, [{ from: 'k', to: 'w', pixels: 4 }]]);
+  const mixed = compareProjects(renderProject(few), renderProject(patchRecipe(few, [{ set: 'frames[a].ops[0].color', value: 'w' }, { remove: 'frames[a].ops[1]' }]).recipe)).frames.changed[0];
+  assert.deepEqual([mixed.pixels, mixed.changes.length, mixed.transitions], [5, 5, undefined]);
   assert.equal(recolor.legend, undefined);
   assert.deepEqual(recolor.image.region, { x: 2, y: 2, w: 24, h: 14 });
   const resized = compareProjects(renderProject(big), renderProject(patchRecipe(big, [{ set: 'width', value: 16 }]).recipe));

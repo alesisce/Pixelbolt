@@ -146,7 +146,7 @@ test('an unknown field or operation names the one most likely meant and what is 
   // No likely match: only the accepted fields.
   assert.equal(message({ op: 'pixel', x: 0, y: 0, color: 'r', zz: 1 }), 'project.frames[0].ops[0].zz: unknown field; fields here: op, x, y, color, ground');
   // Operations: a common other name, a one-letter typo and another case.
-  assert.match(message({ op: 'circle', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /\.op: unknown operation "circle"; did you mean "ellipse"\? It takes x, y, w, h \(the box it fills, not a centre and radius\), color and optionally filled\. Operations: pixel, rect, ellipse, /);
+  assert.match(message({ op: 'circle', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /\.op: unknown operation "circle"; did you mean "ellipse"\? It takes x, y, w, h \(the box it fills: a circle of radius r about cx, cy is x cx - r, y cy - r, w and h 2r \+ 1\), color and optionally filled\. Operations: pixel, rect, ellipse, /);
   // The fields said with a suggestion are fields that operation has: each other name an agent might write, drawn with
   // the fields its hint names, is refused only for a value, never for an unknown field.
   for (const [other, fields] of [['oval', 'ellipse'], ['square', 'rect'], ['dot', 'pixel'], ['flood', 'fill'], ['erase', 'clear'], ['label', 'text'], ['sprite', 'stamp'], ['image', 'grid'], ['recolour', 'replace'], ['border', 'outline']]) {

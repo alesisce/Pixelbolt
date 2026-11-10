@@ -407,6 +407,29 @@ test('every sample the studio lists is served, and the sidebar counts the list i
   assert.match(page, /<h2>Projects<\/h2><span id="example-count"><\/span>/); assert.match(script, /\$\('example-count'\)\.textContent = String\(\$\('examples'\)\.children\.length\)/);
 });
 
+test('CLI render --look writes the frames enlarged, and --gif a GIF of each animation, checked like the rest', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-look-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const cli = (...args) => spawnSync(process.execPath, [path.join(root, 'bin', 'pixelbolt.js'), ...args], { cwd: dir, encoding: 'utf8' });
+  const coin = path.join(root, 'examples', 'coin.json');
+  const made = JSON.parse(cli('render', coin, '--out', 'made', '--look', '--gif-scale', '4', '--expect', '{"width":24,"height":24,"gifScale":4}').stdout);
+  assert.deepEqual([made.look, made.gifs, made.check.ok, made.check.delivered.gifs], ['made/look.png', { scale: 4, width: 96, height: 96 }, true, [96, 96]]);
+  assert.ok(made.files.includes('look.png') && made.files.includes('gifs/spin.gif'));
+  // look.png is the contact sheet inspect draws; the sprite sheet beside it stays at the frames' own size.
+  const look = await readFile(path.join(dir, 'made', 'look.png')), view = inspectProject(renderProject(JSON.parse(await readFile(coin, 'utf8')))).sheet;
+  assert.deepEqual(look, encodePNG(view.data, view.width, view.height));
+  assert.ok(look.readUInt32BE(16) > (await readFile(path.join(dir, 'made', 'coin.png'))).readUInt32BE(16));
+  assert.equal((await readFile(path.join(dir, 'made', 'gifs', 'spin.gif'))).subarray(0, 6).toString('latin1'), 'GIF89a');
+  // --gif alone is the frames' own size, and a GIF of another size than expect asks for is a problem with its fix.
+  const plain = JSON.parse(cli('render', coin, '--out', 'plain', '--gif', '--expect', '{"width":24,"height":24,"gifScale":4}').stdout);
+  assert.deepEqual([plain.gifs, plain.look, plain.check.ok, plain.check.problems[0].file], [{ scale: 1, width: 24, height: 24 }, undefined, false, 'gifs/spin.gif']);
+  // Without either, the folder and the reply are as they were.
+  const bare = JSON.parse(cli('render', coin, '--out', 'bare').stdout);
+  assert.deepEqual([bare.gifs, bare.look, bare.files.some(file => file.startsWith('gifs/') || file === 'look.png')], [undefined, undefined, false]);
+  assert.match(cli('render', coin, '--out', 'bad', '--gif-scale', 'big').stderr, /--gif-scale expects a whole number from 1 to 16/);
+  assert.match(cli('render', coin, '--out', 'bad', '--gif-scale', '40').stderr, /scale/);
+  assert.match(cli('validate', coin, '--gif').stderr, /--gif is not supported by validate/);
+});
+
 test('CLI replies stay small: render names its folder once, compile keeps metadata out, clipping lists 16 places', async t => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-replies-'));
   t.after(() => rm(dir, { recursive: true, force: true }));

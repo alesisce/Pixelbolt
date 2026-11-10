@@ -34,7 +34,10 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            See every frame; writes only --out
   pixelbolt patch <file.json|-> --changes <changes.json|-> [--out new.json] [--image diff.png]
                                            Preview edits; writes only --out and --image
-  pixelbolt render <file.json|-> --out dir Export a complete asset bundle
+  pixelbolt render <file.json|-> --out dir [--look] [--gif | --gif-scale 1-16]
+                                           Export a complete asset bundle. --look also writes look.png there, the frames
+                                           enlarged to look at; --gif a GIF of each animation in gifs/, at the frames'
+                                           own size or --gif-scale times it
                                            --expect '{"width":32,"height":32,"frames":8}' (or a .json file) checks it
                                            against the request; --animation <name> checks only that animation
   pixelbolt share <file.json|->           Print a playground link for the resolved recipe
@@ -132,13 +135,13 @@ Checkout: node bin/pixelbolt.js <command>. Portable build folder: .\\pixelbolt (
 
 // The options each command takes: the one place an option is listed. One named in FLAGS takes no value; every other
 // takes the argument after it.
-const FLAGS = new Set(['force', 'grid', 'native', 'diagnostics', 'open', 'expand', 'embed-recipe', 'embedded', 'project', 'list-files', 'full']);
+const FLAGS = new Set(['force', 'grid', 'native', 'diagnostics', 'open', 'expand', 'embed-recipe', 'embedded', 'project', 'list-files', 'full', 'gif', 'look']);
 const OPTIONS = {
   init: ['force'],
   validate: ['fps'],
   inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'guides', 'motion', 'speed', 'ground', 'metadata'],
   patch: ['changes', 'out', 'image', 'force'],
-  render: ['out', 'force', 'expect', 'animation', 'list-files', 'embed-recipe'],
+  render: ['out', 'force', 'expect', 'animation', 'list-files', 'embed-recipe', 'gif', 'gif-scale', 'look'],
   gif: ['out', 'animation', 'scale', 'background', 'force', 'preset', 'size', 'frames', 'sheet'],
   'gif-frames': ['out', 'fps', 'loops', 'background', 'prefix', 'force'],
   sequence: ['out', 'fps', 'animation', 'size', 'scale', 'fit', 'align', 'offset', 'background', 'loops', 'seconds', 'step', 'force'],
@@ -178,7 +181,6 @@ function parseArgs(args) {
     // A flag given twice says the same thing once more, so it is taken; a value given twice is refused, since keeping
     // either one would drop the other without a word.
     else if (FLAGS.has(key)) options[key] = true;
-    else if (key === 'gif') throw new Error('--gif is not an option; the gif command makes one: pixelbolt gif <recipe.json> --out <new.gif>');
     else if (!KNOWN.has(key)) throw new Error(`Unknown option: ${args[i]}`);
     else {
       if (!valueFollows(args, i)) throw new Error(`--${key} requires a value`);
@@ -642,12 +644,23 @@ try {
         if (!options.out) throw new Error('render requires --out <directory>');
         folderOut('render', options.out, 'name a new folder: the sheet, atlas and animations are written inside it (the sheet as <name>.png); for one GIF use pixelbolt gif --out <new.gif>');
         const expect = options.expect === undefined ? undefined : readExpect(await readJSONOption(options.expect));
-        // The check runs before anything is written, so an unknown --animation writes nothing. render writes no GIFs.
-        const bundle = await createBundle(input.document), check = checkDelivery(bundle.project, { recipe: input.document, expect, animation: options.animation });
+        // --gif also writes a GIF of every animation into gifs/, at the frames' own size or --gif-scale times it, as MCP
+        // pixel_render's gif does. They are encoded, and the check run, before anything is written, so a refused GIF or
+        // an unknown --animation writes nothing.
+        if (options['gif-scale'] !== undefined && !/^\d{1,2}$/.test(options['gif-scale'])) throw new Error('--gif-scale expects a whole number from 1 to 16, such as --gif-scale 4');
+        const bundle = await createBundle(input.document), scale = options['gif-scale'] === undefined ? undefined : Number(options['gif-scale']);
+        const gifs = options.gif || scale !== undefined ? Object.keys(bundle.project.animations).map(name => animationGIF(bundle.project, name, { ...(scale !== undefined && { scale }) })) : undefined;
+        if (gifs && gifs.reduce((sum, item) => sum + item.frames * item.width * item.height, 0) > 67108864) throw new Error('--gif-scale: all animations at this scale exceed 67,108,864 pixels; use a lower scale');
+        const check = checkDelivery(bundle.project, { recipe: input.document, gifs, expect, animation: options.animation });
         if (options['embed-recipe']) await embedBundleRecipe(bundle, input.document, await engineVersion());
+        for (const item of gifs ?? []) bundle.files.set(`gifs/${item.animation}.gif`, Buffer.from(item.data));
+        // --look: look.png in the folder, the frames enlarged as a contact sheet. The sprite sheet is drawn at its own
+        // size for a game, too small to judge by eye.
+        if (options.look) { const sheet = inspectProject(bundle.project, options.animation !== undefined ? { animation: options.animation } : {}).sheet; bundle.files.set('look.png', encodePNG(sheet.data, sheet.width, sheet.height)); }
         const expectFile = options.expect !== undefined && !String(options.expect).trimStart().startsWith('{') ? filesRead(options.expect) : [];
         const files = await writeBundle(bundle, options.out, { force: options.force, inputs: [...inputsOf(input), ...expectFile] });
-        print({ ok: true, ...summary(bundle.project, input.document), ...bundleFiles(path.resolve(options.out), files, options), check: briefCheck(check), ...referenced(input) });
+        const notes = (gifs ?? []).flatMap(item => item.notes.map(text => `${item.animation}: ${text}`)).slice(0, 16);
+        print({ ok: true, ...summary(bundle.project, input.document), ...bundleFiles(path.resolve(options.out), files, options), ...(gifs?.length && { gifs: { scale: gifs[0].scale, width: gifs[0].width, height: gifs[0].height, ...(notes.length && { notes }) } }), ...(options.look && { look: shown(path.join(path.resolve(options.out), 'look.png')) }), check: briefCheck(check), ...referenced(input) });
       }
     }
   }

@@ -338,7 +338,7 @@ function reviewMotion(project, names, boxes, drawn, recipe) {
 }
 
 // project: the rendered project; recipe: its source (for animation directions and whether it names animations);
-// gifs: the animationGIF results written beside it, or undefined when the command writes no GIFs (the CLI's render);
+// gifs: the animationGIF results written beside it, or undefined when the command writes no GIFs (a render without gif);
 // animation: check only that animation and its frames.
 // A check as a reply carries it: the silhouette boxes only of the animations a note is about. The boxes are a note's
 // evidence, and beside an animation with nothing to say they are rows of numbers to read past.

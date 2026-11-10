@@ -78,7 +78,7 @@ Start from `examples/iso-tiles.json` (the tile set) and `examples/iso-glade.scen
 ## Exports and delivery
 
 - Put in `--expect` (MCP `expect`) what the user asked for, such as `{"width":24,"height":24,"frames":6}`, or frame counts per animation, `{"idle": 4, "walk": 8}`. Read the `check`, fix every mismatch it lists, and render again.
-- To post or embed: `pixelbolt gif <recipe> --out <new.gif>` (`--preset <name>` in place of the recipe for a shipped preset; `--sheet <frames.png>` also writes the frames to look at). Options include `--animation <name>`, `--scale <1-16>` (use it only to enlarge for posting) and `--background "#17191d"`, which blends transparent pixels onto a colour.
+- To post or embed: `--gif` on the render (`--gif-scale 4` enlarges it; MCP `gif`), or on its own `pixelbolt gif <recipe> --out <new.gif>` (`--preset <name>` in place of the recipe for a shipped preset; `--sheet <frames.png>` also writes the frames to look at). Options include `--animation <name>`, `--scale <1-16>` (use it only to enlarge for posting) and `--background "#17191d"`, which blends transparent pixels onto a colour.
 - For a video editor: `pixelbolt validate <recipe> --fps 30` checks the timing, then `pixelbolt sequence <recipe> --out <new folder> --fps 30 --size 1080p` writes numbered PNG frames. Pass on the ffmpeg command it prints; Pixelbolt does not encode video.
 - From a folder of numbered PNG frames: `pixelbolt gif-frames <folder> --fps 25 --out <new.gif>`.
 - An existing PNG becomes a recipe with `pixelbolt import <image.png> --out <recipe.json>` (any PNG colour type up to 8 bits per channel, indexed and greyscale included; not 16-bit, interlaced or animated).

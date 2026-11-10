@@ -28,12 +28,12 @@ export const errorReply = error => error.errors
 const own = (obj, key) => Object.hasOwn(obj, key);
 export const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 // Names agents often write for a field or operation the format names differently, offered as "did you mean".
-const FIELD_ALIASES = { width: 'w', height: 'h', x1: 'x', y1: 'y', x0: 'x', y0: 'y', colour: 'color', fill: 'filled', frame: 'from', name: 'symbol' };
+const FIELD_ALIASES = { width: 'w', height: 'h', x1: 'x', y1: 'y', x0: 'x', y0: 'y', colour: 'color', fill: 'filled', frame: 'from', name: 'symbol', hold: 'duration', delay: 'duration', time: 'duration', ms: 'duration', length: 'duration' };
 const OP_ALIASES = { circle: 'ellipse', oval: 'ellipse', rectangle: 'rect', square: 'rect', point: 'pixel', dot: 'pixel', flood: 'fill', floodfill: 'fill', erase: 'clear', label: 'text', print: 'text', sprite: 'stamp', image: 'grid', recolor: 'replace', recolour: 'replace', border: 'outline' };
 // What the operations those names mean take, said with the suggestion: a circle is written with a centre and a radius,
 // an ellipse with its box, and the name alone left an agent to look the fields up.
 const OP_FIELDS = {
-  ellipse: 'x, y, w, h (the box it fills, not a centre and radius), color and optionally filled', rect: 'x, y, w, h, color and optionally filled', pixel: 'x, y, color',
+  ellipse: 'x, y, w, h (the box it fills: a circle of radius r about cx, cy is x cx - r, y cy - r, w and h 2r + 1), color and optionally filled', rect: 'x, y, w, h, color and optionally filled', pixel: 'x, y, color',
   fill: 'x, y, color (a flood fill from that pixel)', clear: 'x, y, w, h', text: 'x, y, text, color and optionally align', stamp: 'symbol, x, y', grid: 'x, y, rows',
   replace: 'from, to (two colours)', outline: 'color and optionally position, width'
 };
@@ -1782,7 +1782,9 @@ export function compareProjects(before, after) {
     }
     if (!pixels) { unchanged.push(frame.name); continue; }
     const box = { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
-    const detail = pixels <= 16 ? { changes } : { transitions: [...transitions].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([pair, count]) => ({ from: names.chars[Math.floor(pair / NAME_PAIRS)], to: names.chars[pair % NAME_PAIRS], pixels: count })) };
+    // A few pixels are listed one by one. More, or four or more that all make the same change (a recoloured palette
+    // key, a filled patch), are summed up by what became what.
+    const detail = pixels <= 16 && !(pixels >= 4 && transitions.size === 1) ? { changes } : { transitions: [...transitions].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([pair, count]) => ({ from: names.chars[Math.floor(pair / NAME_PAIRS)], to: names.chars[pair % NAME_PAIRS], pixels: count })) };
     changed.push({ frame: frame.name, pixels, box, ...detail });
     shown.push({ frame: frame.name, status: 'changed', before: old.data, after: frame.data, box });
   }

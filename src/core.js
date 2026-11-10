@@ -1476,11 +1476,17 @@ export function pictureSheet({ palette = {}, headings = [], rows: lines, scale =
 // Which palette keys colour what, over every frame: a line a key with its colour, its pixels and the layers (a rig's
 // parts) it colours most, so "the fur" or "the jacket" is a set of keys to change together. Keys of one ramp are
 // listed together, dark to light, then the rest by pixels; `unused` names keys that draw nothing and `blended` counts
-// pixels whose colour is no key's (two translucent colours over each other). The project is rendered with owners.
+// pixels whose colour is no key's (two translucent colours over each other). Pixels are told apart by colour, so keys
+// that share a colour are counted under the first of them, and `same` says which. The project is rendered with owners.
 export function paletteUse(project) {
   if (!project.ownerNames) fail('inspect.palette', 'palette needs the project rendered with { owners: true }, which records the layer that drew each pixel');
   const pack = (r, g, b, a) => ((r * 256 + g) * 256 + b) * 256 + a, keyOf = new Map(), use = new Map();
-  for (const [key, value] of Object.entries(project.palette)) { const color = parseColor(value); if (color[3] && !keyOf.has(pack(...color))) keyOf.set(pack(...color), key); }
+  const same = [];
+  for (const [key, value] of Object.entries(project.palette)) {
+    const color = parseColor(value), id = pack(...color);
+    if (!color[3]) continue;
+    if (keyOf.has(id)) same.push(`${key} is the colour of ${keyOf.get(id)}, and counted there`); else keyOf.set(id, key);
+  }
   let blended = 0;
   for (const { data, owners } of project.frames) for (let i = 0; i < owners.length; i++) {
     if (!data[i * 4 + 3]) continue;
@@ -1495,8 +1501,8 @@ export function paletteUse(project) {
     return `${key} ${project.palette[key]}: ${pixels} px${parts.length ? ` on ${parts.slice(0, 4).join(', ')}${parts.length > 4 ? ` and ${parts.length - 4} more` : ''}` : ''}`;
   };
   const ramps = (project.ramps ?? []).map(ramp => ramp.filter(key => use.has(key))).filter(ramp => ramp.length), ramped = new Set(ramps.flat());
-  const others = [...use.keys()].filter(key => !ramped.has(key)).sort((a, b) => use.get(b).pixels - use.get(a).pixels), unused = Object.keys(project.palette).filter(key => !use.has(key));
-  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(unused.length && { unused }), ...(blended && { blended }) };
+  const others = [...use.keys()].filter(key => !ramped.has(key)).sort((a, b) => use.get(b).pixels - use.get(a).pixels), twins = new Set(same.map(text => text.split(' ')[0])), unused = Object.keys(project.palette).filter(key => !use.has(key) && !twins.has(key));
+  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(same.length && { same }), ...(unused.length && { unused }), ...(blended && { blended }) };
 }
 
 // The same view of several recipes as one image, each sheet under the one before and left-aligned, with its name

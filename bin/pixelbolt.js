@@ -113,8 +113,8 @@ and lists the pixels each step changes;
 --view color|silhouette|grayscale|onion|tile|parts (each pixel coloured by the layer or pose part that drew it);
 --palette lists each palette key with its colour, its pixels and the layers or pose parts it colours (ramps
 together, dark to light): which keys to change for a colour variant;
---beside b.json,c.json draws the same view of up to eight more recipes under this one, in the one image, to compare
-variants (the reply's stack says where each starts);
+--beside b.json,c.json draws the same view of up to eight more recipes under this one, in the one image, each
+under its file name, to compare variants (the reply's stack says where each starts);
 --native adds a 1x PNG; --diagnostics adds advisory evidence (past 8 frames, totals and the three frames with the
 most to clean up; --full lists every frame).
 --guides '{"horizon":40,"vanish":[[64,40]],"iso":{"tile":[32,16]}}' (or a file) draws perspective guides over the

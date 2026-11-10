@@ -78,6 +78,9 @@ test('the palette report says which keys colour which layers, ramps together, fo
   // draws nothing; a translucent key over another colour is a blend that no key names.
   assert.deepEqual(use, { ramps: [['a #802020: 13 px on coat, head', 'b #c04040: 3 px on coat']], others: ['s #e0b090: 2 px on head', 'k #101010: 1 px on head'], unused: ['x', 'glass'], blended: 1 });
   assert.throws(() => paletteUse(renderProject(figure)), /palette needs the project rendered with \{ owners: true \}/);
+  // Two keys of one colour can't be told apart in the pixels: the first is counted, and `same` says so.
+  const twin = paletteUse(renderProject({ ...figure, palette: { ...figure.palette, x: '#802020' } }, { owners: true }));
+  assert.deepEqual([twin.same, twin.unused, twin.ramps], [['x is the colour of a, and counted there'], ['glass'], use.ramps]);
   // A recipe without ramps lists its keys under `keys`.
   assert.deepEqual(Object.keys(paletteUse(renderProject({ ...figure, ramps: undefined }, { owners: true }))), ['keys', 'unused', 'blended']);
   // inspect --palette and pixel_inspect palette carry it.

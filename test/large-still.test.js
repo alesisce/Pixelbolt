@@ -87,11 +87,11 @@ test('a large still inspects as one sheet or by region, and exports at its size'
   }
 });
 
-test('the schemas allow a still up to 4096 a side, animations and scene assets 256', async () => {
+test('the schemas allow a still up to 4096 a side, animations and scene assets 256, a scene\'s view 1024', async () => {
   const read = async file => JSON.parse(await readFile(new URL(`../${file}`, import.meta.url), 'utf8'));
   const recipe = await read('schema.json'), scene = await read('scene.schema.json');
   assert.deepEqual([recipe.properties.width.maximum, recipe.properties.height.maximum], [4096, 4096]);
   assert.deepEqual(recipe.if, { properties: { frames: { minItems: 2 } }, required: ['frames'] });
   assert.deepEqual(recipe.then, { properties: { width: { maximum: 256 }, height: { maximum: 256 } } });
-  assert.deepEqual([scene.properties.width.maximum, scene.$defs.recipe.properties.width.maximum, scene.$defs.recipe.properties.height.maximum, scene.$defs.recipe.if], [256, 256, 256, undefined]);
+  assert.deepEqual([scene.properties.width.maximum, scene.$defs.recipe.properties.width.maximum, scene.$defs.recipe.properties.height.maximum, scene.$defs.recipe.if], [1024, 256, 256, undefined]);
 });

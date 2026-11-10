@@ -1472,6 +1472,7 @@ test('MCP pixel_compile builds fluid sources and pixel_help serves their schema'
   const input = new PassThrough(), output = new PassThrough(), waiting = new Map(); let buffer = '', next = 0;
   output.on('data', chunk => { buffer += chunk; for (let end; (end = buffer.indexOf('\n')) !== -1; buffer = buffer.slice(end + 1)) { const message = JSON.parse(buffer.slice(0, end)); waiting.get(message.id)?.(message); } });
   startMCP({ input, output, directory: dir, root: dir });
+  t.after(() => input.end());
   const request = (method, params) => new Promise(resolve => { waiting.set(++next, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id: next, method, params }) + '\n'); });
   await request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   const tools = (await request('tools/list')).result.tools, compile = tools.find(tool => tool.name === 'pixel_compile');

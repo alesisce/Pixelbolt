@@ -28,13 +28,17 @@ const temp = async (t, label) => {
   t.after(async () => { assert.ok(dir.startsWith(base + path.sep)); await rm(dir, { recursive: true, force: true }); });
   return dir;
 };
-function session(options) {
+// A session ends with its test, whether the test passed or an assertion threw first: a server left open keeps the
+// file's process alive, and the run then ends at the job's time limit with no failure to read (as it did on the
+// translated Intel runtime, for every push).
+function session(t, options) {
   const input = new PassThrough(), output = new PassThrough(), waiting = new Map(); let buffer = '', next = 0;
   output.on('data', chunk => { buffer += chunk; for (let end; (end = buffer.indexOf('\n')) !== -1; buffer = buffer.slice(end + 1)) { const message = JSON.parse(buffer.slice(0, end)); waiting.get(message.id)?.(message); } });
   const running = startMCP({ input, output, ...options });
   const request = (method, params) => new Promise(resolve => { waiting.set(++next, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id: next, method, params }) + '\n'); });
   const call = async (name, args) => (await request('tools/call', { name, arguments: args })).result;
   const close = async () => { input.end(); await running; };
+  t.after(close);
   return { call, close, tools: async () => (await request('tools/list', {})).result.tools, init: () => request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } }) };
 }
 const reply = result => JSON.parse(result.content[0].text);
@@ -68,7 +72,7 @@ before(async () => {
 });
 
 test('the presets listing covers every source and looping recipe in examples/, measured from the files themselves', async t => {
-  const directory = await temp(t, 'presets-list'), mcp = session({ directory, root: examples });
+  const directory = await temp(t, 'presets-list'), mcp = session(t, { directory, root: examples });
   await mcp.init();
   const { guide, presets } = reply(await mcp.call('pixel_help', { topic: 'presets', full: true }));
   // What an agent reads by default, on every effect request: a line per preset, from the measurements just kept.
@@ -80,7 +84,11 @@ test('the presets listing covers every source and looping recipe in examples/, m
   }
   // An agent after one effect asks for it by a word and reads its line, not the listing.
   const found = reply(await mcp.call('pixel_help', { topic: 'presets', find: 'Campfire' }));
-  assert.deepEqual(found, { guide: FIND_NOTE, presets: { campfire: brief.presets.campfire } });
+  assert.deepEqual([found.guide, Object.keys(found.presets)], [FIND_NOTE, ['campfire']]);
+  // Each call measures for 20 seconds and keeps what it measured, so on a slow machine the brief listing may have
+  // been written before the campfire was measured and this one after: the lines then differ, and both are right.
+  if (!/; not measured/.test(brief.presets.campfire)) assert.equal(found.presets.campfire, brief.presets.campfire);
+  else assert.ok(found.presets.campfire.startsWith('fluid'), found.presets.campfire);
   assert.ok(Buffer.byteLength(JSON.stringify(found)) < 1024);
   for (const [args, message] of [[{ topic: 'guide', find: 'fire' }, /find goes with topic "presets"/], [{ topic: 'presets', find: 'fire', full: true }, /without full/], [{ topic: 'presets', find: ' ' }, /expected words/], [{ topic: 'presets', find: 3 }, /expected words/]]) {
     const refused = await mcp.call('pixel_help', args);
@@ -130,7 +138,7 @@ test('the presets listing covers every source and looping recipe in examples/, m
 });
 
 test('pixel_compile with a preset is byte-identical to compiling its file', async t => {
-  const mcp = session({ directory: await temp(t, 'presets-compile'), root: examples });
+  const mcp = session(t, { directory: await temp(t, 'presets-compile'), root: examples });
   await mcp.init();
   const entries = await presetEntries();
   for (const entry of entries) {
@@ -158,7 +166,7 @@ test('a preset compiled with frames keeps evenly spaced frames and passes the ef
   const { recipe, project, colors } = compiled.get('smoke-puff.fluid.json'), order = recipe.animations['smoke-puff'].frames, N = 8;
   const drawn = order.filter(name => project.frames.find(frame => frame.name === name).data.some((value, i) => i % 4 === 3 && value)).length;
   const kept = Array.from({ length: N }, (_, i) => order[Math.round(i * (drawn - 1) / (N - 1))]);
-  const dir = await temp(t, 'smoke-cut'), mcp = session({ directory: dir, root: dir });
+  const dir = await temp(t, 'smoke-cut'), mcp = session(t, { directory: dir, root: dir });
   await mcp.init();
   const start = reply(await mcp.call('pixel_compile', { preset: 'smoke-puff', frames: N }));
   const { width, height } = project, rendered = reply(await mcp.call('pixel_render', { revision: start.revision, gif: {}, expect: { width, height, frames: N, colors, transparent: true } }));
@@ -199,7 +207,7 @@ test('a preset compiled with frames keeps evenly spaced frames and passes the ef
 });
 
 test('pixel_help returns one preset\'s source with its files inlined, says what to do with it, and names its mistakes', async t => {
-  const dir = await temp(t, 'preset-help'), mcp = session({ directory: dir, root: dir });
+  const dir = await temp(t, 'preset-help'), mcp = session(t, { directory: dir, root: dir });
   await mcp.init();
   const entries = await presetEntries();
   // A preset that names another file comes back whole, so its source compiles from any root.

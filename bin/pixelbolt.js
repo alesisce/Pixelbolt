@@ -8,11 +8,11 @@ import { compileCrystals } from '../src/crystal.js';
 import { compilePowder } from '../src/powder.js';
 import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery, briefCheck } from '../src/check.js';
-import { resizeRecipe, resizeWarning, keepFrames, keepAnimations } from '../src/resize.js';
+import { resizeRecipe, resizeWarning, resizeMargins, keepFrames, keepAnimations } from '../src/resize.js';
 import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
-import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, tilemapOf, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
+import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, briefComparison, errorReply, tilemapOf, stackViews, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 // A reader that stops early (`| head -1`) closes the pipe: stop quietly, as other command-line tools do. Commands print
 // their reply after writing their files, so only the rest of the reply is lost.
@@ -111,6 +111,8 @@ Inspect: --frames a,b or --animation name picks cells (* and ? in a name match f
 and lists the pixels each step changes;
 --grid adds palette-key rows; --scale 1-16 and --background color style the sheet.
 --view color|silhouette|grayscale|onion|tile|parts (each pixel coloured by the layer or pose part that drew it);
+--beside b.json,c.json draws the same view of up to eight more recipes under this one, in the one image, to compare
+variants (the reply's stack says where each starts);
 --native adds a 1x PNG; --diagnostics adds advisory evidence (past 8 frames, totals and the three frames with the
 most to clean up; --full lists every frame).
 --guides '{"horizon":40,"vanish":[[64,40]],"iso":{"tile":[32,16]}}' (or a file) draws perspective guides over the
@@ -146,7 +148,7 @@ const FLAGS = new Set(['force', 'grid', 'native', 'diagnostics', 'open', 'expand
 const OPTIONS = {
   init: ['force'],
   validate: ['fps'],
-  inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'guides', 'motion', 'speed', 'ground', 'metadata'],
+  inspect: ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'out', 'force', 'view', 'native', 'diagnostics', 'full', 'max-cells', 'step', 'offset', 'every', 'layers', 'reference', 'beside', 'guides', 'motion', 'speed', 'ground', 'metadata'],
   patch: ['changes', 'out', 'image', 'force'],
   render: ['out', 'force', 'expect', 'animation', 'list-files', 'embed-recipe', 'gif', 'gif-scale', 'look'],
   gif: ['out', 'animation', 'scale', 'background', 'force', 'preset', 'size', 'frames', 'sheet'],
@@ -584,7 +586,8 @@ try {
       // The hint to save metadata is for what a next step reads from it; a tile set whose reply carries its tilemap has
       // said what a map needs.
       const unsaved = metadata && !options.metadata && reviewed && !tilemap;
-      print({ ok: true, ...written, ...made, ...(kept && { kept }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...((unsaved || (preview && !options.preview)) && { hint: [unsaved && `The metadata${warnings ? ' (what review tools read: pose contacts, joints, loop seams, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
+      const margins = resized && resizeMargins(resized, [made.width, made.height]);
+      print({ ok: true, ...written, ...made, ...(margins && { margins }), ...(kept && { kept }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...((unsaved || (preview && !options.preview)) && { hint: [unsaved && `The metadata${warnings ? ' (what review tools read: pose contacts, joints, loop seams, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');
@@ -608,7 +611,7 @@ try {
       const layerOptions = options.layers === undefined ? {} : { layers: options.layers.split(',') };
       if (!options.motion && ['speed', 'ground', 'metadata'].some(key => options[key] !== undefined)) throw new Error('--speed, --ground and --metadata require --motion');
       if (options.full && !options.diagnostics) throw new Error('--full goes with --diagnostics: it lists the counts of every frame');
-      if (options.motion) for (const key of ['frames', 'animation', 'region', 'grid', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'guides']) if (options[key] !== undefined) throw new Error(`--${key} cannot be combined with --motion`);
+      if (options.motion) for (const key of ['frames', 'animation', 'region', 'grid', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'beside', 'guides']) if (options[key] !== undefined) throw new Error(`--${key} cannot be combined with --motion`);
       const input = await readResolved(positional[0]), compiled = input.document.format === 'pixelforge-poses' ? compilePoses(input.document) : input.document.format === 'pixelforge-wave' ? compileWaves(input.document) : null;
       if (input.document.format === 'pixelforge-wave' && options.motion) throw new Error('--motion reviews character poses; inspect a wave without --motion');
       if (compiled && options.metadata) throw new Error('A pose source supplies its own metadata; omit --metadata');
@@ -617,12 +620,26 @@ try {
       const { image: referenceImage, ...comparisonReport } = comparison ?? {};
       const view = options.motion ? inspectMotion(project, { animation: options.motion, metadata: compiled?.metadata ?? (options.metadata ? await readProject(options.metadata, '--metadata') : undefined),
         ...Object.fromEntries(['speed', 'ground', 'scale'].filter(key => options[key] !== undefined).map(key => [key, Number(options[key])])),
-        ...(options.background !== undefined && { background: options.background }) }) : inspectProject(project, { ...inspectOptions(options), ...(options.guides !== undefined && { guides: await readGuidesOption(options.guides) }) }), { data, ...sheet } = view.sheet;
+        ...(options.background !== undefined && { background: options.background }) }) : inspectProject(project, { ...inspectOptions(options), ...(options.guides !== undefined && { guides: await readGuidesOption(options.guides) }) });
+      // --beside: the same view of more recipes under this one, in one image.
+      let drawn = view, besideFiles = [];
+      if (options.beside !== undefined) {
+        if (options.native || options.grid) throw new Error('--beside draws several recipes in one sheet; --native and --grid read one recipe at a time');
+        besideFiles = options.beside.split(',').filter(Boolean);
+        if (!besideFiles.length || besideFiles.length > 8) throw new Error('--beside takes one to eight recipe files, separated by commas');
+        const others = [];
+        for (const file of besideFiles) {
+          const { document } = await readResolved(file, '--beside'), other = renderProject(Object.hasOwn(COMPILERS, document?.format ?? '') ? COMPILERS[document.format](document).recipe : document, layerOptions);
+          others.push({ ...inspectProject(other, inspectOptions(options)), name: path.basename(file) });
+        }
+        drawn = stackViews([{ ...view, name: positional[0] === '-' ? project.name : path.basename(positional[0]) }, ...others]);
+      }
+      const { data, ...sheet } = drawn.sheet;
       if (options.out && !/\.png$/i.test(options.out)) throw new Error('inspect --out must name a .png file');
-      const written = await writeOutputs(options.out ? { image: [options.out, encodePNG(data, sheet.width, sheet.height), '--out'], ...(view.nativeSheet && { nativeImage: [options.out.replace(/\.png$/i, '.native.png'), encodePNG(view.nativeSheet.data, view.nativeSheet.width, view.nativeSheet.height), 'The --native sheet beside --out'] }), ...(referenceImage && { referenceImage: [options.out.replace(/\.png$/i, '.reference.png'), encodePNG(referenceImage.sheet.data, referenceImage.sheet.width, referenceImage.sheet.height), 'The --reference comparison beside --out'] }) } : {}, options.force, [...inputsOf(input), ...filesRead(options.reference, options.metadata)]);
+      const written = await writeOutputs(options.out ? { image: [options.out, encodePNG(data, sheet.width, sheet.height), '--out'], ...(view.nativeSheet && { nativeImage: [options.out.replace(/\.png$/i, '.native.png'), encodePNG(view.nativeSheet.data, view.nativeSheet.width, view.nativeSheet.height), 'The --native sheet beside --out'] }), ...(referenceImage && { referenceImage: [options.out.replace(/\.png$/i, '.reference.png'), encodePNG(referenceImage.sheet.data, referenceImage.sheet.width, referenceImage.sheet.height), 'The --reference comparison beside --out'] }) } : {}, options.force, [...inputsOf(input), ...filesRead(options.reference, options.metadata, ...besideFiles)]);
       if (view.diagnostics && !options.full) view.diagnostics = briefDiagnostics(view.diagnostics);
       // Grid rows line up for reading; a short row of a table (a cell, a frame's counts, a box) stays on one line.
-      print({ ok: true, ...summary(project, recipe), ...view, cells: briefCells(view.cells), warnings: [...(compiled?.warnings ?? []), ...project.warnings], sheet, nativeSheet: view.nativeSheet ? { ...view.nativeSheet, data: undefined } : undefined, ...(comparison && { comparison: comparisonReport }), ...written, ...referenced(input) });
+      print({ ok: true, ...summary(project, recipe), ...drawn, cells: briefCells(view.cells), warnings: [...(compiled?.warnings ?? []), ...project.warnings], sheet, nativeSheet: view.nativeSheet ? { ...view.nativeSheet, data: undefined } : undefined, ...(comparison && { comparison: briefComparison(comparisonReport) }), ...written, ...referenced(input) });
     } else if (command === 'patch') {
       if (!options.changes) throw new Error('patch requires --changes <file.json|->');
       if (options.out && !/\.json$/i.test(options.out)) throw new Error('patch --out must name a .json file');
@@ -638,7 +655,7 @@ try {
         ...(options.image && image && { image: [options.image, encodePNG(image.sheet.data, image.sheet.width, image.sheet.height), '--image'] })
       }, options.force, [...input.resolution.files, ...filesRead(options.changes)]);
       const { sheet, ...drawn } = image ?? {};
-      print({ ok: true, name: after.name, edits, ...(applied.rebased && { rebased: true }), ...report, ...(written.image && { image: { ...drawn, scale: sheet.scale, file: written.image } }), ...(written.recipe && { recipe: written.recipe }), warnings: after.warnings, ...(after.clipping && { clipping: after.clipping }), ...(after.clippingOmitted && { clippingOmitted: after.clippingOmitted }) });
+      print({ ok: true, name: after.name, edits, ...(applied.rebased && { rebased: true }), ...briefComparison(report), ...(written.image && { image: { ...drawn, scale: sheet.scale, file: written.image } }), ...(written.recipe && { recipe: written.recipe }), warnings: after.warnings, ...(after.clipping && { clipping: after.clipping }), ...(after.clippingOmitted && { clippingOmitted: after.clippingOmitted }) });
     } else if (command === 'sequence') {
       if (!options.out) throw new Error('sequence requires --out <new folder>');
       folderOut('sequence', options.out, 'name a new folder for the numbered frames; for one GIF use pixelbolt gif --out <new.gif>');
@@ -676,7 +693,8 @@ try {
       const sheet = options.sheet !== undefined ? inspectProject(project, { animation: gif.animation }).sheet : null;
       const written = await writeOutputs({ file: [options.out, data, '--out'], ...(sheet && { sheet: [options.sheet, encodePNG(sheet.data, sheet.width, sheet.height), '--sheet'] }) }, options.force, inputsOf(input));
       // The cut is already said once: the clipping it causes is not a second problem.
-      print({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(kept && { kept }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) });
+      const margins = resized && resizeMargins(resized, [project.width, project.height]);
+      print({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(margins && { margins }), ...(kept && { kept }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) });
     } else if (command === 'gif-frames') {
       if (!positional[0] || positional[0] === '-') throw new Error('gif-frames requires a folder of numbered PNG frames');
       if (!options.out || !/\.gif$/i.test(options.out)) throw new Error('gif-frames requires --out <new.gif>');

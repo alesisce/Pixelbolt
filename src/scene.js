@@ -4,6 +4,9 @@ import { EASINGS, ease, pixelId, random, nearestColor } from './craft.js';
 import { fields, point } from './authoring.js';
 import { expandTilemap, isoLayout } from './autotile.js';
 
+// A scene is one view: up to SCENE_SIDE pixels a side and SCENE_AREA in all (1024×256, 640×360, 512×512), so a level
+// some sixty tiles long is one picture. Its assets stay at the animation canvas, and a map may still be larger than it.
+export const SCENE_SIDE = 1024, SCENE_AREA = 262144;
 const int = (v, min, max, path) => { if (!Number.isInteger(v) || v < min || v > max) fail(path, `expected an integer from ${min} to ${max}`); return v; };
 const num = (v, min, max, path) => { if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) fail(path, `expected a number from ${min} to ${max}`); return v; };
 const smooth = t => t * t * (3 - 2 * t);
@@ -104,9 +107,11 @@ const paletteMap = (value, path) => {
 export function prepareScene(source) {
   fields(source, ['format', 'version', 'name', 'width', 'height', 'background', 'duration', 'palette', 'cues', 'assets', 'instances', 'lighting', 'haze', 'camera'], 'scene');
   if (source.format !== 'pixelforge-scene' || source.version !== 1) fail('scene', 'expected version-1 pixelforge-scene');
-  // A scene is one view. A map may be larger than it: say so where a level's whole width was given as the scene's.
-  for (const side of ['width', 'height']) if (Number.isInteger(source[side]) && source[side] > 256) fail(`scene.${side}`, 'expected an integer from 1 to 256: a scene is one view of at most 256 pixels a side. A tilemap may be larger than it, shown a part at a time (move the placement with at, or the view with camera)');
-  const width = int(source.width, 1, 256, 'scene.width'), height = int(source.height, 1, 256, 'scene.height');
+  // A map may be larger than the view: say so where a level's whole size was given as the scene's.
+  const larger = 'a tilemap may be larger than the scene, which shows a part of it at a time (move the placement with at, or the view with camera)';
+  for (const side of ['width', 'height']) if (Number.isInteger(source[side]) && source[side] > SCENE_SIDE) fail(`scene.${side}`, `expected an integer from 1 to ${SCENE_SIDE}: a scene is one view; ${larger}`);
+  const width = int(source.width, 1, SCENE_SIDE, 'scene.width'), height = int(source.height, 1, SCENE_SIDE, 'scene.height');
+  if (width * height > SCENE_AREA) fail('scene', `${width}×${height} is ${(width * height).toLocaleString('en-US')} pixels, and a scene holds at most ${SCENE_AREA.toLocaleString('en-US')} (1024×256, 640×360, 512×512); ${larger}`);
   const duration = int(source.duration ?? 2000, 1, 60000, 'scene.duration');
   // Reuse portable name validation.
   renderProject({ version: 1, name: source.name, width: 1, height: 1, frames: [{ name: 'check' }] });

@@ -17,12 +17,13 @@
     "width": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 256
+      "maximum": 1024,
+      "description": "The view, up to 1024 a side and 262,144 pixels in all."
     },
     "height": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 256
+      "maximum": 1024
     },
     "background": {
       "type": "string",

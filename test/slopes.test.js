@@ -53,7 +53,7 @@ test('the compiled legend draws slopes in a scene as the test map draws its hill
   assert.deepEqual(hills.rows, metadata.slopes.map);
   assert.deepEqual(metadata.slopes.legend['/'], { frame: 'ground-up' });
   assert.deepEqual(metadata.slopes.legend['#'].rules.at(-1), { frames: ['ground-{mask}-a', 'ground-{mask}-b', 'ground-{mask}-stones'], weights: [3, 3, 1], autotile: 'blob', match: '#/\\uUDd' });
-  // A scene is at most 256 pixels wide: two 16-cell slices of the map, the 45° hill and the gentle one.
+  // Two 16-cell slices of the map, the 45° hill and the gentle one, each drawn as a recipe draws it.
   for (const from of [0, 8]) {
     const rows = hills.rows.map(row => row.slice(from, from + 16));
     const drawn = renderProject({ ...preview, width: 256, height: 80, frames: [{ name: 'hills', ops: [{ ...hills, y: 0, rows }] }] }).frames[0].data;

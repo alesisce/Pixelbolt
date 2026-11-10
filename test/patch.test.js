@@ -132,3 +132,20 @@ test('comparison crops to the change, summarizes recolors and reports resized ca
   assert.deepEqual(resized.canvas, { from: { w: 32, h: 32 }, to: { w: 16, h: 32 } });
   assert.deepEqual(resized.frames.changed, [{ frame: 'a' }, { frame: 'b' }]); assert.equal(resized.image, undefined);
 });
+
+test('a change to many frames is one summary in a reply, and a change to a few stays a list', async () => {
+  const { briefComparison, compareProjects, renderProject } = await import('../src/index.js');
+  const strip = (count, color) => ({ version: 1, name: 'strip', width: 8, height: 8, palette: { a: color, b: '#102030' }, frames: Array.from({ length: count }, (_, i) => ({ name: `f-${i}`, ops: [{ op: 'rect', x: 0, y: 0, w: 4 + (i % 4), h: 6, color: 'a' }, { op: 'pixel', x: 7, y: 7, color: 'b' }] })) });
+  const few = compareProjects(renderProject(strip(8, '#ff0000')), renderProject(strip(8, '#00ff00')));
+  assert.equal(briefComparison(few), few);
+  const { image, ...full } = compareProjects(renderProject(strip(20, '#ff0000')), renderProject(strip(20, '#00ff00'))), brief = briefComparison(full);
+  assert.equal(full.frames.changed.length, 20);
+  const pixels = full.frames.changed.reduce((sum, entry) => sum + entry.pixels, 0);
+  assert.deepEqual(brief.frames.changed, { count: 20, frames: 'every frame', pixels, box: { x: 0, y: 0, w: 7, h: 6 }, transitions: [{ from: '#ff0000', to: '#00ff00 (a)', pixels }],
+    most: [{ frame: 'f-3', pixels: 42, box: { x: 0, y: 0, w: 7, h: 6 } }, { frame: 'f-7', pixels: 42, box: { x: 0, y: 0, w: 7, h: 6 } }, { frame: 'f-11', pixels: 42, box: { x: 0, y: 0, w: 7, h: 6 } }] });
+  assert.ok(JSON.stringify(brief).length * 4 < JSON.stringify(full).length);
+  // Some frames changed and some did not: both are named, numbered runs written as runs.
+  const before = strip(30, '#ff0000'), after = { ...before, frames: before.frames.map((frame, i) => (i < 12 ? { ...frame, ops: [...frame.ops, { op: 'pixel', x: 0, y: 7, color: 'b' }] } : frame)) };
+  const partly = briefComparison(compareProjects(renderProject(before), renderProject(after)));
+  assert.deepEqual([partly.frames.changed.count, partly.frames.changed.frames, partly.frames.changed.pixels, partly.frames.unchanged], [12, 'f-0 … f-11', 12, { count: 18, frames: 'f-12 … f-29' }]);
+});

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import os from 'node:os';
-import { PixelError, MAX_REQUEST_BYTES, errorReply, renderProject, inspectProject, compareProjects, briefDiagnostics, briefCells } from './core.js';
+import { PixelError, MAX_REQUEST_BYTES, errorReply, renderProject, inspectProject, stackViews, compareProjects, briefDiagnostics, briefCells, briefComparison } from './core.js';
 import { patchRecipe } from './patch.js';
 import { createRevisionStore } from './revisions.js';
 import { inspectMotion } from './motion.js';
@@ -21,7 +21,7 @@ import { createSceneBundle } from './scene-export.js';
 import { importPNG } from './import.js';
 import { applyOverlay } from './overlays.js';
 import { resolveReferences, assertInside } from './resolve.js';
-import { resizeRecipe, resizeWarning, keepFrames, keepAnimations } from './resize.js';
+import { resizeRecipe, resizeWarning, resizeMargins, keepFrames, keepAnimations } from './resize.js';
 import { tilemapOf } from './autotile.js';
 import { listPresets, briefListing, findListing, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from './presets.js';
 import { TOPICS, SECTIONED, helpText, jsonTopic } from './help.js';
@@ -357,7 +357,7 @@ export function createToolRunner({ directory, root, version }) {
         const { recipe, resolved, sources } = await recipeFrom(spec, revision), project = renderProject(recipe);
         return { content: [textContent(withResolved({ ok: true, revision: await keep(recipe, sources), width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), timing: briefCells(project.frames.map(({ name, duration }) => ({ name, duration }))), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }), ...(options.fps !== undefined && { frameGrid: frameGrid(project, options.fps) }) }, resolved))] };
       } else if (name === 'pixel_inspect') {
-        const { layers, reference, source: poseSource, metadata: suppliedMetadata, speed, ground, ...inspection } = options;
+        const { layers, reference, beside, source: poseSource, metadata: suppliedMetadata, speed, ground, ...inspection } = options;
         let recipe, resolved, sources, metadata = suppliedMetadata, poseWarnings = [];
         if (poseSource !== undefined) {
           if (spec !== undefined || revision !== undefined || suppliedMetadata !== undefined) throw new PixelError('arguments', 'source replaces project, revision and metadata');
@@ -367,13 +367,20 @@ export function createToolRunner({ directory, root, version }) {
         const project = renderProject(recipe, { ...(layers !== undefined && { layers }), ...(inspection.view === 'parts' && { owners: true }) });
         let view;
         if (inspection.view === 'motion') {
-          if (layers !== undefined || reference !== undefined) throw new PixelError('arguments', 'motion review uses the complete animation; omit layers and reference');
+          if (layers !== undefined || reference !== undefined || beside !== undefined) throw new PixelError('arguments', 'motion review uses the complete animation; omit layers, reference and beside');
           const { view: mode, ...motionOptions } = inspection;
           view = inspectMotion(project, { ...motionOptions, metadata, ...(speed !== undefined && { speed }), ...(ground !== undefined && { ground }) });
         } else {
           if (speed !== undefined || ground !== undefined || suppliedMetadata !== undefined) throw new PixelError('arguments', 'speed, ground and metadata require view: motion');
           view = inspectProject(project, inspection);
           if (view.diagnostics) view.diagnostics = briefDiagnostics(view.diagnostics);
+          // beside: the same view of more revisions under this one, in the one image.
+          if (beside !== undefined) {
+            if (inspection.native || inspection.grid) throw new PixelError('beside', 'beside draws several recipes in one sheet; native and grid read one recipe at a time');
+            const others = [];
+            for (const id of beside) { const other = renderProject(await read(id), layers === undefined ? {} : { layers }); others.push({ ...inspectProject(other, inspection), name: id }); }
+            view = stackViews([{ ...view, name: project.name }, ...others]);
+          }
         }
         const comparison = reference === undefined ? null : compareProjects(renderProject(await read(reference), layers === undefined ? {} : { layers }), project);
         const content = [textContent(withResolved({ ok: true, revision: await keep(recipe, sources), name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), ...viewSummary(view), warnings: [...poseWarnings, ...project.warnings] }, resolved)), imageContent(view.sheet)];
@@ -381,7 +388,7 @@ export function createToolRunner({ directory, root, version }) {
         if (view.grids) content.push(textContent(gridText(view)));
         if (reference !== undefined) {
           const { image, ...report } = comparison;
-          content.push(textContent({ reference, comparison: report, ...(image && { comparisonImage: { region: image.region, frames: image.frames, omitted: image.omitted ?? 0 } }) }));
+          content.push(textContent({ reference, comparison: briefComparison(report), ...(image && { comparisonImage: { region: image.region, frames: image.frames, omitted: image.omitted ?? 0 } }) }));
           if (image) content.push(imageContent(image.sheet));
         }
         // The player plays the project only when the inspection shows it as it plays (all frames or one animation, any
@@ -395,7 +402,7 @@ export function createToolRunner({ directory, root, version }) {
         const applied = options.overlay === undefined ? patchRecipe(base, changes) : applyOverlay(base, options.overlay);
         const { recipe, edits } = applied, after = renderProject(recipe);
         const { image, ...report } = compareProjects(before, after), baseId = await keep(base, sources);
-        const summary = { ok: true, revision: await keep(recipe, sources), base: baseId, edits, ...(applied.rebased && { rebased: true }), ...report, ...(image && { image: { region: image.region, frames: image.frames, ...(image.omitted && { omitted: image.omitted }), scale: image.sheet.scale } }), warnings: after.warnings };
+        const summary = { ok: true, revision: await keep(recipe, sources), base: baseId, edits, ...(applied.rebased && { rebased: true }), ...briefComparison(report), ...(image && { image: { region: image.region, frames: image.frames, ...(image.omitted && { omitted: image.omitted }), scale: image.sheet.scale } }), warnings: after.warnings };
         return { content: [textContent(withResolved(summary, resolved)), ...(image ? [imageContent(image.sheet)] : [])], ...(preview && preview(after)) };
       } else if (name === 'pixel_render') {
         const { animation, listFiles, sequence, share, embedRecipe, saveAs, overwrite } = options, expect = readExpect(options.expect);
@@ -480,7 +487,7 @@ export function createToolRunner({ directory, root, version }) {
         const project = renderProject(recipe), view = inspectProject(project, { maxCells: 256 });
         // An autotile set also shows every tile over a test map, where seams and repetition show.
         const map = testMap ? inspectProject(renderProject(testMap), { scale: testMapScale(testMap) }) : null;
-        return { content: [textContent({ ok: true, revision: await keep(recipe, [...relativeToRoot(sourceFiles), ...(await Promise.all(referenced.map(sourcesOf))).flat()]), name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), preview: viewSummary(view), ...(map && { testMap: 'the second image: every tile of the set over a test map', ...(tilemapOf(recipe, metadata) && { tilemap: tilemapOf(recipe, metadata) }) }), ...(kept && { kept }), warnings: [...compiled, ...(thinned?.notes ?? []), ...(cut ? [cut] : []), ...project.warnings.filter(text => !(cut && text.startsWith('Some drawing falls outside the canvas')))], ...(args.metadata === true && { metadata }) }), imageContent(view.sheet), ...(map ? [imageContent(map.sheet)] : [])], ...(preview && preview(project)) };
+        return { content: [textContent({ ok: true, revision: await keep(recipe, [...relativeToRoot(sourceFiles), ...(await Promise.all(referenced.map(sourcesOf))).flat()]), name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), preview: viewSummary(view), ...(map && { testMap: 'the second image: every tile of the set over a test map', ...(tilemapOf(recipe, metadata) && { tilemap: tilemapOf(recipe, metadata) }) }), ...(resized && resizeMargins(resized, [recipe.width, recipe.height]) && { margins: resizeMargins(resized, [recipe.width, recipe.height]) }), ...(kept && { kept }), warnings: [...compiled, ...(thinned?.notes ?? []), ...(cut ? [cut] : []), ...project.warnings.filter(text => !(cut && text.startsWith('Some drawing falls outside the canvas')))], ...(args.metadata === true && { metadata }) }), imageContent(view.sheet), ...(map ? [imageContent(map.sheet)] : [])], ...(preview && preview(project)) };
       } else if (name === 'pixel_scene') {
         const { document, files: sources } = await resolveReferences(args.scene, { baseDir: root, root, revisions: read });
         const scene = prepareScene(document), frame = renderScene(scene, { time: args.time ?? 0, lit: args.lit ?? true, density: args.density ?? false, depth: args.view === 'depth' });
@@ -597,7 +604,7 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
     speed: { type: 'number', minimum: -4096, maximum: 4096, description: 'Motion view: pixels per second.' },
     ground: { type: 'integer', minimum: 0, maximum: 255, description: 'Motion view: ground row.' },
     layers: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 64, description: 'Show only these named layers.' },
-    reference: { type: 'string', description: 'Revision to compare against: adds a before/after image and the changed pixels.' },
+    reference: { type: 'string', description: 'Revision to compare against: adds a before/after image and the changed pixels.' }, beside: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 8, description: 'Revisions drawn under this one in the same view and image, to compare variants.' },
     frames: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 1024, description: 'Frame names to show, in order; * and ? match, as in "flash-*". Default: every frame.' },
     animation: { type: 'string', description: 'Show one animation in playback order instead of frames.' },
     region: { type: 'object', properties: { x: coordinate(0, 4095), y: coordinate(0, 4095), w: coordinate(1, 4096), h: coordinate(1, 4096) }, required: ['x', 'y', 'w', 'h'], additionalProperties: false, description: 'Crop every frame to this canvas rectangle.' },

@@ -209,7 +209,7 @@ const cueTime = (maximum, description) => ({ oneOf: [int(0, maximum), { type: 's
 const assetRef = { oneOf: [ref('recipe'), { type: 'string', description: 'Recipe file, resolved by the CLI relative to the scene or inside the MCP root.' }, object({ revision: { type: 'string', pattern: '^[a-f0-9]{12}$' } }, ['revision'])] };
 const scene = {
   $schema: schema.$schema, title: 'Pixelbolt scene review',
-  ...object({ format: { const: 'pixelforge-scene' }, version: { const: 1 }, name: id, width: int(1, 256), height: int(1, 256), background: color, duration: int(1, 60000),
+  ...object({ format: { const: 'pixelforge-scene' }, version: { const: 1 }, name: id, width: { ...int(1, 1024), description: 'The view, up to 1024 a side and 262,144 pixels in all.' }, height: int(1, 1024), background: color, duration: int(1, 60000),
     palette: themePalette('A theme for every asset: colours for palette keys the recipes share (keys a recipe lacks are ignored), or a palette file resolved by the CLI and MCP.'),
     cues: { type: 'object', maxProperties: 64, propertyNames: id, additionalProperties: int(0, 60000), description: 'Named times in milliseconds; sequence and trajectory times may say "name", "name+90" or "name-20".' },
     assets: { type: 'object', maxProperties: 64, additionalProperties: { oneOf: [assetRef, object({ recipe: assetRef, normal: assetRef, emissive: assetRef, palette: themePalette('A theme for this asset, applied after the scene palette.') }, ['recipe'])] } },

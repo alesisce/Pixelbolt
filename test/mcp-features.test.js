@@ -71,8 +71,13 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
       assert.ok(text.includes(`\n### ${heading}\n`) && everything.includes(text.slice(text.indexOf(`### ${heading}`)).trimEnd()), heading);
       assert.ok(size(text) < 16384, `${heading}: ${size(text)} bytes`);
     }
+    // No heading of the guide or the workflow returns more than 12 KB.
+    for (const topic of ['guide', 'workflow']) for (const heading of [...(await section(topic, 'all')).matchAll(/^###? (.*)$/gm)].map(match => match[1])) {
+      const text = await section(topic, heading);
+      assert.ok(text.includes(`# ${heading}\n`) && size(text) < 12288, `${topic} ${heading}: ${size(text)} bytes`);
+    }
     assert.match(await section('guide', 'Calling the tool'), /\n## Calling the tool\n/);
-    assert.match(await section('workflow', 'Autotile'), /\n## Autotile templates\n\n[^>]/);
+    assert.match(await section('workflow', 'Depth'), /\n## Depth and perspective\n\n[^>]/);
     // A word: the table row and the paragraph that name the text operation come first, cut to what mentions it.
     const found = await section('guide', 'text');
     assert.match(found, /^# Pixelbolt agent authoring guide\n\n> No section of guide starts with "text"\. The \d+ paragraphs that mention it/);
@@ -147,6 +152,7 @@ test('MCP motion review accepts a pose source or a revision with explicit compil
 
 test('MCP answers an oversized request with an error, recovers its id and keeps serving', async t => {
   const dir = await temp(t, 'oversize'), { input, running, request, init, waiting } = session({ directory: dir });
+  t.after(() => input.end());
   await init();
   const errored = new Promise(resolve => waiting.set(7, resolve));
   // No newline for well over the limit: the server discards it chunk by chunk, then answers once the line ends.

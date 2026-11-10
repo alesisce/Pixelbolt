@@ -161,6 +161,14 @@ export function resizeWarning({ from, cut }, [width, height]) {
   return `The ${width}×${height} canvas leaves out ${share} of what the ${from[0]}×${from[1]} drawing draws (cut, not scaled): look at it before delivering, and say so if it shows.`;
 }
 
+// The empty margins a larger canvas puts round the drawing's own canvas, by side, or null when there are none: what a
+// reply says of a 16×32 flame asked for at 32×32, which fills half of what was asked.
+export function resizeMargins({ from, offset }, [width, height]) {
+  const sides = { left: -offset[0], right: offset[0] + width - from[0], top: -offset[1], bottom: offset[1] + height - from[1] };
+  const margins = Object.fromEntries(Object.entries(sides).filter(([, pixels]) => pixels > 0));
+  return Object.keys(margins).length ? margins : null;
+}
+
 // A recipe whose animations play at most `count` frames: of an animation that lists more, evenly spaced ones are kept
 // and the rest removed. A loop keeps frame floor(i × F / count), so the step across its seam is as even as the others;
 // a one-shot or a pingpong keeps its first and last, where a one-shot's last is the last that draws anything, so an

@@ -32,7 +32,13 @@ test('a compiled tile set says how a map names its tiles, and a set of several m
   assert.deepEqual([pasted.tile, Object.keys(pasted.legend).join(''), pasted.rows], [[16, 16], '#/\\uUDd', ground.metadata.slopes.map]);
   const view = prepareScene({ format: 'pixelforge-scene', version: 1, name: 'hills', width: 256, height: 80, assets: { ground: ground.recipe }, instances: [{ asset: 'ground', at: [0, 0], tilemap: { ...pasted, outside: 'match' } }] });
   assert.equal(view.instances[0].tilemap.cells.length > 60, true);
-  assert.throws(() => prepareScene({ format: 'pixelforge-scene', version: 1, name: 'hills', width: 384, height: 80, assets: {}, instances: [] }), /scene\.width: expected an integer from 1 to 256: a scene is one view/);
+  // The whole sample map, 24 cells of 16 pixels, is one scene; a view past the limits says a map may be larger than it.
+  const whole = renderScene(prepareScene({ format: 'pixelforge-scene', version: 1, name: 'hills', width: 384, height: 80, assets: { ground: ground.recipe }, instances: [{ asset: 'ground', at: [0, 0], tilemap: { ...pasted, outside: 'match' } }] }), { lit: false });
+  assert.deepEqual([whole.width, whole.height, whole.placements[0].tiles > 60], [384, 80, true]);
+  const empty = { format: 'pixelforge-scene', version: 1, name: 'hills', assets: {}, instances: [] };
+  assert.throws(() => prepareScene({ ...empty, width: 1025, height: 80 }), /scene\.width: expected an integer from 1 to 1024: a scene is one view; a tilemap may be larger/);
+  assert.throws(() => prepareScene({ ...empty, width: 1024, height: 257 }), /scene: 1024×257 is 263,168 pixels, and a scene holds at most 262,144/);
+  assert.equal(prepareScene({ ...empty, width: 1024, height: 256 }).width, 1024);
   assert.equal(tilemapOf(await example('coin.json')), null);
 });
 

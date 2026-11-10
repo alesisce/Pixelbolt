@@ -1473,6 +1473,23 @@ export function pictureSheet({ palette = {}, headings = [], rows: lines, scale =
   return { width, height, scale: s, data };
 }
 
+// The same view of several recipes as one image, each sheet under the one before and left-aligned: a hero in three
+// team colours, or a sprite before and after, compared with one look. `views` are inspectProject results with a
+// `name` each. Returns the first view with the taller sheet and `stack`, where each recipe's sheet starts.
+export function stackViews(views) {
+  const sheets = views.map(view => view.sheet), width = Math.max(...sheets.map(sheet => sheet.width)), height = sheets.reduce((sum, sheet) => sum + sheet.height, 0);
+  const data = new Uint8ClampedArray(width * height * 4), fill = sheets[0].data.slice(0, 4), stack = [];
+  for (let i = 0; i < data.length; i += 4) data.set(fill, i);
+  let y = 0;
+  sheets.forEach((sheet, index) => {
+    for (let row = 0; row < sheet.height; row++) data.set(sheet.data.subarray(row * sheet.width * 4, (row + 1) * sheet.width * 4), (y + row) * width * 4);
+    stack.push({ name: views[index].name, y, height: sheet.height });
+    y += sheet.height;
+  });
+  const { name, ...first } = views[0];
+  return { ...first, sheet: { ...sheets[0], data, width, height }, stack };
+}
+
 export function inspectProject(project, options = {}) {
   object(options, 'inspect', ['frames', 'animation', 'region', 'grid', 'scale', 'background', 'view', 'native', 'diagnostics', 'maxCells', 'step', 'offset', 'every', 'guides']);
   const { width, height, frames } = project;
@@ -1726,21 +1743,46 @@ export function briefDiagnostics(diagnostics) {
 // numbered names as its ends. Nineteen cells of a smoke puff read ["smoke-puff-0 … smoke-puff-18: 60 ms each"], where
 // a `{frame, duration}` object each was most of a reply. Cells that carry more than a name and a duration (a motion
 // review's) are returned as they are.
+// Names in order, a run of three or more numbered ones (a-0, a-1, a-2) written as "a-0 … a-2".
+function nameRuns(labels) {
+  const numbered = label => /^(.*?)(\d+)$/.exec(label), names = [];
+  for (let a = 0, b; a < labels.length; a = b) {
+    const first = numbered(labels[a]);
+    for (b = a + 1; first && b < labels.length; b++) { const next = numbered(labels[b]); if (!next || next[1] !== first[1] || Number(next[2]) !== Number(first[2]) + b - a) break; }
+    if (b - a > 2) names.push(`${labels[a]} … ${labels[b - 1]}`);
+    else { names.push(labels[a]); b = a + 1; }
+  }
+  return names;
+}
 export function briefCells(cells) {
   if (!cells.every(cell => Object.keys(cell).every(key => key === 'frame' || key === 'name' || key === 'duration'))) return cells;
-  const label = cell => cell.frame ?? cell.name, numbered = cell => /^(.*?)(\d+)$/.exec(label(cell)), lines = [];
+  const lines = [];
   for (let start = 0, end; start < cells.length; start = end) {
     for (end = start + 1; end < cells.length && cells[end].duration === cells[start].duration; end++);
-    const names = [];
-    for (let a = start, b; a < end; a = b) {
-      const first = numbered(cells[a]);
-      for (b = a + 1; first && b < end; b++) { const next = numbered(cells[b]); if (!next || next[1] !== first[1] || Number(next[2]) !== Number(first[2]) + b - a) break; }
-      if (b - a > 2) names.push(`${label(cells[a])} … ${label(cells[b - 1])}`);
-      else { names.push(label(cells[a])); b = a + 1; }
-    }
-    lines.push(`${names.join(', ')}: ${cells[start].duration} ms${end - start > 1 ? ' each' : ''}`);
+    lines.push(`${nameRuns(cells.slice(start, end).map(cell => cell.frame ?? cell.name)).join(', ')}: ${cells[start].duration} ms${end - start > 1 ? ' each' : ''}`);
   }
   return lines;
+}
+
+// A comparison as a reply carries it. Up to COMPARED changed frames are listed each with its own figures. Past that
+// (a palette change touches every frame of a character) the same few lines would repeat for every frame, so the
+// reply says how many changed and which, the pixels and the box over all of them, the commonest colour changes
+// summed, and the three frames that changed most; a long list of unchanged frames is their names in runs.
+const COMPARED = 8;
+export function briefComparison(report) {
+  const { changed, unchanged, ...rest } = report.frames;
+  if (changed.length <= COMPARED && unchanged.length <= COMPARED * 2) return report;
+  const brief = list => (list.length <= COMPARED * 2 ? list : { count: list.length, frames: nameRuns(list).join(', ') });
+  if (changed.length <= COMPARED) return { ...report, frames: { changed, unchanged: brief(unchanged), ...rest } };
+  const measured = changed.filter(entry => entry.box), sums = new Map();
+  for (const entry of changed) for (const { from, to, pixels } of entry.transitions ?? []) { const key = `${from}\n${to}`; sums.set(key, (sums.get(key) ?? 0) + pixels); }
+  const box = measured.reduce((all, { box: b }) => (all ? { x: Math.min(all.x, b.x), y: Math.min(all.y, b.y), x2: Math.max(all.x2, b.x + b.w), y2: Math.max(all.y2, b.y + b.h) } : { x: b.x, y: b.y, x2: b.x + b.w, y2: b.y + b.h }), null);
+  const transitions = [...sums].sort((a, b) => b[1] - a[1]).slice(0, COMPARED).map(([key, pixels]) => ({ from: key.split('\n')[0], to: key.split('\n')[1], pixels }));
+  return { ...report, frames: {
+    changed: { count: changed.length, frames: unchanged.length ? nameRuns(changed.map(entry => entry.frame)).join(', ') : 'every frame', pixels: changed.reduce((sum, entry) => sum + (entry.pixels ?? 0), 0),
+      ...(box && { box: { x: box.x, y: box.y, w: box.x2 - box.x, h: box.y2 - box.y } }), ...(transitions.length && { transitions }),
+      most: [...measured].sort((a, b) => b.pixels - a.pixels).slice(0, 3).map(({ frame, pixels, box: b }) => ({ frame, pixels, box: b })) },
+    unchanged: brief(unchanged), ...rest } };
 }
 
 // Two names make one number: the first times NAME_PAIRS (2 to the 26th, more names than a frame has pixels) plus the second.

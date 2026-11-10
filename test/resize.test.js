@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { renderProject } from '../src/core.js';
 import { hash } from '../src/craft.js';
 import { findPreset, loadPreset, compilePreset } from '../src/presets.js';
-import { readSize, resizeRecipe, resizeWarning, keepFrames, keepAnimations } from '../src/resize.js';
+import { readSize, resizeRecipe, resizeWarning, resizeMargins, keepFrames, keepAnimations } from '../src/resize.js';
 import { startMCP } from '../src/mcp.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -387,4 +387,18 @@ test('fewer frames are evenly spaced ones, lasting as long as the frames they st
     for (const frame of after.frames) assert.deepEqual(frame.data, before.frames.find(each => each.name === frame.name).data, `${name} ${frame.name}`);
     for (const animation of Object.values(after.animations)) assert.ok(animation.frames.length <= count, name);
   }
+});
+
+test('a canvas larger than the drawing says where its margins are, and a smaller one has none', async t => {
+  const torch = await preset('torch'), dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-margins-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  assert.deepEqual([torch.width, torch.height], [16, 32]);
+  const wide = resizeRecipe(torch, '32x32'), tall = resizeRecipe(torch, '16x40'), cut = resizeRecipe(torch, '12x24'), mixed = resizeRecipe(torch, '20x24');
+  assert.deepEqual(resizeMargins(wide.resized, [32, 32]), { left: 8, right: 8 });
+  const sides = resizeMargins(tall.resized, [16, 40]);
+  assert.deepEqual([Object.keys(sides).every(side => side === 'top' || side === 'bottom'), (sides.top ?? 0) + (sides.bottom ?? 0)], [true, 8]);
+  assert.equal(resizeMargins(cut.resized, [12, 24]), null);
+  assert.deepEqual(resizeMargins(mixed.resized, [20, 24]), { left: 2, right: 2 });
+  // The compile reply carries them beside the size asked for.
+  const reply = JSON.parse(spawnSync(process.execPath, [fileURLToPath(new URL('../bin/pixelbolt.js', import.meta.url)), 'compile', '--preset', 'torch', '--size', '32x32', '--out', path.join(dir, 'torch.json')], { encoding: 'utf8' }).stdout);
+  assert.deepEqual([reply.width, reply.height, reply.margins], [32, 32, { left: 8, right: 8 }]);
 });

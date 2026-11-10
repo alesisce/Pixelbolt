@@ -14,7 +14,7 @@
 import { parseColor, renderProject, CANVAS_SIDE, FRAME_AREA, fail, isObject } from './core.js';
 import { hash, ditherThreshold, sinDeg, cosDeg } from './craft.js';
 import { atan2Deg } from './shapes.js';
-import { createBodyWorld, polygonPart, areaBeyond } from './bodies.js';
+import { createBodyWorld, polygonPart, areaBeyond, turnBetween } from './bodies.js';
 import { number } from './authoring.js';
 
 const known = (object, keys, path) => {
@@ -63,7 +63,6 @@ const PLANS = new WeakMap();
 // would land in a solid it tries NUDGES of a pixel.
 const MOST_PIECES = 128, SEARCH = 4096, SIDE = 4, REACH = 10, PARTED = 8, RESTED = 2, LIQUID_DRAG = 0.6, QUADRATIC = 1, SPLASH_UP = 0.9, SPLASH_OUT = 0.35, HOLD = 0.3, TURN_HOLD = 0.2;
 const NUDGES = [[0, 0], [0, -1], [-1, 0], [1, 0], [0, 1]];
-const turnBetween = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
 // Single-character palette keys. '.' marks an empty pixel.
 const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#$%&*+-=?@^~!<>/|:;,_()[]{}';
 // Salts that keep the random streams apart.

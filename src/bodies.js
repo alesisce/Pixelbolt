@@ -1412,7 +1412,7 @@ function cover(b, x, y) {
 // pixels and at 45 a plus sign. The physics keeps the exact angle.
 const turnStep = size => (Math.max(size[0], size[1]) < 6 ? 90 : 1);
 // The shorter turn from angle a to angle b, in degrees (−180 to 180).
-const turnBetween = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
+export const turnBetween = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
 function drawnDegrees(b, size = b.size) {
   const every = turnStep(size), exact = atan2Deg(b.s, b.c);
   let degrees = Math.round(exact / every) * every;

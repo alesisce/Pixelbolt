@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { renderProject, analyzeProject } from '../src/core.js';
 import { patchRecipe } from '../src/patch.js';
 import { createOverlay, applyOverlay } from '../src/overlays.js';
-import { cleanupIds, rotateRows, turnRows, ease, EASINGS, sinDeg, cosDeg, ditherThreshold } from '../src/craft.js';
+import { cleanupIds, rotateRows, turnRows, ease, EASINGS, sinDeg, cosDeg, ditherThreshold, rasterizeBone, rasterizeMass, hash } from '../src/craft.js';
 
 const palette = { r: '#f00', b: '#00f', g: '#0f0', k: '#000', s: '#888', m: '#0a0' };
 const names = new Map(Object.entries(palette).map(([key, hex]) => [renderProject({ version: 1, name: 'p', width: 1, height: 1, palette, frames: [{ name: 'a', ops: [{ op: 'pixel', color: hex }] }] }).frames[0].data.join(), key]));
@@ -129,6 +129,50 @@ test('cleanup finds doubled corners and strays without touching filled areas or 
   const nook = grid(['.....', '.xx..', '.x...', '.x...']);
   assert.deepEqual(cleanupIds(nook, 5, 4, { corners: true }).map(({ x, y }) => [x, y]), [[1, 1]]);
   assert.equal(cleanupIds(nook, 5, 4, { corners: true, walls: index => index === 0 }).length, 0);
+  // A caller keeping masks beside the ids is told each change as it is made: the pixel, the pixels whose colour it
+  // took (the three beyond a corner, the neighbours of a stray) and that colour.
+  const told = [], took = (index, from, id) => told.push([index, from, id]);
+  cleanupIds(nook, 5, 4, { corners: true, took }); cleanupIds(grid(['ggg', 'gbg', 'ggg']), 3, 3, { strays: true, took });
+  assert.deepEqual(told, [[6, [5, 1, 0], 0], [4, [0, 1, 2, 3, 5, 6, 7, 8], 2]]);
+});
+
+// A bone or mass comes with two masks beside its rows: which pixels are fill and which are outline. The compilers read
+// them (inner lines, sockets), so a cleanup pass that changes what a pixel is must change its masks with it. A tapered
+// bone's outline pixel that cleanup gave the fill colour once stayed in the outline mask (80 to 1392 of 25,200 drawings
+// for six tapers), and the pose compiler's inner-line pass repainted it a ramp step darker.
+test('the fill and outline masks of a bone or mass say what each pixel is, at every whole degree of seeded tapers', () => {
+  const ramp = ['a', 'b', 'c', 'd'];
+  // A pixel whose masks disagree with it: an empty one in a mask, a drawn one in both or neither, an outline-mask pixel
+  // not in the outline colour, a fill pixel in an outline colour that is none of the part's shades.
+  const disagreement = (part, { base, outline }) => {
+    const line = outline === 'selective' ? ramp[0] : outline, shades = [ramp[base], ramp[Math.min(3, base + 1)], ramp[Math.max(0, base - 1)]];
+    for (let y = 0; y < part.height; y++) for (let x = 0; x < part.width; x++) {
+      const i = y * part.width + x, key = part.rows[y][x], fill = part.fill[i], lined = part.outlineMask[i];
+      if (key === '.' ? fill || lined : fill === lined || (lined && key !== line) || (fill && key === line && !shades.includes(line))) return `[${x}, ${y}] is ${key}, fill ${fill}, outline ${lined}:\n${part.rows.join('\n')}`;
+    }
+    return null;
+  };
+  // The reproduction: the corner at [4, 6] of this hourglass at 21° is drawn in the fill colour b.
+  const hourglass = { length: 5, width: [6, 1, 6], base: 1, outline: 'k', caps: ['flat', 'flat'] }, glass = rasterizeBone(hourglass, { angle: 21, ramp });
+  assert.deepEqual([glass.rows[6][4], glass.fill[6 * glass.width + 4], glass.outlineMask[6 * glass.width + 4]], ['b', 1, 0]);
+  const pick = (list, ...seed) => list[hash(...seed) % list.length], caps = ['round', 'flat', 'point', 'socket'];
+  let drawings = 0;
+  for (let seed = 0; seed < 24; seed++) {
+    // Two or three widths from 1 to 10, never all alike; an outline of its own colour, of the ramp's darkest (which a
+    // base of 0 or 1 also shades with), of a shade, or none.
+    const width = Array.from({ length: 2 + hash(seed, 1) % 2 }, (_, i) => 1 + hash(seed, 2, i) % 10);
+    if (width.every(w => w === width[0])) width[0] = width[0] % 10 + 1;
+    const bone = { length: 1 + hash(seed, 3) % 24, width, base: hash(seed, 4) % 3, outline: pick(['k', 'k', 'selective', 'b', null], seed, 5), caps: [pick(caps, seed, 6), pick(caps, seed, 7)], snap: hash(seed, 8) % 4 > 0 };
+    for (let angle = 0; angle < 360; angle++, drawings++) {
+      const wrong = disagreement(rasterizeBone(bone, { angle, ramp, flipX: (seed + angle) % 5 === 0 }), bone);
+      assert.equal(wrong, null, `bone ${JSON.stringify(bone)} at ${angle}°: ${wrong}`);
+    }
+  }
+  for (const [size, flat] of [[[7, 3], false], [[12, 5], true], [[5, 14], false]]) for (const outline of ['k', 'selective']) for (let angle = 0; angle < 360; angle += 15, drawings++) {
+    const mass = { size, base: 1, outline, ...(flat && { flat }) }, wrong = disagreement(rasterizeMass(mass, { angle, squash: 0.75 + (angle % 4) * 0.25, ramp }), mass);
+    assert.equal(wrong, null, `mass ${JSON.stringify(mass)} at ${angle}°: ${wrong}`);
+  }
+  assert.equal(drawings, 24 * 360 + 6 * 24);
 });
 
 test('a cleanup patch proposes corrections with a report, and diagnostics count what it would change', () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { inspectMotion } from '../src/motion.js';
 import { expandPoses } from '../src/authoring.js';
@@ -92,7 +92,7 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            into ~/.claude/skills (Claude Code), ./.claude/skills with --project, or
                                            a skills folder you name; its commands run npx -y pixelbolt@<this version>
 
-Options: --force allows overwriting exported files, and removes an earlier export's frames the new one no longer has. No command writes over a file it reads, however the path is spelled (patch may save over the recipe it edits). '-' reads JSON from stdin.
+Options: --force allows overwriting exported files, and removes an earlier export's frames the new one no longer has. No command writes over a file it reads, however the path is spelled (patch may save over the recipe it edits). '-' reads JSON from stdin, for one input a call. An option is given once; a list goes in one value, separated by commas.
 --embed-recipe on render or scene embeds the resolved recipe in exported PNGs (not scene asset passes).
 render and scene reply with their folder once and the files in it, leaving out frames/<name>.png and, past 16, each
 animation; --list-files lists every file. compile, autotile and import save their metadata only with --metadata <new.json>.
@@ -155,17 +155,36 @@ const OPTIONS = {
   skill: ['project', 'dir', 'force']
 };
 const KNOWN = new Set(Object.values(OPTIONS).flat());
+// The options whose one value is a list separated by commas.
+const LIST_OPTIONS = ['frames', 'layers', 'draft-views'];
+// Whether args[i] is an option that takes a value: one that is known and no flag.
+const takesValue = arg => arg.startsWith('--') && KNOWN.has(arg.slice(2)) && !FLAGS.has(arg.slice(2));
+// The argument after a value option is its value, whatever it says (--name -h, --offset -4,0), unless it is missing or
+// another --option.
+const valueFollows = (args, i) => takesValue(args[i]) && Boolean(args[i + 1]) && !args[i + 1].startsWith('--');
+// `<command> --help` or -h anywhere among the arguments asks for the help, except where an option takes it as its value.
+function asksForHelp(args) {
+  for (let i = 0; i < args.length; i++) {
+    if (valueFollows(args, i)) i++;
+    else if (args[i] === '--help' || args[i] === '-h') return true;
+  }
+  return false;
+}
 function parseArgs(args) {
   const positional = [], options = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i].startsWith('--') ? args[i].slice(2) : null;
     if (key === null) positional.push(args[i]);
+    // A flag given twice says the same thing once more, so it is taken; a value given twice is refused, since keeping
+    // either one would drop the other without a word.
     else if (FLAGS.has(key)) options[key] = true;
     else if (key === 'gif') throw new Error('--gif is not an option; the gif command makes one: pixelbolt gif <recipe.json> --out <new.gif>');
     else if (!KNOWN.has(key)) throw new Error(`Unknown option: ${args[i]}`);
     else {
-      if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`--${key} requires a value`);
-      options[key] = args[++i];
+      if (!valueFollows(args, i)) throw new Error(`--${key} requires a value`);
+      const value = args[++i];
+      if (Object.hasOwn(options, key)) throw new Error(`--${key} is given twice (${options[key]} and ${value}); give it once${LIST_OPTIONS.includes(key) ? `, with the whole list in one value: --${key} ${options[key]},${value}` : ''}`);
+      options[key] = value;
     }
   }
   return { positional, options };
@@ -187,7 +206,7 @@ const DRAFT_NEXT = 'Drafts, not art: compare each with the flat drawing and corr
 // arguments it passes to a program, so '{"width":32}' arrives as {width:32}: with no quote left, quote the bare keys
 // back (no value either option takes is a string).
 async function readJSONOption(value, key = 'expect', example = '{"width":32,"height":32}') {
-  if (!String(value).trimStart().startsWith('{')) return readProject(value);
+  if (!String(value).trimStart().startsWith('{')) return readProject(value, `--${key}`);
   try { return JSON.parse(value); } catch (error) {
     const stripped = !value.includes('"');
     if (stripped) try { return JSON.parse(value.replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3')); } catch {}
@@ -195,16 +214,27 @@ async function readJSONOption(value, key = 'expect', example = '{"width":32,"hei
   }
 }
 const readGuidesOption = value => readJSONOption(value, 'guides', '{"horizon":40,"vanish":[[64,40]]}');
-async function readProject(file) {
+// Stdin can be read once, so one input may be `-`. Every read of stdin goes through here, under the name of the input
+// that asked for it (the input file, or an option): a second input finds it taken and is told which two they are,
+// instead of reading nothing and failing as broken JSON. The options a command reads this way are also listed in
+// STDIN_OPTIONS and checked before any work; one missing from that list is still caught here when it is read.
+const INPUT_FILE = 'the input file';
+let stdinTaken = null;
+function takeStdin(input) {
+  if (stdinTaken !== null && stdinTaken !== input) throw new Error(`Only one input can use stdin: ${stdinTaken} and ${input} are both given as -. Put one of them in a file and name the file.`);
+  stdinTaken = input;
+}
+const STDIN_OPTIONS = { inspect: ['reference', 'metadata', 'guides'], patch: ['changes'], overlay: ['changes', 'selections'], render: ['expect'], scene: ['guides'], import: ['atlas'] };
+async function readProject(file, input = INPUT_FILE) {
   if (!file) throw new Error('Provide a project JSON filename or - for stdin');
   let source;
-  if (file === '-') { const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); source = Buffer.concat(chunks).toString('utf8'); }
+  if (file === '-') { takeStdin(input); const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); source = Buffer.concat(chunks).toString('utf8'); }
   else source = await readFile(file, 'utf8');
   return JSON.parse(source.replace(/^﻿/, ''));
 }
 // Reads a document and inlines its references relative to its own folder (stdin: the working directory).
-async function readResolved(file) {
-  const original = await readProject(file), baseDir = file === '-' ? process.cwd() : path.dirname(path.resolve(file));
+async function readResolved(file, input = INPUT_FILE) {
+  const original = await readProject(file, input), baseDir = file === '-' ? process.cwd() : path.dirname(path.resolve(file));
   const resolution = await resolveReferences(original, { baseDir });
   return { file, original, document: resolution.document, resolution, baseDir };
 }
@@ -214,8 +244,9 @@ const inputsOf = input => [...(input.file === '-' ? [] : [path.resolve(input.fil
 // unless --list-files: the reply already names the frames and animations.
 const bundleFiles = (directory, files, options) => { const { files: listed, removed } = outputSummary(directory, files, options['list-files'] === true); return { directory: shown(directory), files: listed, ...(removed && { removed }) }; };
 // The documents whose shared-palette link carries over to the recipe they are or compile to (a normal source's recipe
-// and a scene's assets do not).
-const LINKED_SOURCES = ['poses', 'autotile', 'fx', 'fluid', 'wave', 'crystal', 'powder', 'project'];
+// and a scene's assets do not): every kind src/resolve.js resolves a palette for but powder, whose source has no
+// palette to link (its colours are its materials', and the compiler refuses a `palette` field).
+const LINKED_SOURCES = ['poses', 'autotile', 'fx', 'fluid', 'wave', 'crystal', 'bodies', 'project'];
 // Compiled output keeps a shared-palette link, rewritten relative to where the output is written.
 function linkPalette(recipe, input, outFile) {
   const link = input.resolution.palettes.find(entry => LINKED_SOURCES.includes(entry.where));
@@ -235,10 +266,28 @@ function folderOut(command, out, instead) {
   if (/\.(?:png|apng|gif|jpe?g|webp|json|tres|tsx|tmx|mov|mp4)$/i.test(out)) throw new Error(`${command} --out takes a folder, and ${out} names a file: ${instead}`);
 }
 const filesRead = (...files) => files.filter(file => file !== undefined && file !== '-').map(file => path.resolve(file));
-// Checks every target before writing any, so a refused overwrite leaves nothing half-written. `inputs` are the files the
-// command read: even --force never writes over one, however the path is spelled (links, short names, letter case).
+// Why a file could not be written, in a few words.
+const WRITE_FAILURES = { EACCES: 'permission was denied', EPERM: 'permission was denied', EROFS: 'the disk is read-only', ENOSPC: 'the disk is full', EISDIR: 'a folder has that name', ENOTDIR: 'a folder in its path is a file', EEXIST: 'something of that name appeared while this ran', ENAMETOOLONG: 'the name is too long', ENOENT: 'this system cannot make that path (a name too long, a character it does not allow or a drive that is not there)', EINVAL: 'the name has a character this system does not allow', EBUSY: 'the file is in use by another program' };
+const writeFailure = error => WRITE_FAILURES[error.code] ?? error.code ?? error.message;
+// What stands in the way of writing `target`, in words, and the folders that would be made for it (deepest first).
+async function outputPath(target) {
+  const own = await stat(target).catch(() => null), folders = [];
+  if (own?.isDirectory()) return { blocked: 'a folder has that name', folders };
+  for (let folder = path.dirname(target); ; folder = path.dirname(folder)) {
+    const found = await stat(folder).catch(error => (error.code === 'ENOENT' || error.code === 'ENOTDIR' ? null : error));
+    if (found === null && path.dirname(folder) !== folder) { folders.push(folder); continue; }
+    // A folder that can't be looked at (no permission) is left for the write to report.
+    return { exists: own !== null, was: own, folders, ...(found?.isDirectory?.() === false && { blocked: `${folder} is a file, not a folder` }) };
+  }
+}
+// Checks every target before writing any, so a refused overwrite leaves nothing half-written: no two outputs are one
+// file, none is a file the command read, each one's folder can be made (nothing in its path is a file) and, without
+// --force, none exists. `inputs` are the files the command read: even --force never writes over one, however the path
+// is spelled (links, short names, letter case). Each target is [file, bytes, the option that names it]. If a write still
+// fails, the files and folders this call made are removed again, as writeBundle removes a failed export's; a file
+// replaced under --force can't be put back, so the error says which ones now hold this run's bytes.
 async function writeOutputs(targets, force, inputs = []) {
-  const entries = Object.entries(targets).map(([label, [file, data]]) => [label, path.resolve(file), data]);
+  const entries = Object.entries(targets).map(([label, [file, data, option = label]]) => [label, path.resolve(file), data, option]);
   // Windows and macOS file systems ignore case by default, so Hero.json and hero.json are one file there.
   const unique = new Set(entries.map(([, target]) => process.platform === 'win32' || process.platform === 'darwin' ? target.toLowerCase() : target));
   if (unique.size !== entries.length) throw new Error('Output paths must be distinct; no files were written.');
@@ -250,14 +299,30 @@ async function writeOutputs(targets, force, inputs = []) {
   }
   const [read] = await sameFiles(entries.map(([, target]) => target), inputs);
   if (read) throw new Error(`${read} is a file this command reads; even --force never writes over it. Choose another file; no files were written.`);
-  if (!force) for (const [, target] of entries) {
-    try { await access(target); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    // Said outright, since an agent that misses the refusal opens the old file and takes it for this run's.
-    throw new Error(`Output already exists: ${target}. Nothing was written, so that file is an earlier run's, not this one's. Choose a new file or pass --force.`);
+  const paths = new Map();
+  for (const [, target,, option] of entries) {
+    const found = await outputPath(target);
+    if (found.blocked) throw new Error(`${option} cannot be written to ${target}: ${found.blocked}. No files were written.`);
+    paths.set(target, found);
   }
-  for (const [, target, data] of entries) {
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, data, { flag: force ? 'w' : 'wx' });
+  // Said outright, since an agent that misses the refusal opens the old file and takes it for this run's.
+  if (!force) for (const [, target] of entries) if (paths.get(target).exists) throw new Error(`Output already exists: ${target}. Nothing was written, so that file is an earlier run's, not this one's. Choose a new file or pass --force.`);
+  const made = [], replaced = [];
+  for (const [, target, data, option] of entries) {
+    try {
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, data, { flag: force ? 'w' : 'wx' });
+      (paths.get(target).exists ? replaced : made).push(target);
+    } catch (error) {
+      // The failed file may be half-written: it goes too, unless it was there before this call or is someone else's.
+      const { exists, was } = paths.get(target), undone = [...made, ...(exists || error.code === 'EEXIST' ? [] : [target])];
+      for (const file of undone) await rm(file, { force: true }).catch(() => {});
+      // rmdir removes only an empty folder, so a folder that already held something, or now does, stays.
+      for (const folder of [...new Set(entries.flatMap(([, file]) => paths.get(file)?.folders ?? []))].sort((a, b) => b.length - a.length)) await rmdir(folder).catch(() => {});
+      // An earlier file under this name that the failed write got as far as changing.
+      const cut = exists && await stat(target).then(now => now.size !== was.size || now.mtimeMs !== was.mtimeMs, () => true);
+      throw new Error(`${option} could not be written to ${target}: ${writeFailure(error)}. ${made.length ? `The ${made.length === 1 ? 'file' : 'files'} this call had written before it (${made.join(', ')}) ${made.length === 1 ? 'was' : 'were'} removed again` : 'No new files were written'}${replaced.length ? `; ${replaced.join(', ')} had already been replaced under --force and now ${replaced.length === 1 ? 'holds' : 'hold'} this run's bytes` : ''}${cut ? `; ${target} was there before and is left incomplete` : ''}.${replaced.length || cut ? '' : ' Nothing of this call is left on disk.'}`);
+    }
   }
   return Object.fromEntries(entries.map(([label, target]) => [label, shown(target)]));
 }
@@ -326,14 +391,18 @@ async function helpTopic([topic, ...words]) {
 try {
   const [command = 'help', ...rest] = process.argv.slice(2);
   // `<command> --help` shows the same help, which lists every command's options (the quick start points agents there).
-  if (command === 'help' && rest.length && !rest.includes('--help') && !rest.includes('-h')) process.stdout.write(await helpTopic(rest));
-  else if (['help', '--help', '-h'].includes(command) || rest.includes('--help') || rest.includes('-h')) process.stdout.write(HELP);
+  // An option's value is never that request, so `--name -h` names something -h and `--find -h` looks for it.
+  if (command === 'help' && rest.length && !asksForHelp(rest)) process.stdout.write(await helpTopic(rest));
+  else if (['help', '--help', '-h'].includes(command) || asksForHelp(rest)) process.stdout.write(HELP);
   else {
     const { positional, options } = parseArgs(rest);
     if (positional.length > 1) throw new Error('Too many positional arguments');
     if (!Object.hasOwn(OPTIONS, command)) throw new Error(`Unknown command: ${command}. Run pixelbolt help.`);
     for (const key of Object.keys(options)) if (!OPTIONS[command].includes(key)) throw new Error(`--${key} is not supported by ${command}`);
     if (['schema', 'mcp'].includes(command) && positional.length) throw new Error(`${command} does not accept a filename`);
+    // Two inputs named - are refused before anything is read or made (import's file is a PNG, never stdin).
+    if (positional[0] === '-' && command !== 'import') takeStdin(INPUT_FILE);
+    for (const key of STDIN_OPTIONS[command] ?? []) if (options[key] === '-') takeStdin(`--${key}`);
     // A preset compiles exactly as its file in examples/ does, so the compile command reads that file.
     if ((command === 'compile' || command === 'gif') && options.preset !== undefined) {
       if (positional.length) throw new Error(`${command} takes a ${command === 'gif' ? 'recipe' : 'source'} file or --preset <name>, not both`);
@@ -391,15 +460,17 @@ try {
       // The sheet is drawn only for --preview; one too large to draw leaves the drafts to come back without it.
       const input = await readResolved(positional[0]), { drafts, sheet, noSheet } = draftViews(input.document, readDraftViews(options['draft-views']), { sheet: options.preview !== undefined });
       const reply = { ok: true, drafts, next: DRAFT_NEXT };
-      const written = await writeOutputs({ ...(options.out && { drafts: [options.out, formatJSON(reply)] }), ...(sheet && { preview: [options.preview, encodePNG(sheet.data, sheet.width, sheet.height)] }) }, options.force, inputsOf(input));
+      const written = await writeOutputs({ ...(options.out && { drafts: [options.out, formatJSON(reply), '--out'] }), ...(sheet && { preview: [options.preview, encodePNG(sheet.data, sheet.width, sheet.height), '--preview'] }) }, options.force, inputsOf(input));
       const unwritten = noSheet && { preview: `not written: ${noSheet}` };
       if (options.out) print({ ok: true, ...written, ...unwritten, parts: Object.keys(drafts), next: DRAFT_NEXT, ...referenced(input) });
       else process.stdout.write(formatJSON({ ...reply, ...written, ...unwritten, ...(options.preview === undefined && { hint: 'Pass --preview <new.png> to see each draft beside the flat drawing, the turn the compiler draws today and any drawn view.' }), ...referenced(input) }));
     } else if (command === 'compile' && options.expand) {
       if (options.metadata) throw new Error('--expand prints source annotations; omit --metadata');
+      // No image is drawn here, so a --preview would be asked for and never written.
+      if (options.preview !== undefined) throw new Error('--expand prints the poses and draws no image; omit --preview (it draws an autotile set over a test map, or with --draft-views the drafted views)');
       if (options.out && !/\.json$/i.test(options.out)) throw new Error('--out must name a .json file');
       const input = await readResolved(positional[0]), expanded = expandPoses(input.document);
-      if (options.out) print({ ok: true, ...await writeOutputs({ source: [options.out, formatJSON(linkPalette(expanded, input, options.out))] }, options.force, inputsOf(input)), ...referenced(input) });
+      if (options.out) print({ ok: true, ...await writeOutputs({ source: [options.out, formatJSON(linkPalette(expanded, input, options.out)), '--out'] }, options.force, inputsOf(input)), ...referenced(input) });
       else process.stdout.write(formatJSON(expanded));
     } else if (command === 'share') {
       const input = await readResolved(positional[0]), version = await engineVersion();
@@ -416,7 +487,7 @@ try {
       const embedded = await readEmbeddedRecipe(await readFile(positional[0]));
       if (!embedded) throw new Error('This PNG carries no Pixelbolt recipe; drop --embedded to import its pixels.');
       const { version, kind, recipe } = embedded;
-      print({ ok: true, ...await writeOutputs({ recipe: [options.out, formatJSON(recipe)] }, options.force, filesRead(positional[0])), embedded: { version, kind } });
+      print({ ok: true, ...await writeOutputs({ recipe: [options.out, formatJSON(recipe), '--out'] }, options.force, filesRead(positional[0])), embedded: { version, kind } });
     } else if (['compile', 'autotile', 'overlay', 'import'].includes(command)) {
       if (!options.out || !/\.json$/i.test(options.out)) throw new Error(`${command} requires --out <new.json>`);
       let value, metadata, input, warnings, preview, resized, kept;
@@ -447,12 +518,11 @@ try {
         value = linkPalette(compiled.recipe, input, options.out);
       } else if (command === 'overlay') {
         if (!options.changes) throw new Error('overlay requires --changes <edits.json>');
-        if (positional[0] === '-' && options.changes === '-') throw new Error('Only one input can use stdin');
         input = await readResolved(positional[0]);
-        value = createOverlay(input.document, await readProject(options.changes), options.selections ? await readProject(options.selections) : {});
+        value = createOverlay(input.document, await readProject(options.changes, '--changes'), options.selections ? await readProject(options.selections, '--selections') : {});
       } else {
         if (!positional[0] || positional[0] === '-') throw new Error('import requires a PNG filename');
-        const imported = importPNG(await readFile(positional[0]), { name: options.name, atlas: options.atlas ? await readProject(options.atlas) : undefined });
+        const imported = importPNG(await readFile(positional[0]), { name: options.name, atlas: options.atlas ? await readProject(options.atlas, '--atlas') : undefined });
         value = imported.recipe; metadata = imported.provenance;
       }
       if (options.metadata && !/\.json$/i.test(options.metadata)) throw new Error('--metadata must name a .json file');
@@ -462,7 +532,7 @@ try {
       const testMap = options.preview !== undefined ? inspectProject(renderProject(preview), { scale: testMapScale(preview) }).sheet : null;
       // Generated files use compact formatting: one line per frame, operation or short grid when it fits.
       const reads = command === 'import' ? filesRead(positional[0], options.atlas) : [...inputsOf(input), ...filesRead(options.changes, options.selections)];
-      const written = await writeOutputs({ recipe: [options.out, formatJSON(value)], ...(options.metadata && { metadata: [options.metadata, formatJSON(metadata)] }), ...(testMap && { preview: [options.preview, encodePNG(testMap.data, testMap.width, testMap.height)] }) }, options.force, reads);
+      const written = await writeOutputs({ recipe: [options.out, formatJSON(value), '--out'], ...(options.metadata && { metadata: [options.metadata, formatJSON(metadata), '--metadata'] }), ...(testMap && { preview: [options.preview, encodePNG(testMap.data, testMap.width, testMap.height), '--preview'] }) }, options.force, reads);
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry. The
       // hint to save it comes only where a next step reads it: a rig's motion review, a tile set's masks, an import.
       const reviewed = command !== 'compile' || ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format);
@@ -476,7 +546,7 @@ try {
       const frame = renderScene(scene, { time, depth: mode === 'depth' });
       const scale = options.scale === undefined ? Math.max(1, Math.min(8, Math.floor(768 / Math.max(frame.width, frame.height)))) : Number(options.scale);
       const image = sceneImage(frame, { mode, scale, ...(options.guides !== undefined && { guides: await readGuidesOption(options.guides) }) });
-      const written = await writeOutputs({ image: [options.image, encodePNG(image.data, image.width, image.height)] }, options.force, [...inputsOf(input), ...filesRead(options.guides?.trimStart().startsWith('{') ? undefined : options.guides)]);
+      const written = await writeOutputs({ image: [options.image, encodePNG(image.data, image.width, image.height), '--image'] }, options.force, [...inputsOf(input), ...filesRead(options.guides?.trimStart().startsWith('{') ? undefined : options.guides)]);
       print({ ok: true, name: input.document.name, width: frame.width, height: frame.height, duration: scene.duration, time, scale, view: mode, placements: frame.placements.length, ...(frame.depth && { depth: frame.depth }), ...(image.guides && { guides: image.guides }), ...(frame.lights && { lights: frame.lights }), ...(frame.shadows && { shadows: frame.shadows }), ...(frame.camera && { camera: frame.camera }), ...(frame.haze && { haze: frame.haze }), warnings: frame.warnings, ...written, ...referenced(input) });
     } else if (command === 'scene') {
       if (!options.out) throw new Error('scene requires --out <directory>, or --image <file.png> for one view');
@@ -488,7 +558,6 @@ try {
       print({ ok: true, ...bundleFiles(path.resolve(options.out), files, options), warnings: bundle.warnings, ...referenced(input) });
     } else if (command === 'inspect') {
       const layerOptions = options.layers === undefined ? {} : { layers: options.layers.split(',') };
-      if ([positional[0], options.reference, options.metadata].filter(file => file === '-').length > 1) throw new Error('Only one inspection input can use stdin');
       if (!options.motion && ['speed', 'ground', 'metadata'].some(key => options[key] !== undefined)) throw new Error('--speed, --ground and --metadata require --motion');
       if (options.full && !options.diagnostics) throw new Error('--full goes with --diagnostics: it lists the counts of every frame');
       if (options.motion) for (const key of ['frames', 'animation', 'region', 'grid', 'view', 'native', 'diagnostics', 'max-cells', 'step', 'offset', 'layers', 'reference', 'guides']) if (options[key] !== undefined) throw new Error(`--${key} cannot be combined with --motion`);
@@ -496,30 +565,29 @@ try {
       if (input.document.format === 'pixelforge-wave' && options.motion) throw new Error('--motion reviews character poses; inspect a wave without --motion');
       if (compiled && options.metadata) throw new Error('A pose source supplies its own metadata; omit --metadata');
       const recipe = compiled?.recipe ?? input.document, project = renderProject(recipe, { ...layerOptions, ...(options.view === 'parts' && { owners: true }) });
-      const comparison = options.reference ? compareProjects(renderProject((await readResolved(options.reference)).document, layerOptions), project) : undefined;
+      const comparison = options.reference ? compareProjects(renderProject((await readResolved(options.reference, '--reference')).document, layerOptions), project) : undefined;
       const { image: referenceImage, ...comparisonReport } = comparison ?? {};
-      const view = options.motion ? inspectMotion(project, { animation: options.motion, metadata: compiled?.metadata ?? (options.metadata ? await readProject(options.metadata) : undefined),
+      const view = options.motion ? inspectMotion(project, { animation: options.motion, metadata: compiled?.metadata ?? (options.metadata ? await readProject(options.metadata, '--metadata') : undefined),
         ...Object.fromEntries(['speed', 'ground', 'scale'].filter(key => options[key] !== undefined).map(key => [key, Number(options[key])])),
         ...(options.background !== undefined && { background: options.background }) }) : inspectProject(project, { ...inspectOptions(options), ...(options.guides !== undefined && { guides: await readGuidesOption(options.guides) }) }), { data, ...sheet } = view.sheet;
       if (options.out && !/\.png$/i.test(options.out)) throw new Error('inspect --out must name a .png file');
-      const written = await writeOutputs(options.out ? { image: [options.out, encodePNG(data, sheet.width, sheet.height)], ...(view.nativeSheet && { nativeImage: [options.out.replace(/\.png$/i, '.native.png'), encodePNG(view.nativeSheet.data, view.nativeSheet.width, view.nativeSheet.height)] }), ...(referenceImage && { referenceImage: [options.out.replace(/\.png$/i, '.reference.png'), encodePNG(referenceImage.sheet.data, referenceImage.sheet.width, referenceImage.sheet.height)] }) } : {}, options.force, [...inputsOf(input), ...filesRead(options.reference, options.metadata)]);
+      const written = await writeOutputs(options.out ? { image: [options.out, encodePNG(data, sheet.width, sheet.height), '--out'], ...(view.nativeSheet && { nativeImage: [options.out.replace(/\.png$/i, '.native.png'), encodePNG(view.nativeSheet.data, view.nativeSheet.width, view.nativeSheet.height), 'The --native sheet beside --out'] }), ...(referenceImage && { referenceImage: [options.out.replace(/\.png$/i, '.reference.png'), encodePNG(referenceImage.sheet.data, referenceImage.sheet.width, referenceImage.sheet.height), 'The --reference comparison beside --out'] }) } : {}, options.force, [...inputsOf(input), ...filesRead(options.reference, options.metadata)]);
       if (view.diagnostics && !options.full) view.diagnostics = briefDiagnostics(view.diagnostics);
       // Grid rows line up for reading; a short row of a table (a cell, a frame's counts, a box) stays on one line.
       print({ ok: true, ...summary(project, recipe), ...view, cells: briefCells(view.cells), warnings: [...(compiled?.warnings ?? []), ...project.warnings], sheet, nativeSheet: view.nativeSheet ? { ...view.nativeSheet, data: undefined } : undefined, ...(comparison && { comparison: comparisonReport }), ...written, ...referenced(input) });
     } else if (command === 'patch') {
       if (!options.changes) throw new Error('patch requires --changes <file.json|->');
-      if (positional[0] === '-' && options.changes === '-') throw new Error('Only one of the project and --changes can be read from stdin');
       if (options.out && !/\.json$/i.test(options.out)) throw new Error('patch --out must name a .json file');
       if (options.image && !/\.png$/i.test(options.image)) throw new Error('patch --image must name a .png file');
-      const input = await readResolved(positional[0]), base = input.document, changes = await readProject(options.changes);
+      const input = await readResolved(positional[0]), base = input.document, changes = await readProject(options.changes, '--changes');
       const applied = changes?.format === 'pixelforge-overlay' ? applyOverlay(base, changes) : patchRecipe(base, Array.isArray(changes) ? changes : changes?.changes);
       const { recipe, edits } = applied;
       const after = renderProject(recipe), { image, ...report } = compareProjects(renderProject(base), after);
       // A recipe that referenced a shared palette keeps that reference; only new or changed entries stay local.
       const saved = restorePaletteReference(input.original, recipe, input.resolution);
       const written = await writeOutputs({
-        ...(options.out && { recipe: [options.out, Buffer.from(JSON.stringify(saved, null, 2) + '\n')] }),
-        ...(options.image && image && { image: [options.image, encodePNG(image.sheet.data, image.sheet.width, image.sheet.height)] })
+        ...(options.out && { recipe: [options.out, Buffer.from(JSON.stringify(saved, null, 2) + '\n'), '--out'] }),
+        ...(options.image && image && { image: [options.image, encodePNG(image.sheet.data, image.sheet.width, image.sheet.height), '--image'] })
       }, options.force, [...input.resolution.files, ...filesRead(options.changes)]);
       const { sheet, ...drawn } = image ?? {};
       print({ ok: true, name: after.name, edits, ...(applied.rebased && { rebased: true }), ...report, ...(written.image && { image: { ...drawn, scale: sheet.scale, file: written.image } }), ...(written.recipe && { recipe: written.recipe }), warnings: after.warnings, ...(after.clipping && { clipping: after.clipping }), ...(after.clippingOmitted && { clippingOmitted: after.clippingOmitted }) });
@@ -559,7 +627,7 @@ try {
       // The cut is already said once: the clipping it causes is not a second problem.
       // --sheet: the frames of that animation as a contact sheet, to look at before delivering.
       const sheet = options.sheet !== undefined ? inspectProject(project, { animation: gif.animation }).sheet : null;
-      const written = await writeOutputs({ file: [options.out, data], ...(sheet && { sheet: [options.sheet, encodePNG(sheet.data, sheet.width, sheet.height)] }) }, options.force, inputsOf(input));
+      const written = await writeOutputs({ file: [options.out, data, '--out'], ...(sheet && { sheet: [options.sheet, encodePNG(sheet.data, sheet.width, sheet.height), '--sheet'] }) }, options.force, inputsOf(input));
       print({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(kept && { kept }), ...(resized && { resized }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) });
     } else if (command === 'gif-frames') {
       if (!positional[0] || positional[0] === '-') throw new Error('gif-frames requires a folder of numbered PNG frames');
@@ -567,7 +635,7 @@ try {
       if (options.fps === undefined) throw new Error('gif-frames requires --fps, for example 12, 24, 25 or 30');
       const { folderGIF } = await import('../src/frame-folder.js');
       const { data, ...gif } = folderGIF(positional[0], { fps: options.fps, ...(options.loops !== undefined && { loops: Number(options.loops) }), ...(options.background !== undefined && { background: options.background }), ...(options.prefix !== undefined && { prefix: options.prefix }) });
-      const written = await writeOutputs({ file: [options.out, data] }, options.force);
+      const written = await writeOutputs({ file: [options.out, data, '--out'] }, options.force);
       print({ ok: true, ...gif, bytes: data.length, ...written });
     } else {
       const input = await readResolved(positional[0]);
@@ -575,7 +643,6 @@ try {
       else {
         if (!options.out) throw new Error('render requires --out <directory>');
         folderOut('render', options.out, 'name a new folder: the sheet, atlas and animations are written inside it (the sheet as <name>.png); for one GIF use pixelbolt gif --out <new.gif>');
-        if (positional[0] === '-' && options.expect === '-') throw new Error('Only one input can use stdin');
         const expect = options.expect === undefined ? undefined : readExpect(await readJSONOption(options.expect));
         // The check runs before anything is written, so an unknown --animation writes nothing. render writes no GIFs.
         const bundle = await createBundle(input.document), check = checkDelivery(bundle.project, { recipe: input.document, expect, animation: options.animation });

@@ -65,8 +65,27 @@ function structuralPart(part, source, path) {
 
 // Templates check planted-foot reach on many single poses; they need resolved joints, not a validated recipe. The
 // probe mode is private to this module (a symbol nobody else holds), so compilePoses' public contract is unchanged.
-const PROBE = Symbol('pose probe');
-export function expandPoses(source) { return expandMotions(source, compilePoses, probe => compilePoses(probe, PROBE)); }
+const PROBE = Symbol('pose probe'), WITHIN = Symbol('motion expansion');
+// Expansion compiles poses one at a time, each as the only pose of a source made for it: the rest pose, a generated
+// pose to see what it draws, a probe of a few of its parts. An error from one of those addresses the pose where the
+// author's source has it, as the full compile does (writtenPoses), not as poses.poses[0] of that one-pose source: an
+// authored pose at its own index, and a generated pose, which is named <motion>-<label>, by its motion (the longest
+// motion name its own begins with) and its name.
+function posesWithin(input) {
+  const authored = new Map(input.poses.map((pose, i) => [pose?.name, { path: `poses.poses[${i}]` }]));
+  const motions = Object.keys(input.motions).sort((a, b) => b.length - a.length);
+  return { get(name) {
+    if (authored.has(name)) return authored.get(name);
+    const motion = typeof name === 'string' ? motions.find(key => name.startsWith(`${key}-`)) : undefined;
+    return motion === undefined ? undefined : { path: `poses.motions.${motion} (${name})`, generated: true };
+  } };
+}
+export function expandPoses(source) {
+  // Made at the first compile: by then expandMotions has checked that the source has poses and motions to read.
+  let written = null;
+  const compile = probe => one => compilePoses(one, { [WITHIN]: { written: written ??= posesWithin(source), probe } });
+  return expandMotions(source, compile(false), compile(true));
+}
 // Nominal pixels visited while drawing distinct bone and mass shapes in one compile (see rasterizeMass). Real rigs use
 // a few percent of it; a source that would draw for seconds fails fast with a path instead of blocking the caller.
 export const RASTER_BUDGET = 8388608;
@@ -78,7 +97,7 @@ function writtenPoses(input, expanded) {
   const found = new Map();
   input.poses.forEach((pose, i) => found.set(pose?.name, { path: `poses.poses[${i}]` }));
   for (const motion of Object.keys(expanded.motionInfo ?? {})) for (const name of expanded.animations[motion].frames)
-    if (!found.has(name)) found.set(name, { path: `poses.motions.${motion} (${name})`, motion });
+    if (!found.has(name)) found.set(name, { path: `poses.motions.${motion} (${name})`, motion, generated: true });
   return found;
 }
 
@@ -111,8 +130,10 @@ function stampsOutside(frames, symbols, width, height) {
 const nameList = (names, limit = 3) => names.slice(0, limit).join(', ') + (names.length > limit ? ` and ${names.length - limit} more` : '');
 const span = (low, high) => low === high ? `${low}` : `${low} to ${high}`;
 
-export function compilePoses(source, mode) {
-  let written = null;
+export function compilePoses(source, within) {
+  // `within` is this module's own (see expandPoses): a compile made during motion expansion, and whether it is a probe.
+  const mode = within?.[WITHIN]?.probe ? PROBE : undefined;
+  let written = within?.[WITHIN]?.written ?? null;
   if (source?.motions !== undefined) { const input = source; source = expandPoses(source); written = writtenPoses(input, source); }
   fields(source, ['format', 'version', 'name', 'width', 'height', 'palette', 'ramps', 'light', 'innerLines', 'rig', 'motionInfo', 'parts', 'poses', 'animations', 'sheet'], 'poses');
   if (source.format !== 'pixelforge-poses' || source.version !== 1) fail('poses', 'expected version-1 pixelforge-poses');
@@ -317,7 +338,12 @@ export function compilePoses(source, mode) {
       if (!Array.isArray(spec.parts) || spec.parts.length > 64) fail(partsPath, 'expected at most 64 parts in back-to-front order');
       inputs = { origin, parts: [] };
       const instances = new Map(), owners = new Map(), worldAngles = new Map(), solved = new Map(), resolvedShapes = new Map();
-      const instancePath = (instance, i) => spec === pose && motion === undefined ? `${partsPath}[${i}]` : `${partsPath} (${instance.name})`;
+      // How every error and warning addresses a part of this pose. A pose the author wrote lists its parts, so a part
+      // goes by its index there (poses.poses[2].parts[0]: the path a patch of the source takes). A pose made from
+      // others (a motion template's, a tween, a relit mirror) has no such list in the source, so its part goes by name
+      // (poses.motions.idle (idle-settle).parts (tail)), never by an index into a list the compiler made.
+      const listed = spec === pose && !writtenAs?.generated;
+      const instancePath = (instance, i) => listed ? `${partsPath}[${i}]` : `${partsPath} (${instance.name})`;
       spec.parts.forEach((instance, i) => {
         const ip = instancePath(instance, i);
         fields(instance, ['name', 'part', 'at', 'attach', 'flipX', 'rotate', 'angle', 'reach', 'bend', 'cleanup', 'squash'], ip);
@@ -359,7 +385,7 @@ export function compilePoses(source, mode) {
       const resolve = i => {
         const instance = spec.parts[i];
         if (Object.hasOwn(placed, instance.name)) return;
-        const ip = spec === pose ? `${partsPath}[${i}]` : `${partsPath} (${instance.name})`;
+        const ip = instancePath(instance, i);
         if (typeof instance.part !== 'string' || !Object.hasOwn(source.parts, instance.part)) fail(`${ip}.part`, 'unknown part definition');
         for (const key of ['flipX', 'cleanup']) if (instance[key] !== undefined && typeof instance[key] !== 'boolean') fail(`${ip}.${key}`, 'expected a boolean');
         for (const key of ['rotate', 'angle']) if (instance[key] !== undefined && (!Number.isInteger(instance[key]) || Math.abs(instance[key]) > 360)) fail(`${ip}.${key}`, 'expected whole degrees from -360 to 360, clockwise');
@@ -420,21 +446,27 @@ export function compilePoses(source, mode) {
         if (shape.outline && parentShape?.fill && instances.get(instance.attach.part) < index
           && source.parts[instance.part].bone && (source.parts[instance.part].bone.caps?.[0] ?? 'socket') === 'socket') {
           const rows = symbols[symbol].map(row => [...row]);
-          let changed = false, fingerprint = 2166136261;
+          let fingerprint = 2166136261;
+          const opened = [];
           for (let y = 0; y < shape.height; y++) for (let x = 0; x < shape.width; x++) {
             const at = y * shape.width + x;
             if (!shape.outline[at]) continue;
             const px = part.topLeft[0] + x - parent.topLeft[0], py = part.topLeft[1] + y - parent.topLeft[1];
             if (px >= 0 && py >= 0 && px < parentShape.width && py < parentShape.height && parentShape.fill[py * parentShape.width + px]) {
-              rows[y][x] = '.'; changed = true; fingerprint = Math.imul(fingerprint ^ at, 16777619) >>> 0;
+              rows[y][x] = '.'; opened.push(at); fingerprint = Math.imul(fingerprint ^ at, 16777619) >>> 0;
             }
           }
-          if (changed) {
+          if (opened.length) {
             symbol = `${shape.symbol}-j${fingerprint.toString(36)}`;
             const joined = rows.map(row => row.join(''));
-            if (symbol.length > 64 || Object.hasOwn(source.parts, symbol) || (symbols[symbol] && JSON.stringify(symbols[symbol]) !== JSON.stringify(joined))) fail(partsPath, `socket symbol ${symbol} collides or is too long; shorten or rename the part`);
+            if (symbol.length > 64 || Object.hasOwn(source.parts, symbol) || (symbols[symbol] && JSON.stringify(symbols[symbol]) !== JSON.stringify(joined))) fail(instancePath(instance, index), `socket symbol ${symbol} collides or is too long; shorten or rename the part`);
             symbols[symbol] = joined; part.symbol = symbol;
-            if (lineShades.has(shape.symbol)) lineShades.set(symbol, lineShades.get(shape.symbol));
+            // The opened drawing's outline is the whole drawing's less the pixels opened, which are outline no longer.
+            if (lineShades.has(shape.symbol) && !lineShades.has(symbol)) {
+              const outline = shape.outline.slice();
+              for (const at of opened) outline[at] = 0;
+              lineShades.set(symbol, { outline, shade: lineShades.get(shape.symbol).shade });
+            }
           }
         }
         return { name: instance.name, ops: [{ op: 'stamp', symbol, x: part.topLeft[0], y: part.topLeft[1], ...(shape.flipX && { flipX: true }) }] };

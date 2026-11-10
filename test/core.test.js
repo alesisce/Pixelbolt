@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderProject, buildAtlas, parseColor, scalePixels } from '../src/core.js';
+import { createHash } from 'node:crypto';
+import { renderProject, buildAtlas, parseColor, scalePixels, analyzeProject, inspectProject } from '../src/core.js';
 
 const make = (ops = [], extra = {}) => ({ version: 1, name: 'test', width: 4, height: 4, palette: { r: '#f00', b: '#00f', g: '#0f0' }, frames: [{ name: 'a', ops }], ...extra });
 const pixel = (frame, x, y, width = 4) => [...frame.data.slice((y * width + x) * 4, (y * width + x) * 4 + 4)];
@@ -40,6 +41,92 @@ test('validation names every miscounted row, and every broken operation, in one 
   // Checking stops after ten.
   const many = make(Array.from({ length: 30 }, () => ({ op: 'pixel', x: 0, y: 0, color: 'nope' })));
   assert.throws(() => renderProject(many), error => error.errors.length === 10 && /9 more errors \(checking stopped at 10\)/.test(error.message));
+});
+test('an operation a ground-sorted layer cannot take is one broken operation among the others', () => {
+  const base = { version: 1, name: 't', width: 8, height: 8, palette: { k: '#000', r: '#f00', g: '#0f0' } };
+  const badPixel = { op: 'pixel', x: 1, y: 1, color: 'nope' }, fill = { op: 'fill', x: 0, y: 0, color: 'k' };
+  const errors = frames => { try { renderProject({ ...base, frames }); } catch (error) { return error.errors ?? [{ path: error.path, error: error.message }]; } return []; };
+  const paths = frames => errors(frames).map(item => item.path), L = 'project.frames[0].layers';
+  const area = `${L}[0].ops[0].op: fill works on an area rather than standing on the ground; draw it in a layer without sort`;
+  const nope = path => ({ path, error: `${path}: unknown color "nope"; use a palette name or #RGB, #RGBA, #RRGGBB, #RRGGBBAA` });
+  // Alone it is the plain error it was, with no list.
+  assert.throws(() => renderProject({ ...base, frames: [{ name: 'a', layers: [{ sort: 'ground', ops: [fill] }] }] }), error => error.errors === undefined && error.path === `${L}[0].ops[0].op` && error.message === area);
+  // With a broken operation in another layer, whichever comes first: both, each with the path and message it has alone.
+  assert.deepEqual(errors([{ name: 'a', layers: [{ sort: 'ground', ops: [fill] }, { ops: [badPixel] }] }]), [{ path: `${L}[0].ops[0].op`, error: area }, nope(`${L}[1].ops[0].color`)]);
+  assert.deepEqual(paths([{ name: 'a', layers: [{ ops: [badPixel] }, { sort: 'ground', ops: [fill] }] }]), [`${L}[0].ops[0].color`, `${L}[1].ops[0].op`]);
+  // In the same layer: text without ground, a ground that is no row, and two area operations.
+  assert.deepEqual(errors([{ name: 'a', layers: [{ sort: 'ground', ops: [{ op: 'text', x: 0, y: 0, text: 'a', color: 'k' }, badPixel] }] }]), [
+    { path: `${L}[0].ops[0].ground`, error: `${L}[0].ops[0].ground: text in a layer with sort "ground" needs ground: the row it stands on` },
+    nope(`${L}[0].ops[1].color`)]);
+  assert.deepEqual(paths([{ name: 'a', layers: [{ sort: 'ground', ops: [{ op: 'pixel', x: 0, y: 0, color: 'k', ground: 'low' }, badPixel] }] }]), [`${L}[0].ops[0].ground`, `${L}[0].ops[1].color`]);
+  assert.deepEqual(paths([{ name: 'a', layers: [{ sort: 'ground', ops: [fill, { op: 'outline', color: 'k' }] }] }]), [`${L}[0].ops[0].op`, `${L}[0].ops[1].op`]);
+  assert.deepEqual(paths([{ name: 'a', layers: [{ sort: 'ground', ops: [badPixel, fill] }] }]).sort(), [`${L}[0].ops[0].color`, `${L}[0].ops[1].op`]);
+  // The rest of the frame, and the frames after it, are still checked.
+  assert.deepEqual(paths([{ name: 'a', layers: [{ sort: 'ground', ops: [fill] }], pixels: [] }, { name: 'b', ops: [badPixel] }]), [`${L}[0].ops[0].op`, 'project.frames[1].ops[0].color']);
+  // What the layer cannot take is noted before it draws; the others still draw far to near, so their errors come by row.
+  assert.deepEqual(paths([{ name: 'a', layers: [{ sort: 'ground', ops: [{ ...badPixel, y: 5 }, fill, { ...badPixel, y: 1 }] }] }]), [`${L}[0].ops[1].op`, `${L}[0].ops[2].color`, `${L}[0].ops[0].color`]);
+  // Still at most ten.
+  for (const ops of [Array.from({ length: 30 }, () => fill), Array.from({ length: 12 }, (_, i) => (i % 2 ? fill : badPixel))]) {
+    assert.throws(() => renderProject({ ...base, frames: [{ name: 'a', layers: [{ sort: 'ground', ops }] }] }), error => error.errors.length === 10 && /9 more errors \(checking stopped at 10\)/.test(error.message));
+  }
+  // The 20,000-operation budget is not a broken operation: it stops the check, listed after what was noted before it.
+  const crowd = Array.from({ length: 10 }, () => ({ ops: Array.from({ length: 2048 }, () => ({ op: 'pixel', x: 0, y: 0, color: 'k' })) }));
+  const over = errors([{ name: 'a', layers: [{ sort: 'ground', ops: [fill, badPixel] }, ...crowd, { ops: [badPixel] }] }]);
+  assert.deepEqual(over.map(item => item.path), [`${L}[0].ops[0].op`, `${L}[0].ops[1].color`, `${L}[10].ops`]);
+  assert.equal(over[2].error, `${L}[10].ops: project exceeds 20,000 drawing operations`);
+});
+test('a ground-sorted layer of sound operations renders the bytes it did', () => {
+  // Every kind of operation that can stand, listed out of order; the hash was taken before sorted layers noted errors.
+  const ops = [
+    { op: 'stamp', x: 2, y: 5, symbol: 'short' }, { op: 'stamp', x: 2, y: 1, symbol: 'tall' }, { op: 'rect', x: 0, y: 4, w: 16, h: 3, color: 'n' },
+    { op: 'line', x: 5, y: 0, x2: 5, y2: 5, color: 'f' }, { op: 'ellipse', x: 6, y: 0, w: 8, h: 6, color: 't' }, { op: 'box', x: 0, y: 8, w: 6, d: 4, h: 3, top: 'f', left: 'n', right: 't', edge: '#ffffff' },
+    { op: 'grid', x: 9, y: 7, rows: ['ff', 'nf', 'ff'], scale: 2, rotate: 90 }, { op: 'stamp', x: 10, y: 8, symbol: 'wide', scale: 2, rotate: 270, flipX: true },
+    { op: 'copy', x: 12, y: 9, symbol: 'tall', h: 3 }, { op: 'autotile', x: 1, y: 9, symbol: 'tiles', mask: 0 }, { op: 'pixel', x: 3, y: 3, color: 't' },
+    { op: 'text', x: 1, y: 9, text: 'Hi', color: 't', ground: 12 }, { op: 'stamp', x: 7, y: 6, symbol: 'tall', ground: 0 }, { op: 'rect', x: 3, y: 2, w: 9, h: 9, color: '#ff00ff80', filled: false }
+  ];
+  const recipe = {
+    version: 1, name: 'ground', width: 16, height: 16, palette: { n: '#ff0000', f: '#00ff00', t: '#0000ff' },
+    symbols: { tall: ['f', 'f', 'f', 'f', 'f'], short: ['n', 'n'], wide: ['ff', 'fn', 'ff'], tiles: ['tttt', 'tnnt', 'tttt', 'tttt', 'tfft', 'tttt'] },
+    frames: [{ name: 'a', layers: [{ sort: 'ground', ops }, { sort: 'ground', x: 1, opacity: .5, ops: [...ops].reverse() }] }, { name: 'b', from: 'a', layers: [{ sort: 'ground', palette: { n: '#ffff00' }, ops: ops.slice(0, 5) }] }]
+  };
+  const project = renderProject(recipe), hash = createHash('sha256');
+  for (const frame of project.frames) hash.update(frame.data);
+  assert.equal(hash.digest('hex'), '462429a1291f3842ae649a79f08bb8690f2b912526e89707a12d320f580beed0');
+  // The second layer is moved a pixel right, so its last column is clipped, as it was.
+  assert.deepEqual(project.clipping, [{ path: 'project.frames[0].layers[1]', pixels: 7 }]);
+});
+test('colours a frame continues or copies from a recoloured frame are declared for it', () => {
+  const base = { version: 1, name: 't', width: 8, height: 8, palette: { k: '#000', r: '#f00', g: '#0f0' } };
+  const outside = project => analyzeProject(project).findings.filter(finding => finding.code === 'palette').map(({ frame, coordinates }) => ({ frame, coordinates }));
+  const hex = (frame, x, y) => '#' + pixel(frame, x, y, 8).slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join('');
+  // `hit` recolours k white for its own drawing; `hit-2` continues it and draws k itself, which is still black.
+  const hit = { name: 'hit', palette: { k: '#ffffff' }, ops: [{ op: 'rect', x: 2, y: 2, w: 3, h: 3, color: 'k' }] };
+  const chain = renderProject({ ...base, frames: [hit, { name: 'hit-2', from: 'hit', ops: [{ op: 'pixel', x: 6, y: 6, color: 'r' }, { op: 'pixel', x: 7, y: 7, color: 'k' }] }] });
+  assert.equal(hex(chain.frames[1], 3, 3), '#ffffff'); assert.equal(hex(chain.frames[1], 7, 7), '#000000');
+  assert.deepEqual(outside(chain), []);
+  assert.deepEqual(inspectProject(chain, { diagnostics: true }).diagnostics.findings.filter(finding => finding.code === 'palette'), []);
+  assert.equal(chain.frames[1].palette, undefined);
+  assert.deepEqual(chain.frames[1].inherited, ['#ffffff']); assert.equal(chain.frames[0].inherited, undefined);
+  // A colour nothing declares is still found on the continuing frame, and only that colour.
+  const stray = renderProject({ ...base, frames: [hit, { name: 'hit-2', from: 'hit', ops: [{ op: 'pixel', x: 6, y: 6, color: '#123456' }] }] });
+  assert.deepEqual(outside(stray), [{ frame: 'hit-2', coordinates: [{ x: 6, y: 6, color: '#123456' }] }]);
+  // A frame that continues nothing gets nothing from a recoloured frame beside it.
+  const apart = renderProject({ ...base, frames: [hit, { name: 'other', ops: [{ op: 'pixel', x: 0, y: 0, color: '#ffffff' }] }] });
+  assert.deepEqual(outside(apart), [{ frame: 'other', coordinates: [{ x: 0, y: 0, color: '#ffffff' }] }]);
+  // A chain: each frame's own frame and layer palettes reach every frame that continues it, however far down.
+  const nested = renderProject({ ...base, frames: [
+    hit,
+    { name: 'b', from: 'hit', palette: { r: '#0000ff' }, ops: [{ op: 'pixel', x: 0, y: 0, color: 'r' }], layers: [{ palette: { g: '#ff00ff' }, ops: [{ op: 'pixel', x: 1, y: 0, color: 'g' }] }] },
+    { name: 'c', from: 'b', translate: [1, 1] },
+    { name: 'd', from: 'c', ops: [{ op: 'pixel', x: 0, y: 7, color: 'g' }, { op: 'pixel', x: 7, y: 0, color: '#abcdef' }] }
+  ] });
+  assert.equal(hex(nested.frames[3], 3, 3), '#ffffff'); assert.equal(hex(nested.frames[3], 1, 1), '#0000ff'); assert.equal(hex(nested.frames[3], 2, 1), '#ff00ff'); assert.equal(hex(nested.frames[3], 0, 7), '#00ff00');
+  assert.deepEqual(nested.frames[3].inherited, ['#0000ff', '#ff00ff', '#ffffff']);
+  assert.deepEqual(outside(nested), [{ frame: 'd', coordinates: [{ x: 7, y: 0, color: '#abcdef' }] }]);
+  // A copy of an earlier frame keeps exact RGBA, so it brings that frame's colours the same way.
+  const copied = renderProject({ ...base, frames: [hit, { name: 'dst', ops: [{ op: 'copy', from: 'hit', x: 3, y: 3 }] }, { name: 'dst-2', layers: [{ ops: [{ op: 'copy', from: 'dst', x: 0, y: 0 }] }] }] });
+  assert.equal(hex(copied.frames[2], 6, 6), '#ffffff');
+  assert.deepEqual(outside(copied), []);
 });
 test('an unknown field or operation names the one most likely meant and what is accepted; a missing number says so', () => {
   const message = op => { try { renderProject(make([op])); } catch (error) { return error.message; } return null; };

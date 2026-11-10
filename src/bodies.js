@@ -796,8 +796,10 @@ export function createBodyWorld(effect, context) {
   const stirred = [];
   const stir = b => { rouse([b]); b.asleep = false; b.sleepy = 0; stirred.push(b); };
   const turf = effect.territory || [effect.pickups, effect.events, effect.strikes].some(list => list && list.length) ? createTerritory(effect, { trace: traceGrid, scale, copy, shatter: (b, at, count) => shatter(b, at, count, b.breaks ? b.breaks.speed : 0.5), stir, energy, width, height, fastest: MAX_SPEED }) : null;
-  // A body that cuts passes through what it cuts, so it is drawn over it (paintBodies draws it last).
-  for (const r of effect.strikes ?? []) if (r.cut) bodies[r.by].cuts = true;
+  // A body that cuts passes through what it cuts, so it is drawn over it (paintBodies draws it last): in the frames its
+  // strike works in, as it cuts. (Marked once for the whole run, a blade whose cut had not begun, or was over, was still
+  // drawn over the balls it pushed.)
+  const cutting = f => { const by = turf.cutters(f); for (const r of effect.strikes ?? []) if (r.cut) bodies[r.by].cuts = by.includes(r.by); };
   let current = 0;
   const dynamic = b => !b.fixed && !b.gone;
   const moving = b => b.fixed ? (b.vx !== 0 || b.vy !== 0 || b.spin !== 0) : !b.gone && !b.asleep;
@@ -1166,6 +1168,7 @@ export function createBodyWorld(effect, context) {
     if (turf) {
       const was = bodies.map(b => b.gone);
       turf.frame(f, bodies);
+      cutting(f);
       for (const b of bodies) if (!b.gone) place(b);
       rouse(bodies.filter((b, k) => k < was.length && b.gone && !was[k]));
       if (stirred.length) { rouse(stirred.filter(b => !b.gone)); stirred.length = 0; }

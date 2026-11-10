@@ -298,6 +298,15 @@ export function renderProject(spec, options = {}) {
   const clipped = new Map();
   const clip = (path, pixels = 1) => clipped.set(path, (clipped.get(path) ?? 0) + pixels);
   const rendered = new Map(), frameNames = new Set();
+  // Colours a frame takes from an earlier frame as exact RGBA, which its own palettes need not name: what the frame it
+  // continues (`from`) or copies from recoloured with a frame or layer palette, and what that frame took the same way.
+  // Diagnostics count them as declared for the frame (`inherited`); drawing never reads them.
+  let taken = null;
+  const take = source => {
+    for (const value of Object.values(source.palette ?? {})) taken.add(value);
+    for (const entry of source.layerPalettes ?? []) for (const value of Object.values(entry.palette)) taken.add(value);
+    for (const value of source.inherited ?? []) taken.add(value);
+  };
   // The row an operation stands on, for a layer with sort "ground": its `ground`, or the lowest row it draws (a
   // stamp's or grid's bottom after scale and rotation, a line's lower end, a shape's bottom edge). Text needs `ground`,
   // since accents and alignment move it. Operations that work on an area rather than stand on the ground are refused.
@@ -337,13 +346,20 @@ export function renderProject(spec, options = {}) {
       if (y > bounds[3]) bounds[3] = y;
     };
     list(ops, path);
-    const order = ops.map((_, index) => index);
+    const order = ops.map((_, index) => index), refused = new Set();
     if (sorted) {
-      const rows = ops.map((op, index) => standingRow(op, `${path}[${index}]`));
+      // An operation a sorted layer cannot take is noted like any other broken one, before the layer draws, and
+      // skipped; the rest still sort and are still checked.
+      const rows = ops.map((op, index) => {
+        const p = `${path}[${index}]`;
+        try { return standingRow(op, p); } catch (error) { note(error, p); refused.add(index); return 0; }
+      });
       order.sort((a, b) => rows[a] - rows[b] || a - b);
     }
     for (const index of order) {
+      // A budget, not a broken operation: it stops the check, joined to whatever was noted before it.
       if (++operationCount > 20000) fail(path, 'project exceeds 20,000 drawing operations');
+      if (refused.has(index)) continue;
       const p = `${path}[${index}]`;
       try { drawOp(ops[index], p); } catch (error) { note(error, p); }
     }
@@ -516,6 +532,7 @@ export function renderProject(spec, options = {}) {
           if (typeof op.from !== 'string' || !rendered.has(op.from)) fail(`${p}.from`, 'must name an earlier frame');
           // A frame copy keeps exact RGBA; remap swaps exact colours, named by project palette key or hex, for others.
           const source = rendered.get(op.from).data, swaps = new Map();
+          take(rendered.get(op.from));
           if (op.remap !== undefined) {
             object(op.remap, `${p}.remap`);
             if (Object.keys(op.remap).length > 256) fail(`${p}.remap`, 'at most 256 colours');
@@ -748,8 +765,10 @@ export function renderProject(spec, options = {}) {
     }
     const tile = frame.tile === undefined ? null : tileFacts(frame.tile, `${p}.tile`, width, height);
     let data = new Uint8ClampedArray(width * height * 4), owner = ownerNames && new Uint16Array(width * height);
+    taken = new Set();
     if (frame.from !== undefined) {
       if (typeof frame.from !== 'string' || !rendered.has(frame.from)) fail(`${p}.from`, 'must name an earlier frame');
+      take(rendered.get(frame.from));
       data.set(rendered.get(frame.from).data);
       owner?.set(rendered.get(frame.from).owners);
     } else if (background.some(Boolean)) {
@@ -848,7 +867,7 @@ export function renderProject(spec, options = {}) {
       if (owner) owner[y * width + x] = !data[(y * width + x) * 4 + 3] ? 0 : owner[y * width + x] || ownerId('frame.pixels');
     }
     activePalette = palette;
-    const result = { name: frameName, duration, data, ...(owner && { owners: owner }), ...(frameAnchor && { anchor: frameAnchor }), ...(points && { points }), ...(tile && { tile }), ...(overrides && { palette: overrides }), ...(layerPalettes.length && { layerPalettes }) };
+    const result = { name: frameName, duration, data, ...(owner && { owners: owner }), ...(frameAnchor && { anchor: frameAnchor }), ...(points && { points }), ...(tile && { tile }), ...(overrides && { palette: overrides }), ...(layerPalettes.length && { layerPalettes }), ...(taken.size && { inherited: [...taken] }) };
     rendered.set(frameName, result);
     return result;
   }));
@@ -1625,8 +1644,9 @@ export function analyzeProject(project) {
   const known = new Set(Object.values(project.palette).map(color => colorId(parseColor(color), 0)));
   const stats = frames.map(frame => {
     const colors = new Set(), outside = new Set(), isolated = [], unlisted = [];
-    // Colors a frame or layer palette introduces are declared for that frame.
-    const introduced = [...Object.values(frame.palette ?? {}), ...(frame.layerPalettes ?? []).flatMap(entry => Object.values(entry.palette))];
+    // Colors a frame or layer palette introduces are declared for that frame, and for the frames that continue it or
+    // copy from it (`inherited`), whose pixels carry them.
+    const introduced = [...Object.values(frame.palette ?? {}), ...(frame.layerPalettes ?? []).flatMap(entry => Object.values(entry.palette)), ...(frame.inherited ?? [])];
     const declared = introduced.length ? new Set([...known, ...introduced.map(color => colorId(parseColor(color), 0))]) : known;
     let visible = 0, isolatedCount = 0, hash = 2166136261;
     for (let at = 0; at < frame.data.length; at += 4) {

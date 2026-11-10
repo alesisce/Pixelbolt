@@ -360,6 +360,11 @@ test('numbered frames are read in number order, with gaps and other files report
   assert.throws(() => numberedFrames(['a_1.png', 'a_01.png']), /a_01\.png and a_1\.png have the same number|a_1\.png and a_01\.png have the same number/);
   assert.throws(() => numberedFrames(['notes.txt', 'cover.png']), /no numbered PNG frames .*found cover\.png/);
   assert.throws(() => numberedFrames(['a_1.png'], { prefix: 'z' }), /no frames are named z<number>\.png/);
+  // Numbers past nine digits are one sequence (they were split where the tenth digit began), and stay in number order.
+  const long = numberedFrames(['frame_1000000001.png', 'frame_999999998.png', 'frame_1000000000.png', 'frame_999999999.png']);
+  assert.deepEqual([long.prefix, long.first, long.last, long.gaps, long.frames.map(frame => frame.file)], ['frame_', 999999998, 1000000001, [], ['frame_999999998.png', 'frame_999999999.png', 'frame_1000000000.png', 'frame_1000000001.png']]);
+  const stamps = numberedFrames(['shot_1700000000000.png', 'shot_1699999999950.png']);
+  assert.deepEqual([stamps.prefix, stamps.first, stamps.last, stamps.gaps], ['shot_', 1699999999950, 1700000000000, [[1699999999951, 1699999999999]]]);
 });
 test('CLI gif-frames turns a folder of PNG frames into an exact GIF and writes only --out', async t => {
   const tempRoot = path.resolve(os.tmpdir()), dir = await mkdtemp(path.join(tempRoot, 'pixelbolt-gif-frames-'));

@@ -5,7 +5,8 @@
 //   node scripts/qa-studio.mjs [--app <package folder>] [--browser <program>] [--browser-arg <flag>]... [--out <new folder>]
 // --app is the package to serve: this checkout by default, or the app folder of an extracted portable build.
 // Screenshots and the downloaded files are kept in --out (default: a new folder under output/studio-qa).
-// Exit code 3 means no browser was found, so nothing was checked.
+// Exit code 3 means no browser was found, so nothing was checked. If the browser quits, crashes or is stopped partway,
+// the walk fails the check it was in, prints its summary and stops (exit code 1) rather than waiting for an answer.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -40,11 +41,22 @@ if (!program) { console.log('No Chromium-based browser (Edge or Chrome) was foun
 const out = options.out ? path.resolve(options.out) : null, results = [];
 if (out) await mkdir(out); else await mkdir(path.join(root, 'output', 'studio-qa'), { recursive: true });
 const kept = out ?? await mkdtemp(path.join(root, 'output', 'studio-qa', 'run-')), profile = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-browser-'));
+// Why the walk can no longer reach the browser (it quit, crashed or was killed), or null while it can. No check can pass
+// after that, so the check it happens in fails and is the last: the error goes on up to the summary and the cleanup.
+let lost = null, current = null;
 const check = async (name, run) => {
+  current = name;
   try { const detail = await run(); results.push({ name, ok: true }); console.log(`  ok    ${name}${detail ? ` (${detail})` : ''}`); }
-  catch (error) { results.push({ name, ok: false }); console.log(`  FAIL  ${name}\n        ${String(error.message).replace(/\n/g, '\n        ')}`); }
+  catch (error) { results.push({ name, ok: false }); console.log(`  FAIL  ${name}\n        ${String(error.message).replace(/\n/g, '\n        ')}`); if (lost) throw lost; }
+  current = null;
 };
 const note = text => console.log(`  note  ${text}`);
+// The last line of every walk that got as far as its checks. Returns how many failed.
+const summary = () => {
+  const failed = results.filter(result => !result.ok);
+  console.log(`${results.length - failed.length} of ${results.length} checks passed${failed.length ? `; failed: ${failed.map(result => result.name).join('; ')}` : ''}`);
+  return failed.length;
+};
 
 const { startStudio } = await import(pathToFileURL(path.join(path.resolve(options.app), 'src', 'server.js')));
 const { renderProject, MAX_REQUEST_BYTES } = await import(pathToFileURL(path.join(path.resolve(options.app), 'src', 'core.js')));
@@ -66,17 +78,33 @@ try {
     }
     throw new Error(`the browser did not open its DevTools port within 30 seconds:\n${complaints}`);
   })();
-  // One connection to the browser; each page is a session on it.
-  const socket = new WebSocket(endpoint), pending = new Map(), listeners = new Set();
+  // One connection to the browser; each page is a session on it. `pending` holds the requests not yet answered, and
+  // `waits` what else is waiting on the browser (a download). When the connection closes or fails, all of them are
+  // rejected and every later request is rejected at once, so nothing waits for a browser that is gone.
+  const socket = new WebSocket(endpoint), pending = new Map(), listeners = new Set(), waits = new Set();
   let sequence = 0;
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve); socket.addEventListener('error', () => reject(new Error('could not connect to the browser'))); });
+  const disconnected = why => {
+    if (lost) return;
+    lost = new Error(`the browser closed its DevTools connection (${why}), so the walk stopped here. The browser quit, crashed or was stopped.`);
+    for (const waiting of [...pending.values(), ...waits]) waiting.reject(lost);
+    pending.clear(); waits.clear();
+  };
+  socket.addEventListener('close', event => disconnected(`close code ${event.code}${event.reason ? `, ${event.reason}` : ''}`));
+  socket.addEventListener('error', event => disconnected(event.message || event.error?.message || 'socket error'));
   socket.addEventListener('message', event => {
     const message = JSON.parse(event.data);
     if (!message.id) { for (const listener of listeners) listener(message); return; }
-    const waiting = pending.get(message.id); pending.delete(message.id);
+    // An answer to nothing that is waiting (a request already rejected, or an id never sent) is ignored.
+    const waiting = pending.get(message.id); if (!waiting) return;
+    pending.delete(message.id);
     if (message.error) waiting.reject(new Error(`${waiting.method}: ${message.error.message}`)); else waiting.resolve(message.result);
   });
-  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => { pending.set(++sequence, { resolve, reject, method }); socket.send(JSON.stringify({ id: sequence, method, params, ...(sessionId && { sessionId }) })); });
+  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    if (lost) { reject(lost); return; }
+    const id = ++sequence; pending.set(id, { resolve, reject, method });
+    try { socket.send(JSON.stringify({ id, method, params, ...(sessionId && { sessionId }) })); } catch (error) { pending.delete(id); reject(error); }
+  });
   closeBrowser = () => Promise.race([send('Browser.close'), sleep(3000)]);
   const version = await send('Browser.getVersion');
   console.log(`Studio ${origin} from ${path.resolve(options.app)}\nBrowser ${version.product}, headless, throwaway profile\nKeeping screenshots and downloads in ${kept}`);
@@ -107,9 +135,10 @@ try {
     };
     // A page that is navigating cannot answer; that counts as "not yet". The wait asks whether something happens, not
     // how fast: it returns as soon as it does, and the 30 s is room for a busy CI runner (a cold browser on one took
-    // more than 8 s to load the studio), so only something that never happens fails.
+    // more than 8 s to load the studio), so only something that never happens fails. A browser that is gone will
+    // never answer, so that ends the wait at once.
     const until = async (expression, what, timeout = 30000) => {
-      for (const start = Date.now(); ;) { const value = await evaluate(expression).catch(() => false); if (value) return value; if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${what}`); await sleep(50); }
+      for (const start = Date.now(); ;) { const value = await evaluate(expression).catch(error => { if (lost) throw error; return false; }); if (value) return value; if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${what}`); await sleep(50); }
     };
     const goto = async url => { await page('Page.navigate', { url }); await until('document.readyState === "complete"', `${url} to load`); };
     const reload = async () => { await evaluate('window.__before = true'); await page('Page.reload'); await until('!window.__before && document.readyState === "complete"', 'the page to reload'); };
@@ -136,16 +165,20 @@ try {
     const folder = path.join(kept, 'downloads', String(++downloads));
     await mkdir(folder, { recursive: true });
     await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: folder, eventsEnabled: true });
-    const saved = new Promise((resolve, reject) => {
+    // The wait ends once: with the file, with what went wrong, when the action fails, or when the browser is gone.
+    const wait = {}, saved = new Promise((resolve, reject) => {
       let filename = null;
-      const timer = setTimeout(() => { listeners.delete(listener); reject(new Error('no download arrived within 30 seconds')); }, 30000);
+      const end = (settle, value) => { clearTimeout(timer); listeners.delete(listener); waits.delete(wait); settle(value); };
+      const timer = setTimeout(() => end(reject, new Error('no download arrived within 30 seconds')), 30000);
       const listener = ({ method, params }) => {
         if (method === 'Browser.downloadWillBegin') filename = params.suggestedFilename;
-        else if (method === 'Browser.downloadProgress' && params.state !== 'inProgress') { clearTimeout(timer); listeners.delete(listener); params.state === 'completed' ? resolve(path.join(folder, filename)) : reject(new Error(`the download was ${params.state}`)); }
+        else if (method === 'Browser.downloadProgress' && params.state !== 'inProgress') params.state === 'completed' ? end(resolve, path.join(folder, filename)) : end(reject, new Error(`the download was ${params.state}`));
       };
-      listeners.add(listener);
+      wait.reject = error => end(reject, error);
+      listeners.add(listener); waits.add(wait);
     });
-    await action();
+    saved.catch(() => {});
+    try { await action(); } catch (error) { wait.reject(error); throw error; }
     return saved;
   }
 
@@ -154,7 +187,8 @@ try {
   // What the preview canvas shows: its size, how many pixels are drawn, the colours and a hash of every pixel.
   const canvas = () => evaluate(`(() => { const c = document.getElementById('canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, colors = new Set(); let drawn = 0, hash = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3]) { drawn++; colors.add((d[i] << 16 | d[i + 1] << 8 | d[i + 2]).toString(16).padStart(6, '0')); } hash = (hash * 31 + d[i] + d[i + 1] * 3 + d[i + 2] * 7 + d[i + 3] * 11) >>> 0; } return { width: c.width, height: c.height, shown: c.style.width, drawn, hash, colors: [...colors] }; })()`);
   const pressed = id => evaluate(`document.getElementById(${JSON.stringify(id)}).getAttribute('aria-pressed')`);
-  const loaded = `document.querySelectorAll('#examples .example').length > 0 && document.getElementById('example-count').textContent !== '' && document.getElementById('source').value.length > 0 && document.getElementById('timeline').children.length > 0`;
+  // Loaded means started: the editor is read-only until start-up has put its recipe there.
+  const loaded = `document.querySelectorAll('#examples .example').length > 0 && document.getElementById('example-count').textContent !== '' && document.getElementById('source').value.length > 0 && !document.getElementById('source').readOnly && document.getElementById('timeline').children.length > 0`;
   const ready = (page = studio) => page.until(loaded, 'the studio to finish loading');
   // Replaces the whole recipe the way typing does, then pauses; each caller waits for what the recompile shows.
   const type = async recipe => {
@@ -424,6 +458,47 @@ try {
     assert.equal(images.length, [...entries.keys()].filter(file => file.startsWith('animations/')).length);
     await preview.shot('exported-preview'); return `${entries.size} files, ${images.length} animations shown`;
   });
+  await check('while Export assets packs, its button stays off with its packing label whatever recompiles, no second export starts, and it ends on only for a valid recipe', async () => {
+    // Every export the page sends for is counted and held until the walk lets it go, so packing lasts as long as the
+    // walk needs. The button used to come back on at the next recompile, still labelled as packing; a second click
+    // then sent a second export and left that label for good.
+    const button = () => evaluate(`(() => { const button = document.getElementById('export'); return button.textContent + (button.disabled ? ' (off)' : ' (on)'); })()`);
+    const release = `(() => { const held = window.__exports?.held.splice(0) ?? []; for (const go of held) go(); return held.length; })()`;
+    const folder = path.join(kept, 'downloads', String(++downloads)), seen = {};
+    await mkdir(folder, { recursive: true });
+    await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: folder, eventsEnabled: true });
+    let landed = 0;
+    const count = ({ method, params }) => { if (method === 'Browser.downloadProgress' && params.state === 'completed') landed++; };
+    // An export is over once its ZIP has landed: the page hands it to the browser as the last thing it does.
+    const over = async wanted => { for (const start = Date.now(); landed < wanted; await sleep(50)) { if (lost) throw lost; if (Date.now() - start > 30000) throw new Error(`${wanted - landed} of ${wanted} exported ZIPs never arrived`); } };
+    listeners.add(count);
+    await evaluate(`(() => { const real = window.fetch, exports = window.__exports = { sent: 0, held: [], real }; window.fetch = async (...args) => { if (args[0] === '/api/export') { exports.sent++; await new Promise(resolve => exports.held.push(resolve)); } return real(...args); }; })()`);
+    try {
+      await click('#export'); await until(`window.__exports.held.length === 1`, 'the export to be sent for');
+      seen.packing = await button();
+      // A valid edit recompiles while it packs.
+      await type(edited.replace('"#ff00ff"', '"#ff00fe"'));
+      await until(`[...document.querySelectorAll('#palette .swatch')].some(swatch => swatch.title.includes('#ff00fe'))`, 'the edit made while packing to recompile');
+      seen.recompiled = await button();
+      await click('#export');
+      seen.sent = await evaluate(`window.__exports.sent`);
+      await evaluate(release); await over(seen.sent);
+      seen.packed = await button();
+      // A recipe broken while it packs: the export of the valid one still arrives, and the button then stays off.
+      await click('#export'); await until(`window.__exports.held.length === 1`, 'the next export to be sent for');
+      await type(edited.slice(0, -3)); await until(`!document.getElementById('error').hidden`, 'the error for the recipe broken while packing');
+      seen.broken = await button();
+      await evaluate(release); await over(seen.sent + 1);
+      seen.packedBroken = await button();
+      await type(edited); await until(`document.getElementById('error').hidden`, 'the mended recipe to recompile');
+      seen.mended = await button();
+    } finally {
+      listeners.delete(count);
+      await evaluate(`(() => { if (!window.__exports) return; window.fetch = window.__exports.real; ${release}; })()`).catch(() => {});
+    }
+    assert.deepEqual(seen, { packing: 'Packing assets… (off)', recompiled: 'Packing assets… (off)', sent: 1, packed: 'Export assets ↗ (on)', broken: 'Packing assets… (off)', packedBroken: 'Export assets ↗ (off)', mended: 'Export assets ↗ (on)' });
+    return `3 clicks, ${landed} ZIPs`;
+  });
   await check('GIF downloads the current animation at the current zoom, and the browser decodes it', async () => {
     await choose('zoom', '4');
     const gif = await download(() => click('#gif')), bytes = await readFile(gif), expected = await evaluate(`document.getElementById('timeline').children.length`);
@@ -533,6 +608,65 @@ try {
     await until(`!Object.values(localStorage).some(value => value.includes('tab-b.json'))`, "the third tab's changes to tab-b's draft to reach the first tab");
     assert.equal(await evaluate(`localStorage.length`), 0);
     await studio.reload(); await ready(); assert.equal(await offered(studio), 'nothing');
+  });
+  // Typing into a page the way a person does: into whatever has the keyboard.
+  const typeInto = async (page, recipe) => { await page.evaluate(`(() => { const source = document.getElementById('source'); source.focus(); source.select(); })()`); await page.page('Input.insertText', { text: recipe }); };
+  await check('the editor cannot be typed in until the studio has started and put its recipe there, and takes typing and keeps a draft from then on', async () => {
+    // The last file start-up asks for is held back, so the walk can try the editor while the studio is still starting.
+    // The editor used to take the typing: no draft store was up to keep it, and start-up's recipe then replaced it
+    // (unasked when `pixelbolt preview` had opened a file).
+    const early = await openPage();
+    try {
+      await early.page('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const real = window.fetch; window.fetch = async (...args) => { if (args[0] === '/project.json') await new Promise(resolve => { window.__start = resolve; }); return real(...args); }; })()` });
+      await early.size(1440, 900); await early.goto(`${origin}/`);
+      await early.until(`typeof window.__start === 'function'`, 'start-up to ask for the recipe it opens with');
+      const editor = () => early.evaluate(`(() => { const source = document.getElementById('source'); return { value: source.value, readOnly: source.readOnly, busy: source.getAttribute('aria-busy'), placeholder: source.placeholder, focused: document.activeElement === source }; })()`);
+      // It can be reached with the keyboard while it loads, and says that it is loading; typing does nothing.
+      await typeInto(early, 'typed while starting');
+      const starting = await editor(), asked = dialogs.length;
+      // Tab is not taken for indenting there: it moves on, as from any other control.
+      await early.key('Tab', 9);
+      const tabbed = await editor();
+      await early.evaluate(`window.__start()`); await ready(early);
+      const started = await editor();
+      assert.deepEqual(starting, { value: '', readOnly: true, busy: 'true', placeholder: 'Loading the recipe…', focused: true });
+      assert.deepEqual([tabbed.value, tabbed.focused], ['', false], 'Tab indented the loading editor or stayed in it');
+      assert.deepEqual(dialogs.slice(asked), [], 'nothing was typed, so start-up had nothing to ask about');
+      assert.deepEqual({ ...started, value: started.value.includes('"name": "forest-spirit"') }, { value: true, readOnly: false, busy: null, placeholder: '', focused: false });
+      await typeInto(early, started.value.replace('"name": "forest-spirit"', '"name": "typed-after-start"'));
+      await early.until(`document.getElementById('project-name').textContent === 'Typed after start'`, 'what is typed after start-up to be drawn');
+      await early.until(`Object.values(localStorage).some(value => value.includes('typed-after-start'))`, 'what is typed after start-up to be kept as a draft');
+      // Choosing another recipe drops the draft, so this tab leaves nothing for the others to be offered.
+      await early.click('#new'); await early.until(`document.getElementById('project-name').textContent === 'New sprite'`, 'the blank canvas');
+      assert.equal(await early.evaluate(`localStorage.length`), 0);
+    } finally { await early.close(); await studio.page('Page.bringToFront'); }
+  });
+  await check('a studio whose start-up fails still opens its editor and plays, and says once that it is not keeping drafts', async () => {
+    // This tab cannot be given an id, so its draft store never comes up. Start-up used to end there: an editor that
+    // compiled but never played, and drafts skipped without a word.
+    const broken = await openPage(), before = problems.length;
+    let failure = null;
+    try {
+      await broken.page('Page.addScriptToEvaluateOnNewDocument', { source: `crypto.randomUUID = () => { throw new Error('this walk gives the tab no id'); };` });
+      await broken.size(1440, 900); await broken.goto(`${origin}/`); await ready(broken);
+      const shown = id => broken.evaluate(`(() => { const element = document.getElementById(${JSON.stringify(id)}); return element.hidden ? '' : element.textContent; })()`);
+      assert.equal(await shown('error'), 'The studio did not finish starting (this walk gives the tab no id). Reload the page to try again.');
+      const counter = await shown('frame-counter');
+      await broken.until(`document.getElementById('frame-counter').textContent !== ${JSON.stringify(counter)}`, 'the first sample to play');
+      const recipe = await broken.evaluate(`document.getElementById('source').value`);
+      await typeInto(broken, recipe.replace('"name": "forest-spirit"', '"name": "no-drafts"'));
+      await broken.until(`document.getElementById('project-name').textContent === 'No drafts'`, 'the edit to be drawn');
+      await broken.until(`!document.getElementById('toast').hidden`, 'the studio to say that it keeps no drafts');
+      assert.equal(await shown('toast'), 'The studio did not finish starting, so it is not keeping drafts. Use Save JSON.');
+      // Said once: leaving the page is another moment a draft would be kept, and it does not say so again.
+      assert.equal(await broken.evaluate(`(() => { const toast = document.getElementById('toast'); toast.textContent = ''; dispatchEvent(new Event('pagehide')); return toast.textContent; })()`), '');
+      assert.equal(await broken.evaluate(`localStorage.length`), 0);
+    } catch (error) { failure = error; }
+    finally { await broken.close(); await studio.page('Page.bringToFront'); }
+    // What this page reported belongs to this check, which asked for the failure.
+    const reported = problems.splice(before);
+    if (failure) throw reported.length ? new Error(`${failure.message}\nThe page also reported: ${reported.join('; ')}`) : failure;
+    assert.deepEqual(reported, []);
   });
 
   console.log('Shared palettes');
@@ -903,6 +1037,40 @@ try {
     assert.equal(pixelDigest(live.render().rgba), sent, 'Node replays the link to other pixels');
     return `${strokes.length} strokes over ${replayFrames} frames, ${link.length} characters`;
   });
+  await check('a replay link that is ready only after another scene has opened is copied, and is not written into that scene', async () => {
+    // Making a link waits for the browser to compress the strokes. The first read of that is held back until another
+    // scene is open; the sandbox's link was then written into the new scene's link field and notice. What the page
+    // copies is noted in place of the clipboard, which a headless browser may refuse.
+    await evaluate(`(() => {
+      const real = window.__getReader = ReadableStream.prototype.getReader;
+      ReadableStream.prototype.getReader = function (...args) {
+        ReadableStream.prototype.getReader = real;
+        const reader = real.apply(this, args), read = reader.read.bind(reader);
+        reader.read = async (...rest) => { reader.read = read; await new Promise(resolve => { window.__linkReady = resolve; }); return read(...rest); };
+        return reader;
+      };
+      navigator.clipboard.writeText = async text => { window.__copied = text; };
+    })()`);
+    const shown = () => evaluate(`[document.getElementById('link-text').value, document.getElementById('notice').hidden ? '' : document.getElementById('notice').textContent]`);
+    try {
+      await click('#link'); await until(`typeof window.__linkReady === 'function'`, 'the sandbox link to be asked for');
+      await click('#scenes .example[data-scene="hut-fire"]');
+      await until(`location.hash === '#hut-fire' && document.getElementById('name').textContent === 'Hut fire'`, 'the hut fire to open'); await running();
+      assert.deepEqual(await shown(), ['', ''], 'a scene opens with no link');
+      await evaluate(`window.__linkReady()`);
+      await until(`typeof window.__copied === 'string'`, 'the sandbox link to be copied');
+      const copied = await evaluate(`window.__copied`);
+      assert.ok(copied.startsWith(`${origin}/powder.html#s=sandbox&i=`), copied);
+      assert.deepEqual(await shown(), ['', ''], 'the sandbox link was written into the hut fire');
+      assert.match(await text('toast'), /^Copied the Sandbox link you asked for, replaying [\d,]+ strokes over [\d,]+ frames, [\d,]+ characters\. A scene has opened since, so the link is not shown here\.$/);
+      // A link asked for in the scene that is open is still shown there.
+      await click('#link'); await until(`document.getElementById('link-text').value.includes('#s=hut-fire&i=')`, 'the hut fire link');
+      assert.match((await shown())[1], /^Copied a link replaying 0 strokes over [\d,]+ frames, [\d,]+ characters\.$/);
+      return `${copied.length} characters copied`;
+    } finally {
+      await evaluate(`(() => { ReadableStream.prototype.getReader = window.__getReader; window.__linkReady?.(); delete navigator.clipboard.writeText; })()`).catch(() => {});
+    }
+  });
   await check('every powder preset runs live in the browser and compiles there to the same recipe as Node', async () => {
     const { compilePowder } = await import(pathToFileURL(path.join(path.resolve(options.app), 'src', 'powder.js')));
     const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex'), seen = [];
@@ -928,11 +1096,14 @@ try {
     const gif = await readFile(await download(() => click('#gif')));
     assert.equal(gif.toString('latin1', 0, 6), 'GIF89a');
     const decoded = await evaluate(`(async () => { const decoder = new ImageDecoder({ data: Uint8Array.from(atob(${JSON.stringify(gif.toString('base64'))}), c => c.charCodeAt(0)), type: 'image/gif' }); try { await decoder.tracks.ready; await decoder.completed; return decoder.tracks.selectedTrack.frameCount; } finally { decoder.close(); } })()`);
-    assert.equal(decoded, 32);
+    // As many frames as the preset's clip asks for, read from the file the studio serves (the count was written here,
+    // and the check failed when the preset was trimmed).
+    const preset = JSON.parse(await readFile(path.join(path.resolve(options.app), 'examples', 'quarry-blast.powder.json'), 'utf8')), frames = preset.clips['quarry-blast'].frames;
+    assert.equal(decoded, frames);
     const recipe = JSON.parse(await readFile(await download(() => click('#recipe')), 'utf8'));
-    assert.deepEqual([recipe.name, recipe.frames.length], ['quarry-blast', 32]);
+    assert.deepEqual([recipe.name, recipe.frames.length], ['quarry-blast', frames]);
     const source = JSON.parse(await readFile(await download(() => click('#powder-source')), 'utf8'));
-    assert.deepEqual(source, JSON.parse(await readFile(path.join(path.resolve(options.app), 'examples', 'quarry-blast.powder.json'), 'utf8')));
+    assert.deepEqual(source, preset);
     // The sandbox has no clip worth baking, so only its source downloads.
     await click('#scenes .example[data-scene="sandbox"]'); await until(`location.hash === '#sandbox'`, 'the sandbox to open'); await running();
     assert.deepEqual([await evaluate(`document.getElementById('gif').disabled`), await evaluate(`document.getElementById('recipe').disabled`), await evaluate(`document.getElementById('powder-source').disabled`)], [true, true, false]);
@@ -989,10 +1160,13 @@ try {
     return `${requests.length} requests, all to ${origins.join(' or ')} or local files`;
   });
   if (dialogs.length) note(`Confirmations the studio asked for and the walk accepted: ${[...new Set(dialogs)].join(' | ')}`);
-  const failed = results.filter(result => !result.ok);
-  console.log(`${results.length - failed.length} of ${results.length} checks passed${failed.length ? `; failed: ${failed.map(result => result.name).join('; ')}` : ''}`);
-  exitCode = failed.length ? 1 : 0;
-} catch (error) { console.error(error.stack); }
+  exitCode = summary() ? 1 : 0;
+} catch (error) {
+  // A browser that went away ends the walk where it was, with the summary of what had been checked; anything else is
+  // a fault in the walk itself.
+  if (error !== lost) console.error(error.stack);
+  else { console.log(current ? `The walk stopped in "${current}": its browser is gone.` : `The walk stopped ${results.length ? `after "${results.at(-1).name}"` : 'before its first check'}: ${lost.message}`); summary(); }
+}
 finally {
   // Ask the browser to quit; then stop whatever still runs on this run's profile, which nothing else uses.
   await closeBrowser?.().catch(() => {});

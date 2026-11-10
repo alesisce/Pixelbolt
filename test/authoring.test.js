@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { patchRecipe } from '../src/patch.js';
 import { renderProject, buildAtlas } from '../src/core.js';
 import { compilePoses, compileAutotile } from '../src/authoring.js';
 import { createOverlay, applyOverlay } from '../src/overlays.js';
@@ -166,5 +168,73 @@ test('a compiled mirror placed by its anchor draws exactly what drawFrame draws 
     drawFrame(mirrored, sheet, 'left', 16, 12);
     assert.ok(flipped.out.some(v => v), 'something was drawn');
     assert.deepEqual(mirrored.out, flipped.out, `trim ${trim}`);
+  }
+});
+
+// How errors and warnings address a part of a pose: an authored pose's by its index in the source, a generated pose's
+// by motion, pose and the part's name. One generated pose once had both styles (an error at
+// "poses.motions.idle (idle-settle).parts[0]", a warning at "poses.motions.idle (idle-rest).parts (farShin).reach"), and
+// a pose compiled on its own while the motions expand was always "poses.poses[0]".
+const hero = () => JSON.parse(readFileSync(new URL('../examples/hero.poses.json', import.meta.url), 'utf8'));
+const errorPath = source => { try { compilePoses(source); } catch (error) { return error.path; } return 'compiled'; };
+// The name the compiler gives a bone's drawing; a part definition of that name is refused where the drawing is made.
+const drawingName = placed => `${placed.definition}-${placed.flipX ? 'f' : ''}b${(((placed.rotate ?? 0) % 360) + 360) % 360}`;
+
+test('errors and warnings name a part of a generated pose by motion, pose and part name, never by an index', () => {
+  const generatedPart = /^poses\.motions\.([a-z]+) \(([a-z-]+)\)\.parts \(([A-Za-z]+)\)/;
+  // An error meets a generated pose in the full compile (the attack alone and no tail: only leg probes are compiled
+  // while the motions expand) or in a compile of that one pose during expansion (the whole hero: every walking pose is
+  // drawn to see whether a hand floats).
+  for (const [label, trim] of [['full compile', s => { delete s.rig.tail; s.motions = { attack: s.motions.attack }; }], ['during expansion', () => {}]]) {
+    const source = () => { const s = hero(); trim(s); return s; }, arm = source().rig.arms[0][0], definition = source().poses[0].parts.find(p => p.name === arm).part;
+    // The first generated pose that draws the upper arm at another angle than the rest pose does.
+    const { metadata } = compilePoses(source()), rest = metadata.poses.stand;
+    const [pose, placed] = Object.entries(metadata.poses).find(([name, p]) => name !== 'stand' && drawingName(p.parts[arm]) !== drawingName(rest.parts[arm]));
+    const clash = source(); clash.parts[drawingName(placed.parts[arm])] = { rows: ['k'] };
+    const path = errorPath(clash), [, motion, named, part] = generatedPart.exec(path) ?? [];
+    assert.ok(motion && path.endsWith(`.parts (${part})`), `${label}: ${path}`);
+    assert.ok(Object.hasOwn(source().motions, motion) && named.startsWith(`${motion}-`) && Object.hasOwn(metadata.poses, named), `${label}: ${path}`);
+    assert.equal(source().poses[0].parts.find(p => p.name === part).part, definition, `${label}: ${path}`);
+    if (label === 'full compile') assert.equal(path, `poses.motions.attack (${pose}).parts (${arm})`);
+    // A warning about a part of the same poses reads the same way: the legs cannot reach a ground 30 pixels lower.
+    const far = source(); far.rig.ground += 30; far.height += 30;
+    const reach = compilePoses(far).metadata.warnings.filter(warning => warning.error !== undefined).map(warning => warning.path);
+    assert.ok(reach.length && reach.every(at => generatedPart.test(at) && at.endsWith(').reach')), `${label}: ${reach.slice(0, 3).join(' | ')}`);
+    assert.ok(reach.some(at => at.startsWith(`poses.motions.${motion} (${named}).parts (`)), `${label}: no reach warning beside ${path}`);
+  }
+});
+
+test('an error in an authored pose gives a path that patches that pose, wherever the rest pose stands in the list', () => {
+  // The rest pose is compiled on its own before the motions expand; second in the list, its errors read poses.poses[0].
+  for (const motions of [true, false]) for (const second of [false, true]) for (const [field, bad] of [['angle', 1.5], ['part', 'nope'], ['bend', 'side']]) {
+    const source = hero(), at = second ? 1 : 0, label = JSON.stringify({ motions, second, field });
+    if (!motions) delete source.motions;
+    if (second) source.poses.unshift({ ...structuredClone(source.poses[0]), name: 'first' });
+    const index = source.poses[at].parts.findIndex(p => p.name === 'nearFore'), broken = structuredClone(source);
+    broken.poses[at].parts[index][field] = bad;
+    const path = errorPath(broken);
+    assert.equal(path, `poses.poses[${at}].parts[${index}].${field}`, label);
+    // A patch takes the path as the error gives it, less the name of the root (as a recipe's path may drop "project").
+    const good = source.poses[at].parts[index][field], target = path.replace(/^poses\./, '');
+    assert.deepEqual(patchRecipe(broken, [good === undefined ? { remove: target } : { set: target, value: good }]).recipe, source, label);
+  }
+});
+
+test('inner lines repaint outline pixels only: a corner that cleanup turned to fill keeps its colour', () => {
+  const ramp = ['a', 'b', 'c', 'd'], palette = { k: '#000000', a: '#553311', b: '#aa7733', c: '#ddbb66', d: '#ffeeaa' };
+  const one = (bone, rotate) => compilePoses({ format: 'pixelforge-poses', version: 1, name: 'h', width: 32, height: 32, palette, ramps: [ramp],
+    parts: { glass: { bone } }, poses: [{ name: 'p', origin: [16, 16], parts: [{ name: 'g', part: 'glass', rotate }] }] }).recipe;
+  // An hourglass bone at 21°: the outline pixel at [4, 6] of its drawing is the corner of a step, which cleanup gives
+  // the fill colour b. It was still listed as outline, so the inner-line pass repainted it a, a ramp step darker.
+  const hourglass = { length: 5, width: [6, 1, 6], ramp: 0, base: 1, outline: 'k', caps: ['flat', 'flat'] };
+  const recipe = one(hourglass, 21), [frame] = recipe.frames, stamp = frame.layers[0].ops[0];
+  assert.equal(stamp.symbol, 'glass-b21'); assert.equal(recipe.symbols[stamp.symbol][6][4], 'b');
+  assert.deepEqual((frame.pixels ?? []).filter(pixel => pixel.x === stamp.x + 4 && pixel.y === stamp.y + 6), []);
+  const drawn = renderProject(recipe).frames[0].data.subarray(((stamp.y + 6) * 32 + stamp.x + 4) * 4, ((stamp.y + 6) * 32 + stamp.x + 4) * 4 + 4);
+  assert.deepEqual([...drawn], [0xaa, 0x77, 0x33, 255]);
+  // Every whole degree of three tapers: each inner-line pixel lies on a pixel the stamp draws in the outline colour.
+  for (const width of [[6, 1, 6], [5, 1], [4, 10, 2]]) for (let rotate = 0; rotate < 360; rotate++) {
+    const { symbols, frames: [turned] } = one({ ...hourglass, width }, rotate), { symbol, x, y } = turned.layers[0].ops[0];
+    for (const pixel of turned.pixels ?? []) assert.equal(symbols[symbol][pixel.y - y][pixel.x - x], 'k', `${JSON.stringify(width)} at ${rotate}°: inner line at [${pixel.x - x}, ${pixel.y - y}] of ${symbol}`);
   }
 });

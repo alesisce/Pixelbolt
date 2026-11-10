@@ -621,3 +621,20 @@ test('a match drawn frame by frame has no frame before its first', () => {
   assert.equal(frames.image(0).length, 48 * 32 * 4);
   assert.throws(() => frames.image(-1), error => error instanceof PixelError && /frame -1 is not ahead of frame 0/.test(error.message));
 });
+
+test('a cutter is drawn over what it touches only in the frames its strike works in', () => {
+  // A blade turning about its hilt pushes a ring of balls round. Its strike has a cut, in frames that never come in
+  // this run: the blade cuts nothing and moves everything as with no strike, but it was drawn over the balls it pushed
+  // (18 of the 60 frames differed), since a strike with a cut marked its body a cutter for the whole run.
+  const blade = { name: 'blade', shape: 'box', size: [20, 2], pivot: [-10, 0], at: [32, 24], fixed: true, spin: 4, fill: 'w' };
+  const balls = { name: 'ball', shape: 'circle', radius: 1.5, at: [32, 24], ring: { radius: 12, count: 10 }, weightless: true, drag: 0.1, fill: 'r' };
+  const made = strikes => run(scene({ frames: 60, gravity: [0, 0], bodies: [blade, balls], ...(strikes && { strikes }) }, { width: 64, height: 48 }));
+  const drawn = ({ recipe }) => recipe.frames.map(frame => JSON.stringify(frame.ops.filter(op => op.op === 'grid')));
+  const none = made(null), later = made([{ by: 'blade', power: 'speed', factor: 1, from: 200, cut: 0.5 }]), over = made([{ by: 'blade', power: 'speed', factor: 1, from: 0, until: 1, cut: 0.5 }]);
+  assert.deepEqual(later.effect.paths, none.effect.paths);
+  assert.deepEqual(drawn(later), drawn(none), 'before its cut begins');
+  assert.deepEqual(drawn(over).slice(2), drawn(none).slice(2), 'and after it is over');
+  // While it cuts, it passes through the balls and is drawn over them.
+  const cuts = made([{ by: 'blade', power: 'speed', factor: 1, cut: 0.5 }]);
+  assert.notDeepEqual(cuts.effect.paths, none.effect.paths);
+});

@@ -324,11 +324,16 @@ $('scale').addEventListener('change', fit);
 window.addEventListener('resize', () => { if ($('scale').value === 'fit') fit(); });
 $('radius').addEventListener('input', () => { $('radius-out').value = $('radius').value; if (live) drawOverlay(); });
 $('spray').addEventListener('input', () => { $('spray-out').value = `${$('spray').value}%`; });
+// The link is made for the scene as it is at the click: its strokes, frame and pixels are taken before the first wait.
+// The link field and the notice belong to the open scene, which clears them as it opens, so a link that is ready only
+// after a scene has opened (or restarted) is not written there. It is still copied, since the clipboard is the
+// person's and the link is the one they asked for, and a toast says which it was.
 $('link').addEventListener('click', async () => {
   if (!live || busy) return;
+  const entry = scene, mine = version;
   try {
-    const made = await fitReplayLink(`${location.origin}${location.pathname}`, { scene: scene.id, strokes: live.strokes.slice(), frames: live.frame, digest: pixelDigest(live.render().rgba), recordedUntil: recordedUntil() }, packStrokes);
-    $('link-text').value = made.link;
+    const made = await fitReplayLink(`${location.origin}${location.pathname}`, { scene: entry.id, strokes: live.strokes.slice(), frames: live.frame, digest: pixelDigest(live.render().rgba), recordedUntil: recordedUntil() }, packStrokes);
+    if (mine === version) $('link-text').value = made.link;
     const copied = await navigator.clipboard.writeText(made.link).then(() => true, () => false);
     const what = `${made.kept.toLocaleString('en')} ${made.kept === 1 ? 'stroke' : 'strokes'} over ${made.frames.toLocaleString('en')} frames, ${made.link.length.toLocaleString('en')} characters`, end = made.frames.toLocaleString('en');
     const why = {
@@ -336,7 +341,10 @@ $('link').addEventListener('click', async () => {
       long: `: a link replays at most ${REPLAY_FRAMES.toLocaleString('en')} frames (two hours), so it stops at frame ${end}`,
       length: `: cut at a stroke to fit, so it stops at frame ${end}`
     }[made.cut] ?? '';
-    notice(`${copied ? 'Copied a link' : 'Made a link (select it to copy it)'} replaying ${what}${why}.`);
+    if (mine === version) notice(`${copied ? 'Copied a link' : 'Made a link (select it to copy it)'} replaying ${what}${why}.`);
+    else toast(copied
+      ? `Copied the ${entry.title} link you asked for, replaying ${what}${why}. A scene has opened since, so the link is not shown here.`
+      : `The ${entry.title} link you asked for could not be copied, and a scene has opened since, so it is not shown here.`);
   } catch (error) { toast(error.message); }
 });
 $('gif').addEventListener('click', async () => {

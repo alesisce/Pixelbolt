@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderProject, PixelError } from '../src/core.js';
 import { compileCrystals, CRYSTAL_HABITS } from '../src/crystal.js';
+import { random } from '../src/craft.js';
 import { startMCP } from '../src/mcp.js';
 import { packageFiles } from '../scripts/build-studio.mjs';
 import { crystalPresets } from '../scripts/crystal-presets.mjs';
@@ -87,6 +88,7 @@ test('a prism seeds as one bright pixel, grows only outward, glints once grown a
   const glints = frames.map(rows => rows.join('').split('w').length - 1);
   assert.deepEqual(glints.slice(22, 30), [0, 1, 1, 1, 1, 9, 5, 0]);
   for (let f = 29; f < 40; f++) assert.deepEqual(frames[f], frames[22], `frame ${f} differs from the grown crystal`);
+  assert.equal(compiled.metadata.effects.e.grown, 22);
   assert.equal(compiled.metadata.effects.e.settled, 29);
   assert.deepEqual(compiled.warnings, []);
   // The glint climbs to the tip, where the star shines.
@@ -96,6 +98,107 @@ test('a prism seeds as one bright pixel, grows only outward, glints once grown a
   // Upright and lit from the upper left: its left face is brighter than its front, and its front than its right.
   const middle = frames[39][24], body = [...middle].map((key, x) => [x, key]).filter(([, key]) => key !== '.' && key !== 'k');
   assert.deepEqual(body.map(([, key]) => key).join(''), 'ddcccaa');
+});
+
+// What the last frame cuts off is read from each crystal's timeline (its start and grow, then its glint), never from
+// comparing pictures: slow growth can draw one picture twice, and a glint changes the picture after growth has ended.
+const ice = { colors: ['a', 'b', 'c'], outline: 'k', glint: 'w' };
+const timed = (crystals, frames, look = ice, seed = 0) => {
+  const compiled = compileCrystals(source(crystals, { frames, seed }, { height: 48, looks: { ice: look } }));
+  const { grown, settled, visiblePixels } = compiled.metadata.effects.e;
+  return { warnings: compiled.warnings, frames: grids(compiled), grown, settled, shown: visiblePixels.at(-1) };
+};
+const spike = { habit: 'prism', at: [24, 40], angle: 270, length: 24, width: 8, start: 0 };
+const growing = (who, slowest, grown, fix) => `crystal.effects.e: ${who} still growing on the last frame (${slowest} would be full grown on frame ${grown}); ${fix}.`;
+const glinting = (whose, frames) => `crystal.effects.e: ${whose === 'its glint' ? 'the crystal' : 'every crystal'} is full grown, but the effect ends before ${whose} has played out; use at least ${frames} frames so the last glint goes out, or lower start or grow.`;
+
+test('a compile warns whenever the last frame cuts growth off, with the frames that finish it', () => {
+  // A spike that takes 40 frames to grow and 7 more to glint: 245 pixels, at rest from frame 47.
+  const whole = timed([{ ...spike, grow: 40 }], 48);
+  assert.deepEqual([whole.warnings, whole.grown, whole.settled, whole.shown], [[], 40, 47, 245]);
+  // Cut off anywhere before, it warns. At 3–8, 10, 11, 13, 29, 31 and 33–40 frames the last two frames draw the same
+  // picture, which once passed for rest.
+  const same = [];
+  for (let frames = 2; frames <= 40; frames++) {
+    const cut = timed([{ ...spike, grow: 40 }], frames);
+    assert.ok(cut.shown < 245, `${frames} frames end on ${cut.shown} pixels`);
+    assert.deepEqual(cut.warnings, [growing('the crystal is', 'it', 40, 'use at least 48 frames (41 for the growth, the rest for the glint after it), or lower start or grow')], `${frames} frames`);
+    assert.equal(cut.grown, 40);
+    if (frames > 2 && cut.settled < frames - 1) same.push(frames);
+  }
+  assert.deepEqual(same, [3, 4, 5, 6, 7, 8, 10, 11, 13, 29, 31, 33, 34, 35, 36, 37, 38, 39, 40]);
+  // Growth longer than an effect can be (256 frames) says to shorten it; a cube and a snowflake are timed as a prism.
+  const tooSlow = frames => growing('the crystal is', 'it', 256, `lower start or grow: finishing takes ${frames} frames, and an effect has at most 256`);
+  const slow = timed([{ ...spike, grow: 256 }], 12);
+  assert.deepEqual([slow.warnings, slow.grown, slow.settled], [[tooSlow(264)], 256, 1]);
+  assert.deepEqual(timed([{ habit: 'cube', at: [24, 24], size: 6, grow: 256 }], 10).warnings, [tooSlow(264)]);
+  // A snowflake's newest pixels shine for the frame they grow in, so it rests a frame after it is grown.
+  const flake = { habit: 'snowflake', at: [24, 24], radius: 8 };
+  assert.deepEqual(timed([{ ...flake, grow: 256 }], 10).warnings, [tooSlow(258)]);
+  for (let frames = 2; frames <= 24; frames++) assert.deepEqual(timed([{ ...flake, grow: 24 }], frames).warnings, [growing('the crystal is', 'it', 24, 'use at least 26 frames (25 for the growth, the rest for the glint after it), or lower start or grow')], `${frames} frames`);
+  assert.deepEqual(timed([{ ...flake, grow: 24 }], 25).warnings, [glinting('its glint', 26)]);
+  assert.deepEqual(timed([{ ...flake, grow: 24 }], 26).warnings, []);
+  // A flake's growth is followed to its end past the effect's, and what the effect draws is the same either way.
+  assert.deepEqual(timed([{ ...flake, grow: 24 }], 12).frames, timed([{ ...flake, grow: 24 }], 26).frames.slice(0, 12));
+  // Without a glint in the look, the frame a crystal is full grown is the frame it rests.
+  const plain = { colors: ['a', 'b', 'c'] };
+  assert.deepEqual(timed([{ ...flake, grow: 24 }], 24, plain).warnings, [growing('the crystal is', 'it', 24, 'use at least 25 frames, or lower start or grow')]);
+  assert.deepEqual(timed([{ ...flake, grow: 24 }], 25, plain).warnings, []);
+});
+
+test('a glint the last frame cuts off is called a glint, not growth, and a crystal that rests on the last frame is left alone', () => {
+  // Grown at frame 6, glinting on frames 7–12, at rest from frame 13. An effect that ends on frames 6–12 shows no
+  // glint, or holds one part-way.
+  const quick = { ...spike, grow: 6, ease: 'linear' };
+  for (let frames = 7; frames <= 13; frames++) {
+    const cut = timed([quick], frames);
+    assert.deepEqual(cut.warnings, [glinting('its glint', 14)], `${frames} frames`);
+    assert.equal(cut.grown, 6);
+    assert.equal(cut.frames.at(-1).join('').includes('w'), frames > 7, `a glint on the last of ${frames} frames`);
+  }
+  // In 14 frames the last one is the first at rest: nothing is cut off, though the picture changed on it (the star
+  // went out).
+  const rested = timed([quick], 14);
+  assert.deepEqual([rested.warnings, rested.grown, rested.settled], [[], 6, 13]);
+  assert.deepEqual(rested.frames[13], rested.frames[6]);
+  assert.deepEqual(timed([quick], 6).warnings, [growing('the crystal is', 'it', 6, 'use at least 14 frames (7 for the growth, the rest for the glint after it), or lower start or grow')]);
+  // A look without a glint has none to cut off: full grown on the last frame is at rest.
+  const plain = { colors: ['a', 'b', 'c'], outline: 'k' };
+  for (let frames = 7; frames <= 14; frames++) assert.deepEqual(timed([quick], frames, plain).warnings, [], `${frames} frames, no glint`);
+  assert.deepEqual(timed([quick], 6, plain).warnings, [growing('the crystal is', 'it', 6, 'use at least 7 frames, or lower start or grow')]);
+  // Nor has a crystal with no ridge for one to run up: a cube seen square on shows one face.
+  const square = { habit: 'cube', at: [24, 30], size: 10, tilt: 0, turn: 0, grow: 6 };
+  const flat = timed([square], 16);
+  assert.ok(flat.frames.slice(1).every(rows => !rows.join('').includes('w')), 'a cube seen square on never glints');
+  assert.deepEqual([flat.grown, flat.settled], [6, 6]);
+  for (let frames = 7; frames <= 14; frames++) assert.deepEqual(timed([square], frames).warnings, [], `${frames} frames, no ridge`);
+});
+
+test('each crystal of a cluster is timed by its own seeded start and grow', () => {
+  const cluster = { habit: 'prism', at: [[6, 36], [42, 36]], count: 5, angle: [-150, -30], length: [8, 16], width: 4, start: [0, 10], grow: [10, 14] };
+  // The members' draws, as the compiler makes them: full grown on frames 10, 17, 23, 14 and 17, each glinting for six
+  // frames after.
+  const grown = Array.from({ length: 5 }, (_, i) => Math.floor(random(0, 0, i, 2) * 11) + 10 + Math.floor(random(0, 0, i, 3) * 5));
+  assert.deepEqual(grown, [10, 17, 23, 14, 17]);
+  const fix = 'use at least 31 frames (24 for the growth, the rest for the glint after it), or lower start or grow';
+  const expected = frames => {
+    const late = grown.filter(g => g > frames - 1).length, lit = grown.filter(g => g + 7 > frames - 1).length;
+    if (late) return [growing(late === 5 ? 'all 5 crystals are' : `${late} of 5 crystals ${late === 1 ? 'is' : 'are'}`, 'the slowest, in crystals[0],', 23, fix)];
+    return lit ? [glinting(`the glint of ${lit} of 5`, 31)] : [];
+  };
+  for (let frames = 11; frames <= 34; frames++) assert.deepEqual(timed([cluster], frames).warnings, expected(frames), `${frames} frames`);
+  assert.deepEqual(expected(11), [growing('4 of 5 crystals are', 'the slowest, in crystals[0],', 23, fix)]);
+  assert.deepEqual(expected(23), [growing('1 of 5 crystals is', 'the slowest, in crystals[0],', 23, fix)]);
+  assert.deepEqual(expected(24), [glinting('the glint of 3 of 5', 31)]);
+  assert.deepEqual(expected(31), []);
+  assert.match(timed([{ ...cluster, start: [1, 10] }], 11).warnings.join('\n'), /^crystal\.effects\.e: all 5 crystals are still growing on the last frame \(the slowest, in crystals\[0\], would be full grown on frame \d+\)/);
+  // A late crystal among finished ones is named by its entry. In 32 frames its last two frames draw the same picture.
+  const late = { habit: 'prism', at: [24, 36], length: 20, width: 6, start: 20, grow: 12 };
+  const mixed = timed([cluster, late], 32);
+  assert.deepEqual(mixed.warnings, [growing('1 of 6 crystals is', 'the slowest, in crystals[1],', 32, 'use at least 40 frames (33 for the growth, the rest for the glint after it), or lower start or grow')]);
+  assert.deepEqual([mixed.grown, mixed.settled], [32, 30]);
+  assert.deepEqual(timed([cluster, late], 39).warnings, [glinting('the glint of 1 of 6', 40)]);
+  assert.deepEqual(timed([cluster, late], 40).warnings, []);
 });
 
 test('mirroring the light mirrors an upright crystal exactly', () => {
@@ -153,6 +256,8 @@ golden.test('every crystal example compiles to its golden recipe, draws only pal
     // A clear rest at the end: at least six still frames.
     const [effect] = Object.values(metadata.effects);
     assert.ok(effect.settled <= effect.frames - 7, `${name} settles at ${effect.settled} of ${effect.frames}`);
+    // Its last crystal is full grown before that, and the frames between are its glint.
+    assert.ok(effect.grown < effect.settled && effect.settled <= effect.grown + 7, `${name} is grown at ${effect.grown} and settles at ${effect.settled}`);
     renderProject(recipe);
   }
   assert.deepEqual(Object.keys(crystalPresets).sort(), [...CRYSTAL_SHOWCASE].sort());

@@ -124,6 +124,38 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - **A `saveAs` copy that cannot be written** (`pixel_render`). The reply was a system message naming a temporary file, and said nothing of the export folder and revision already made. It now names the entry by its key and path with the reason in a few words, says that no `saveAs` file was written or changed, and carries the `directory` and `revision`.
 - **Tiled and Godot take the same tiles.** An animation that plays once, or whose frames another animation already uses, left its later frames in the `.tsx` as Wang tiles, so Tiled's Terrain Brush picked between stills of one animation that the Godot TileSet left out. Both now follow one rule (`tileAnimations`); a sheet with no terrain (a sprite's tileset in a scene) plays its looping animations as before. A Wang-set warning names its terrain whenever the tileset has more than one, whichever comes first.
 
+### The smaller fixes from the review of hidden state
+
+Command line:
+
+- `-h` given as an option's value (`import art.png --name -h`, `inspect coin.json --animation -h`, `gif-frames frames --prefix -h`, `presets --find -h`) printed the whole help, exited 0 and did nothing. It is now that option's value. `<command> --help` or `-h` anywhere else among the arguments still shows the help.
+- `compile <poses> --expand --preview p.png` exited 0 and wrote no preview. It is refused: `--expand` prints the poses and draws no image.
+- Naming stdin (`-`) for two inputs failed with a bare "Unexpected end of JSON input" for several pairs (`overlay - --selections -`, `inspect - --guides -`, `scene - --image s.png --guides -`). Every pair is refused before anything is read, naming both inputs.
+- An option given twice silently kept the last value: `gif coin.json --out a.gif --out b.gif` wrote only `b.gif`. It is refused by name, and for `--frames`, `--layers` and `--draft-views` the error writes the list as one value. A flag given twice is still taken.
+- A command that writes several files could leave the first behind when a later one failed (`gif coin.json --out first.gif --sheet blocker/sheet.png`, with `blocker` a file), so the corrected call was refused with "Output already exists". Every output's path is checked before any is written, and if a write still fails the files and folders that call made are removed. Under `--force` a replaced file cannot be put back, so the error says which now hold the new bytes.
+- A `pixelforge-bodies` source that links a shared palette (`"palette": {"$ref": "…"}`) compiled to a recipe with the colours written in. It keeps the link, as poses, autotile, fx, fluid, wave and crystal sources do.
+- `gif-frames`: frames numbered across a thousand million (millisecond timestamps) were split into two sequences where the tenth digit began. Numbers of up to 15 digits are one sequence.
+
+Validation and warnings:
+
+- An operation a layer with `sort: "ground"` cannot take (an area operation, `text` without `ground`, a `ground` that is not a row) is listed with the other broken operations instead of alone: it used to hide every other error in its layer and in the layers and frames after it.
+- Diagnostics no longer report a `palette` finding on a frame for colours it continues (`from`) or copies (`copy` with `from`) from a frame that recoloured them with a frame or layer palette; rendered frames list them as `inherited`. A colour nothing declares is still found, and no pixel changes.
+- Errors and warnings about a part of a pose address it one way. A pose you wrote gives the part's index in your source (`poses.poses[1].parts[3].angle`); a pose a motion template made gives the motion, the pose and the part's name (`poses.motions.walk (walk-contact-a).parts (nearUpper)`). An error in a generated pose used to give an index into a list you never wrote, and an error in a rest pose that was not the first pose pointed at the first one.
+- A tapered bone could draw one pixel a ramp step too dark where its outline steps: cleanup had turned that outline pixel into fill, but the inner-line pass still took it for outline and repainted it. The masks of bones and masses now follow every pixel cleanup changes. Shipped examples are unchanged; a figure with tapered horns or tail segments may differ by a pixel or two a frame.
+- A crystal compile's last-frame warnings come from each crystal's own timeline (`start`, `grow`, then its glint) instead of from comparing the last two pictures. Growth cut off by the last frame always warns (`grow: 40` in 13 frames used to pass), with how many crystals, which entry is slowest and the frame count that finishes it. A crystal that is full grown no longer warns that it is "still growing" because its glint is playing: an effect that ends before a glint has played out says that. Metadata gains `grown` beside `settled`. No pixel changes.
+
+Bodies:
+
+- A blade whose strike has a `cut` was drawn over the bodies it touched for the whole run, also before its cut began and after it was over. It is drawn over them only in the frames it cuts.
+
+Studio:
+
+- Export assets stays off and labelled "Packing assets…" until its ZIP arrives, whatever recompiles meanwhile. A second click mid-export used to send a second export and leave the button reading "Packing assets…" for good.
+- The recipe editor is read-only, and says it is loading, until the studio has started and put its recipe there: what was typed in that moment was kept by no draft and replaced by the start-up recipe. A start-up that fails still opens the editor and plays, and says once that drafts are not being kept.
+- Powder lab: a replay link that is ready only after another scene has opened is no longer written into that scene's link field. It is still copied, and a toast says which scene it was for.
+
+For contributors: `scripts/qa-studio.mjs` stops when its browser quits or crashes (it used to wait until the CI job's time limit), reads the quarry blast's frame count from the preset instead of a written number, and gains four checks for the studio fixes above. The live powder runner's limit of 4,096 waiting inputs is documented.
+
 ## 0.14.0 (2026-11-08)
 
 ### Fixes from a review before release

@@ -61,7 +61,7 @@ test('the studio is given a linked recipe as written, so Save JSON keeps its $re
   assert.deepEqual(inlineSharedPalette(edited, served.shared), reopened.document);
   // The page fills its editor from /project.json and Save JSON downloads the editor's text.
   const script = await readFile(path.join(root, 'studio', 'studio.js'), 'utf8');
-  assert.match(script, /\[initial, linked\] = await Promise\.all\(\[fetch\('\/project\.json'\), fetch\('\/shared-palette\.json'\)\]/);
+  assert.match(script, /\[recipe, linked\] = await Promise\.all\(\[fetch\('\/project\.json'\), fetch\('\/shared-palette\.json'\)\]/);
   assert.match(script, /if \(initial\) setSource\(initial\);/);
   assert.match(script, /\$\('save'\)\.addEventListener\('click', \(\) => \{[\s\S]*?download\(source\.value, filename/);
 });

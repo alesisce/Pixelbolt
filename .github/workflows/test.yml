@@ -15,7 +15,9 @@ jobs:
   test:
     name: Node ${{ matrix.node }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # The suite takes six to ten minutes on these runners (570 s on Node 20 at 35f2b72): the limit is there to end
+    # a hang, not to race a slow runner.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +47,9 @@ jobs:
   studio:
     name: Portable Studio / ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The Intel build runs the whole suite on a translated runtime, which has taken from 7 to over 16 minutes of
+    # this job on different runners: at 20 minutes a slow runner cut a passing run short (1b9a14a).
+    timeout-minutes: ${{ matrix.target == 'darwin-x64' && 35 || 20 }}
     strategy:
       fail-fast: false
       matrix:

@@ -68,7 +68,7 @@ Check the listing at <https://registry.modelcontextprotocol.io/v0.1/servers?sear
 
 The [Gemini CLI gallery](https://geminicli.com/extensions/) lists public repositories that carry the `gemini-cli-extension` topic by itself: it crawls tagged repositories daily and reads `gemini-extension.json` at the root of the repository or the release archive. Its `version` should match the tag, as Gemini's docs ask, since Gemini CLI shows it; the tag check enforces that. `gemini extensions install https://github.com/skulitom/Pixelbolt` installs the latest release. Gemini CLI uses a release asset only when its name starts with the user's platform (`win32.`, `darwin.`, `linux.`) or when it is the release's only asset; otherwise it unpacks the tag's source archive, which carries `bin/pixelbolt.js`, the skill and the manifest. Keep two or more assets with no platform prefix: a lone `pixelbolt.mcpb` can't be unpacked, and Gemini CLI then installs a clone of `main` instead of the release. `gemini extensions validate .` checks the manifest in a checkout (checked with Gemini CLI 0.67.0 in November 2026).
 
-The first release that carries the manifest is the one after 0.14.0. Until it is Latest, an install reads 0.14.0's archive, which has none, and fails. So add the `gemini-cli-extension` topic only once that release is Latest, then add the install line to README.md and llms.txt.
+0.15.0 is the first release that carries the manifest: an install of 0.14.0's archive, which has none, fails. So add the `gemini-cli-extension` topic only once 0.15.0 is Latest, then add the install line to README.md and llms.txt.
 
 ## Local build
 
@@ -76,7 +76,7 @@ The first release that carries the manifest is the one after 0.14.0. Until it is
 node scripts/build-mcpb.mjs --check
 node scripts/verify-mcpb.mjs dist/mcpb/pixelbolt.mcpb
 npx --yes @anthropic-ai/mcpb@2.1.2 validate dist/mcpb/manifest.json
-node scripts/build-mcpb.mjs --registry-entry --tag v0.14.0 --bundle dist/mcpb/pixelbolt.mcpb  # v + package.json's version
+node scripts/build-mcpb.mjs --registry-entry --tag v0.15.0 --bundle dist/mcpb/pixelbolt.mcpb  # v + package.json's version
 ```
 
 The dependency-free builder reads an explicit set of runtime inputs from disk, normalizes UTF-8 text from CRLF to LF, sorts ZIP entries and uses a fixed date. Use a clean checkout and the same Node/zlib version to reproduce bytes. `--check` builds twice and compares; differing existing artifacts require a fresh `--out` folder. No version agreement with `server.json` is required for ordinary tests or builds; release and registry entry creation enforce it.

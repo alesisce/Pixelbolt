@@ -6,8 +6,8 @@ import { createLivePowder, applyStroke, packStrokes, unpackStrokes, compilePowde
 import { renderProject } from '/core.js';
 import { animationGIF } from '/gif.js';
 import { POWDER_SCENES, SANDBOX_SOURCE, POWDER_TOOLS, brushInput, heldTool, callText, inputText, clipSteps, powderCommands, pixelDigest, fitReplayLink, checkReplay, readReplayLink, recordedText, replayLeft, sceneById, BLAST, REPLAY_FRAMES, PowderLinkError } from '/powder-controls.js';
+import { $, toast, download, playButton } from '/page.js';
 
-const $ = id => document.getElementById(id);
 const canvas = $('canvas'), context = canvas.getContext('2d'), overlay = $('overlay'), ink = overlay.getContext('2d');
 const STEP_MS = 1000 / 60, reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 // While paused, strokes wait for the next step; past this many the brush stops until a step (the grid queues 4,096).
@@ -15,16 +15,10 @@ const MOST_WAITING = 1024;
 const title = name => name.charAt(0).toUpperCase() + name.slice(1);
 let scene = null, source = null, table = {}, live = null, image = null, zoom = 1;
 let playing = !reducedMotion, clock = null, brush = 'sand', pointer = null, last = null, pressedAt = -1, hover = null, waiting = [];
-let stepMs = 0, drawMs = 0, statusAt = -Infinity, baked = null, version = 0, busy = false, stopping = false, toldFull = false, toastTimer;
+let stepMs = 0, drawMs = 0, statusAt = -Infinity, baked = null, version = 0, busy = false, stopping = false, toldFull = false;
 
-function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4000); }
 function notice(message) { $('notice').textContent = message ?? ''; $('notice').hidden = !message; }
 function failed(error) { $('error').textContent = error.message; $('error').hidden = false; }
-function download(data, filename, type) {
-  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type }));
-  const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
 // The table a source draws from: the starter table under a `base: "sandbox"` source's own materials.
 const materialsOf = value => (value.base === 'sandbox' ? { ...SANDBOX.materials, ...value.materials } : value.materials ?? {});
 const radius = () => Number($('radius').value), spray = () => Number($('spray').value) / 100;
@@ -172,7 +166,7 @@ function choose(id) {
 }
 
 // ---- Scenes and replays ----
-function playState() { $('play').textContent = playing ? 'Ⅱ' : '▶'; $('play').setAttribute('aria-label', playing ? 'Pause simulation' : 'Play simulation'); }
+const playState = () => playButton(playing, 'simulation');
 // While a scene opens, replays or bakes, everything that would change the scene waits; a replay has its own Stop.
 function setBusy(value) {
   busy = value;

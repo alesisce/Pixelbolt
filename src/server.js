@@ -42,6 +42,7 @@ const routes = new Map([
   ['/bodies.js', ['./bodies.js', 'text/javascript; charset=utf-8']],
   ['/territory.js', ['./territory.js', 'text/javascript; charset=utf-8']],
   ['/wave.js', ['./wave.js', 'text/javascript; charset=utf-8']],
+  ['/page.js', ['../studio/page.js', 'text/javascript; charset=utf-8']],
   ['/effects.html', ['../studio/effects.html', 'text/html; charset=utf-8']],
   ['/effects-lab.js', ['../studio/effects-lab.js', 'text/javascript; charset=utf-8']],
   ['/effects-controls.js', ['../studio/effects-controls.js', 'text/javascript; charset=utf-8']],

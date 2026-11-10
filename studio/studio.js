@@ -4,8 +4,8 @@ import { createDraftStore, claimTab, openTabs } from '/draft.js';
 import { compilePoses } from '/authoring.js';
 import { compileWaves } from '/wave.js';
 import { inspectMotion } from '/motion.js';
+import { $, toast, download, playButton } from '/page.js';
 
-const $ = id => document.getElementById(id);
 const source = $('source'), canvas = $('canvas'), context = canvas.getContext('2d');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let project, spec, atlas, frameImages = [], selected = 0, playing = !reducedMotion, mode = 'animation';
@@ -27,7 +27,7 @@ function withSharedPalette(value) {
   return inlineSharedPalette(value, sharedPalette);
 }
 const compileSource = value => { const drawn = withSharedPalette(value); return drawn?.format === 'pixelforge-poses' ? compilePoses(drawn) : drawn?.format === 'pixelforge-wave' ? compileWaves(drawn) : { recipe: drawn, metadata: null }; };
-let elapsed = 0, lastTime = 0, zoom = 12, dirty = false, valid = false, compileTimer, toastTimer, loadVersion = 0;
+let elapsed = 0, lastTime = 0, zoom = 12, dirty = false, valid = false, compileTimer, loadVersion = 0;
 // Whether an Export assets request is on its way: the one thing the button's packing label and its being off while it
 // packs are drawn from. Otherwise the button is on exactly when the recipe is valid. Whatever compiles meanwhile
 // (typing, a sample, GIF, Frames) calls showExport, so it can neither turn the button on nor lose its label mid-export.
@@ -75,13 +75,7 @@ function imageCanvas(data, width, height) {
 function thumbnail(c) {
   const image = document.createElement('img'); image.src = c.toDataURL('image/png'); image.alt = ''; return image;
 }
-function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4000); }
-function download(data, filename, type) {
-  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type }));
-  const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
-function playState() { $('play').textContent = playing ? 'Ⅱ' : '▶'; $('play').setAttribute('aria-label', playing ? 'Pause animation' : 'Play animation'); }
+const playState = () => playButton(playing);
 function reviewMotion() {
   if (motionReview) return motionReview;
   const speed = $('motion-speed').value, ground = $('motion-ground').value;

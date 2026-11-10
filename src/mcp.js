@@ -156,19 +156,12 @@ export function createToolRunner({ directory, root, version }) {
   const hidden = relative => relative.split(path.sep).some(part => part.startsWith('.'));
   // Where a home folder keeps app settings without a leading dot.
   const SETTINGS = { win32: 'AppData', darwin: 'Library' }[process.platform];
-  const spriteJSON = async (file, size) => {
-    if (size > MAX_REQUEST_BYTES) return false;
-    try { const value = JSON.parse(await readFile(file, 'utf8')); return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'frames'); }
-    catch { return false; }
-  };
-  const godotResource = async (file, size, type) => {
-    if (size > MAX_REQUEST_BYTES) return false;
-    try { return new RegExp(`^\\[gd_resource type="${type}"[ \\]]`).test(await readFile(file, 'utf8')); } catch { return false; }
-  };
-  const tiledTileset = async (file, size) => {
-    if (size > MAX_REQUEST_BYTES) return false;
-    try { return /^﻿?(?:<\?xml[^>]*\?>\s*)?<tileset[\s>]/.test(await readFile(file, 'utf8')); } catch { return false; }
-  };
+  // Whether an existing file is the kind a save may replace: its text, judged by `is`. One too large to read, unreadable
+  // or not that kind of text is not.
+  const fileIs = async (file, size, is) => { if (size > MAX_REQUEST_BYTES) return false; try { return is(await readFile(file, 'utf8')); } catch { return false; } };
+  const spriteJSON = (file, size) => fileIs(file, size, text => { const value = JSON.parse(text); return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'frames'); });
+  const godotResource = (file, size, type) => fileIs(file, size, text => new RegExp(`^\\[gd_resource type="${type}"[ \\]]`).test(text));
+  const tiledTileset = (file, size) => fileIs(file, size, text => /^﻿?(?:<\?xml[^>]*\?>\s*)?<tileset[\s>]/.test(text));
   // The Godot project a path is in: the nearest folder above it with a project.godot. Godot loads textures only from
   // inside its project, so a saved .tres there needs its sheet there too. The search may pass above the root, so a
   // folder it can't read counts as having none.
@@ -242,33 +235,25 @@ export function createToolRunner({ directory, root, version }) {
       seen.add(id);
       plan.push({ key, target, file, destination, bytes, replaced: Boolean(existing) });
     }
-    // Every saved atlas names the sheet it describes: a saved sheet (the one in its own folder first), or else the
-    // export folder's, whose name is only known once that folder exists (null here).
+    // A saved atlas, .tres or .tsx names the sheet it describes relative to itself (Godot and Tiled read it from the
+    // file's own folder): a saved sheet, the one in its own folder first, or else the export folder's, whose name is
+    // only known once that folder exists (null here).
     const sheets = plan.filter(item => item.file === `${project.name}.png`);
-    for (const atlas of plan.filter(item => item.file === `${project.name}.atlas.json`)) {
-      const sheet = sheets.find(item => fold(path.dirname(item.destination)) === fold(path.dirname(atlas.destination))) ?? sheets[0];
-      atlas.rebase = sheet ? sheet.destination : null;
+    const named = [['atlas', ['.atlas.json']], ['.tres', ['.tres', '.tileset.tres']], ['.tsx', ['.tsx']]];
+    for (const [kind, endings] of named) for (const item of plan.filter(each => endings.some(ending => each.file === project.name + ending))) {
+      const sheet = sheets.find(each => fold(path.dirname(each.destination)) === fold(path.dirname(item.destination))) ?? sheets[0];
+      item.rebase = sheet ? sheet.destination : null;
       // The export folder is <directory>/<name>-<6 letters or digits>, so its own name can't add these characters.
       const target = sheet ? sheet.destination : path.join(path.resolve(directory), `${project.name}-x`, `${project.name}.png`);
-      if (path.isAbsolute(path.relative(path.dirname(atlas.destination), target))) throw new PixelError(`saveAs.${atlas.key}`, 'the atlas is on another drive than the export folder, so it can\'t name the export\'s sheet: save the sheet too, such as saveAs.sheet');
-      const image = imagePath(atlas.destination, target);
-      if (!readsAsURL(image)) throw new PixelError(`saveAs.${atlas.key}`, `the atlas would name its sheet as ${image}, which reads as another name when it is loaded as a URL: choose a sheet path${sheet ? '' : ' in saveAs, or an export directory,'} without #, ?, %, backslashes or spaces at either end of a name`);
-    }
-    // A saved .tres names its sheet the same way, relative to itself, which Godot reads from the .tres's folder.
-    for (const godot of plan.filter(item => item.file === `${project.name}.tres` || item.file === `${project.name}.tileset.tres`)) {
-      const sheet = sheets.find(item => fold(path.dirname(item.destination)) === fold(path.dirname(godot.destination))) ?? sheets[0];
-      godot.rebase = sheet ? sheet.destination : null;
-      const target = sheet ? sheet.destination : path.join(path.resolve(directory), `${project.name}-x`, `${project.name}.png`);
-      if (path.isAbsolute(path.relative(path.dirname(godot.destination), target))) throw new PixelError(`saveAs.${godot.key}`, 'the .tres is on another drive than the export folder, so it can\'t name the export\'s sheet: save the sheet too, such as saveAs.sheet');
-      const godotFolder = await godotProject(path.dirname(godot.destination));
-      if (godotFolder && !inside(godotFolder, target)) throw new PixelError(`saveAs.${godot.key}`, `${godot.destination} is in the Godot project ${godotFolder}, but its sheet ${sheet ? `${sheet.destination} is` : 'would stay in the export folder,'} outside it, and Godot loads textures only from inside the project: save the sheet into the project too, such as saveAs.sheet`);
-    }
-    // A saved .tsx names its image relative to itself too, which Tiled reads from the .tsx's folder.
-    for (const tiled of plan.filter(item => item.file === `${project.name}.tsx`)) {
-      const sheet = sheets.find(item => fold(path.dirname(item.destination)) === fold(path.dirname(tiled.destination))) ?? sheets[0];
-      tiled.rebase = sheet ? sheet.destination : null;
-      const target = sheet ? sheet.destination : path.join(path.resolve(directory), `${project.name}-x`, `${project.name}.png`);
-      if (path.isAbsolute(path.relative(path.dirname(tiled.destination), target))) throw new PixelError(`saveAs.${tiled.key}`, 'the .tsx is on another drive than the export folder, so it can\'t name the export\'s sheet: save the sheet too, such as saveAs.sheet');
+      if (path.isAbsolute(path.relative(path.dirname(item.destination), target))) throw new PixelError(`saveAs.${item.key}`, `the ${kind} is on another drive than the export folder, so it can't name the export's sheet: save the sheet too, such as saveAs.sheet`);
+      if (kind === 'atlas') {
+        const image = imagePath(item.destination, target);
+        if (!readsAsURL(image)) throw new PixelError(`saveAs.${item.key}`, `the atlas would name its sheet as ${image}, which reads as another name when it is loaded as a URL: choose a sheet path${sheet ? '' : ' in saveAs, or an export directory,'} without #, ?, %, backslashes or spaces at either end of a name`);
+      }
+      if (kind === '.tres') {
+        const godotFolder = await godotProject(path.dirname(item.destination));
+        if (godotFolder && !inside(godotFolder, target)) throw new PixelError(`saveAs.${item.key}`, `${item.destination} is in the Godot project ${godotFolder}, but its sheet ${sheet ? `${sheet.destination} is` : 'would stay in the export folder,'} outside it, and Godot loads textures only from inside the project: save the sheet into the project too, such as saveAs.sheet`);
+      }
     }
     return plan;
   };
@@ -504,13 +489,14 @@ export function createToolRunner({ directory, root, version }) {
         const summary = { ok: true, name: document.name, width: frame.width, height: frame.height, duration: scene.duration, time: args.time ?? 0, scale, placements: frame.placements.length, tilemaps: frame.placements.filter(p => p.tilemap).map(p => ({ name: p.name, tiles: p.tiles })), ...(frame.depth && { depth: frame.depth }), ...(frame.lights && { lights: frame.lights }), ...(frame.shadows && { shadows: frame.shadows }), ...(frame.camera && { camera: frame.camera }), ...(frame.haze && { haze: frame.haze }), warnings: frame.warnings, ...(sources.length && { resolved: sources.map(file => path.relative(root, file).split(path.sep).join('/')) }) };
         // The sequence is built before anything is written, so a refused one leaves no folder behind.
         const frames = args.sequence === undefined ? null : checkSequenceSize(createSceneSequence(scene, document.name, args.sequence));
-        if (frames && args.export !== true) { const out = await newFolder(document.name); await writeBundle(frames, path.join(out, 'sequence')); Object.assign(summary, { directory: out, sequence: sequenceSummary(frames.info) }); }
-        if (args.export === true) {
-          const bundle = await createSceneBundle(document), out = await newFolder(document.name);
+        // One new folder holds whatever the call writes: the scene bundle, the sequence, or both.
+        const bundle = args.export === true ? await createSceneBundle(document) : null;
+        if (bundle || frames) {
+          const out = summary.directory = await newFolder(document.name);
           if (frames) { await writeBundle(frames, path.join(out, 'sequence')); summary.sequence = sequenceSummary(frames.info); }
           // The export's own warnings too (a shade placement left out of the planes, a tile set Godot or Tiled can't
           // take), each once.
-          Object.assign(summary, { directory: out, ...outputSummary(out, await writeBundle(bundle, out), false), playback: path.join(out, 'preview.html'), warnings: [...new Set([...frame.warnings, ...bundle.warnings])] });
+          if (bundle) Object.assign(summary, { ...outputSummary(out, await writeBundle(bundle, out), false), playback: path.join(out, 'preview.html'), warnings: [...new Set([...frame.warnings, ...bundle.warnings])] });
         }
         return { content: [textContent(summary), imageContent(image)], ...(preview && preview({ width: frame.width, height: frame.height, frames: [{ name: document.name, duration: 100, data: sceneImage(frame, { mode: args.view ?? 'color', guides: args.guides }).data }], animations: {} })) };
       } else if (name === 'pixel_import') {

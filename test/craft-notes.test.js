@@ -3,7 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { compileAutotile } from '../src/authoring.js';
-import { tilemapEntry } from '../src/autotile.js';
+import { tilemapEntry, tilemapOf } from '../src/autotile.js';
+import { compileFluid } from '../src/fluid.js';
+import { compileEffects } from '../src/fx.js';
+import { compileBodies } from '../src/bodies.js';
+import { patchRecipe } from '../src/patch.js';
 import { prepareScene, renderScene } from '../src/scene.js';
 import { createBundle, describeAnimations } from '../src/export.js';
 import { findPreset, loadPreset, compilePreset } from '../src/presets.js';
@@ -21,6 +25,15 @@ test('a compiled tile set says how a map names its tiles, and a set of several m
   assert.deepEqual(tilemapEntry(compileAutotile(plain).recipe).legend, { frame: 'meadow-{mask}', autotile: 'blob' });
   assert.equal(tilemapEntry(compileAutotile(await example('shore.autotile.json')).recipe), null);
   assert.equal(tilemapEntry(await example('coin.json')), null);
+  // What a reply carries is a tilemap to give rows: the legend by character, and for a set with slopes the whole
+  // legend its maps use with a map of every slope, which a scene draws as written.
+  assert.deepEqual(tilemapOf(meadow), { tile: [16, 16], legend: { '#': tilemapEntry(meadow).legend } });
+  const ground = compileAutotile(await example('ground.autotile.json')), pasted = tilemapOf(ground.recipe, ground.metadata);
+  assert.deepEqual([pasted.tile, Object.keys(pasted.legend).join(''), pasted.rows], [[16, 16], '#/\\uUDd', ground.metadata.slopes.map]);
+  const view = prepareScene({ format: 'pixelforge-scene', version: 1, name: 'hills', width: 256, height: 80, assets: { ground: ground.recipe }, instances: [{ asset: 'ground', at: [0, 0], tilemap: { ...pasted, outside: 'match' } }] });
+  assert.equal(view.instances[0].tilemap.cells.length > 60, true);
+  assert.throws(() => prepareScene({ format: 'pixelforge-scene', version: 1, name: 'hills', width: 384, height: 80, assets: {}, instances: [] }), /scene\.width: expected an integer from 1 to 256: a scene is one view/);
+  assert.equal(tilemapOf(await example('coin.json')), null);
 });
 
 test('the two-layer tile set the craft notes give to start from compiles: both plain tiles, every meeting, a Godot TileSet', async () => {
@@ -50,4 +63,14 @@ test('the scene the craft notes give to start from draws: a floor from the tile 
   const sum = (image, x0, y0, w, h) => { let total = 0; for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) { const at = (y * image.width + x) * 4; total += image.data[at] + image.data[at + 1] + image.data[at + 2]; } return total; };
   assert.ok(sum(frame, 0, 34, 16, 16) < sum(unlit, 0, 34, 16, 16) * 0.8, 'the far grass is darker under the night lighting');
   assert.equal(sum(frame, 62, 20, 16, 12), sum(unlit, 62, 20, 16, 12), 'the fire keeps its colours');
+});
+
+test('a symbol or grid with a miscounted row names the row and both widths, in every format', async () => {
+  const rows = ['kkk', 'kk', 'kkk', 'k'], said = /\[1\]: all rows must be 3 characters wide, as row 0 is: row 1 has 2, row 3 has 1$/;
+  const torch = await example('torch.fluid.json'), sparks = await example('effects.fx.json'), drop = await example('ring-escape.bodies.json');
+  assert.throws(() => compileFluid({ ...torch, symbols: { ...torch.symbols, bad: rows } }), { path: 'fluid.symbols.bad[1]', message: said });
+  assert.throws(() => compileEffects({ ...sparks, symbols: { ...sparks.symbols, bad: rows } }), { path: 'fx.symbols.bad[1]', message: said });
+  assert.throws(() => compileBodies({ ...drop, symbols: { ...drop.symbols, bad: rows } }), { path: 'bodies.symbols.bad[1]', message: said });
+  const coin = await example('coin.json');
+  assert.throws(() => patchRecipe(coin, [{ grid: `frames[${coin.frames[0].name}]`, value: { x: 0, y: 0, rows } }]), { message: said });
 });

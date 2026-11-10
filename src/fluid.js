@@ -12,7 +12,7 @@
 // ramps and ordered dither. Browser-compatible and deterministic: only + − × ÷ and sqrt, craft.js's polynomial
 // trigonometry and seeded hash, a fixed timestep and fixed iteration counts.
 // createLiveFluid runs the same simulation a frame at a time for interactive pages, with pushes, puffs and boosts.
-import { renderProject, parseColor, fail, isObject } from './core.js';
+import { renderProject, parseColor, fail, isObject, sameWidth } from './core.js';
 import { fields, number, integer, pair, pick, pickWhole } from './authoring.js';
 import { patternProblem, ditherThreshold, cleanupIds, traceLine, random, sinDeg, cosDeg } from './craft.js';
 import { atan2Deg } from './shapes.js';
@@ -4984,7 +4984,8 @@ function buildRecipe(source, each) {
   if (!isObject(symbols)) fail('fluid.symbols', 'expected named symbols for obstacles');
   for (const [name, rows] of Object.entries(symbols)) {
     identifier(name, `fluid.symbols.${name}`);
-    if (!Array.isArray(rows) || !rows.length || rows.length > 128 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string' || row.length !== rows[0].length)) fail(`fluid.symbols.${name}`, 'expected 1–128 equal-width text rows');
+    if (!Array.isArray(rows) || !rows.length || rows.length > 128 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string')) fail(`fluid.symbols.${name}`, 'expected 1–128 equal-width text rows');
+    sameWidth(rows, `fluid.symbols.${name}`);
   }
   if (!isObject(source.effects) || !Object.keys(source.effects).length || Object.keys(source.effects).length > LIMITS.effects) fail('fluid.effects', `expected 1–${LIMITS.effects} named effects`);
   const frames = [], animations = {}, seen = new Set();

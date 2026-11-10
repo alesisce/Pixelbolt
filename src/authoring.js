@@ -161,7 +161,8 @@ export function compilePoses(source, within) {
   // `within` is this module's own (see expandPoses): a compile made during motion expansion, and whether it is a probe.
   const mode = within?.[WITHIN]?.probe ? PROBE : undefined;
   let written = within?.[WITHIN]?.written ?? null;
-  if (source?.motions !== undefined) { const input = source; source = expandPoses(source); written = writtenPoses(input, source); }
+  const motions = source?.motions;
+  if (motions !== undefined) { const input = source; source = expandPoses(source); written = writtenPoses(input, source); }
   fields(source, ['format', 'version', 'name', 'width', 'height', 'palette', 'ramps', 'light', 'innerLines', 'rig', 'motionInfo', 'parts', 'poses', 'animations', 'sheet'], 'poses');
   if (source.format !== 'pixelforge-poses' || source.version !== 1) fail('poses', 'expected version-1 pixelforge-poses');
   if (source.light !== undefined && (!Number.isInteger(source.light) || source.light < 0 || source.light > 359)) fail('poses.light', 'expected whole degrees from 0 to 359');
@@ -629,7 +630,13 @@ export function compilePoses(source, within) {
     }
     const box = items.reduce((all, { box: b }) => [Math.min(all[0], b[0]), Math.min(all[1], b[1]), Math.max(all[2], b[2]), Math.max(all[3], b[3])], items[0].box);
     const nothing = items.every(item => item.outside === item.total), poses = `${items.length} of ${new Set(source.animations[motion].frames).size} poses`;
-    return `poses.motions.${motion}: ${poses} ${nothing ? `draw${one ? 's' : ''} nothing inside` : `draw${one ? 's' : ''} up to ${Math.max(...items.map(item => item.outside))} pixels outside`} the ${canvas} (${names}; ${one ? 'its' : 'their'} parts cover ${cover(box)}). Generated poses move the rest pose${rig?.rest !== undefined ? ` "${rig.rest}"` : ''}: ${nothing ? 'place it inside the canvas first' : 'give it more room in the canvas, or change the motion\'s settings'}.`;
+    // How far past which edges, the room that would hold it, and the settings of this template that carry the figure there.
+    const over = { top: Math.max(0, -box[1]), bottom: Math.max(0, box[3] - height + 1), left: Math.max(0, -box[0]), right: Math.max(0, box[2] - width + 1) };
+    const room = [over.top + over.bottom && `raise \`height\` by ${over.top + over.bottom}${over.top ? ` and move the rest pose's \`origin\` and \`rig.ground\` down ${over.top}` : ''}`, over.left + over.right && `raise \`width\` by ${over.left + over.right}${over.left ? ` and move the rest pose's \`origin\` right ${over.left}` : ''}`].filter(Boolean).join(', and ');
+    const past = [['top', -box[1]], ['bottom', box[3] - height + 1], ['left', -box[0]], ['right', box[2] - width + 1]].filter(([, by]) => by > 0).map(([edge, by]) => `${by} px past the ${edge}`);
+    const upDown = box[1] < 0 || box[3] >= height, gait = [...(upDown ? ['lift', 'bob'] : []), ...(box[0] < 0 || box[2] >= width ? ['stride', 'lean'] : [])];
+    const settings = { walk: gait, trot: gait, run: gait, jump: upDown ? ['apex (the figure rises twice that)', 'stretch'] : [], idle: ['breath', 'squash'], attack: ['arm', 'windup', 'strike'], hurt: ['recoil'] }[motions?.[motion]?.template] ?? [];
+    return `poses.motions.${motion}: ${poses} ${nothing ? `draw${one ? 's' : ''} nothing inside` : `reach${one ? 'es' : ''} ${nameList(past, 4)} of`} the ${canvas}${nothing ? '' : `, where up to ${Math.max(...items.map(item => item.outside))} of ${one ? 'its' : 'their'} pixels are clipped`} (${names}; ${one ? 'its' : 'their'} parts cover ${cover(box)}). Generated poses move the rest pose${rig?.rest !== undefined ? ` "${rig.rest}"` : ''}: ${nothing ? 'place it inside the canvas first' : `for room, ${room}; or lower the motion's ${settings.length ? nameList(settings.map(setting => setting.replace(/^(\w+)/, '`$1`')), 4).replace(/, ([^,]*)$/, ' or $1') : 'settings'}`}.`;
   };
   return plain({ recipe, metadata, ...(warnings.length && { warnings: text.map(item => typeof item === 'string' ? item : grouped(item)) }) });
 }

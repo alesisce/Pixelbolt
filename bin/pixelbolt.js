@@ -12,7 +12,7 @@ import { resizeRecipe, resizeWarning, keepFrames, keepAnimations } from '../src/
 import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
-import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, tilemapEntry, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
+import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, tilemapOf, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 // A reader that stops early (`| head -1`) closes the pipe: stop quietly, as other command-line tools do. Commands print
 // their reply after writing their files, so only the rest of the reply is lost.
@@ -27,7 +27,8 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
   pixelbolt help [topic] [section]         One reference, as MCP pixel_help gives it: quickstart, guide, workflow,
                                            craft, schema, example, presets, preset <name>, poses, scenes, autotile, fx,
                                            fluid, wave, crystal, powder, bodies or normals. guide, workflow and craft list
-                                           their sections first; name one to print only it: help craft "Characters"
+                                           their sections; name one to print it (help craft "Characters"), or give a
+                                           word to print the paragraphs that mention it (help guide text)
   pixelbolt validate <file.json|-> [--fps 30]
                                            Validate and describe a project; --fps lists durations off that video frame grid
   pixelbolt inspect <file.json|-> [--out sheet.png] [--grid]
@@ -578,9 +579,12 @@ try {
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry. The
       // hint to save it comes only where a next step reads it: a rig's motion review, a tile set's masks.
       const reviewed = command === 'autotile' || (command === 'compile' && ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format));
-      // A tile set comes with how a map names its tiles: the legend entry to paste into a tilemap.
-      const tilemap = preview ? tilemapEntry(value) : null;
-      print({ ok: true, ...written, ...made, ...(kept && { kept }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
+      // A tile set comes with how a map names its tiles: a tilemap to paste into a scene and give rows.
+      const tilemap = preview ? tilemapOf(value, metadata) : null;
+      // The hint to save metadata is for what a next step reads from it; a tile set whose reply carries its tilemap has
+      // said what a map needs.
+      const unsaved = metadata && !options.metadata && reviewed && !tilemap;
+      print({ ok: true, ...written, ...made, ...(kept && { kept }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...((unsaved || (preview && !options.preview)) && { hint: [unsaved && `The metadata${warnings ? ' (what review tools read: pose contacts, joints, loop seams, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');

@@ -1,5 +1,5 @@
 // Browser-compatible recipe patching: targeted edits addressed by readable paths. No I/O.
-import { parseColor, renderProject, fail, isObject } from './core.js';
+import { parseColor, renderProject, fail, isObject, sameWidth } from './core.js';
 import { pixelId, colorOf, idsOf, cleanupIds } from './craft.js';
 
 const define = (target, key, value) => Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
@@ -23,7 +23,8 @@ function regionPixels(recipe, frameIndex, verb, value, where) {
     if (!Number.isInteger(number) || number < (key === 'w' || key === 'h' ? 1 : 0) || number > max) fail(`${where}.${key}`, 'expected an integer region inside the canvas');
   }
   if (value.x + w > recipe.width || value.y + h > recipe.height) fail(where, 'region must fit inside the canvas');
-  if (rows && rows.some(row => typeof row !== 'string' || row.length !== w)) fail(`${where}.rows`, 'rows must have equal width');
+  if (rows && rows.some(row => typeof row !== 'string')) fail(`${where}.rows`, 'expected 1–256 equal-width rows');
+  if (rows) sameWidth(rows, `${where}.rows`);
   if (value.mask !== undefined && (!Array.isArray(value.mask) || value.mask.length !== h || value.mask.some(row => typeof row !== 'string' || row.length !== w || /[^x.]/.test(row)))) fail(`${where}.mask`, 'mask must match the region: x selects, dot preserves');
   if (value.erase !== undefined && (typeof value.erase !== 'string' || value.erase.length !== 1 || '. '.includes(value.erase) || Object.hasOwn(recipe.palette ?? {}, value.erase))) fail(`${where}.erase`, 'choose one non-palette character other than dot/space for erasure');
   let data, from, to;

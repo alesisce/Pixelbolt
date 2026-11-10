@@ -132,10 +132,17 @@ test('CLI help topics print what pixel_help returns, and one section of a long g
   assert.match(section.stdout, /^# .*\n\n## Particle effects\n/);
   assert.doesNotMatch(section.stdout, /\n## Fluid effects\n/);
   assert.match(help('guide', 'oper').stdout, /\n## Operations\n/);
+  // The whole of a long guide is never printed unasked: its opening and sections, a long section's parts, a part,
+  // or the paragraphs that mention a word.
+  assert.ok(workflow.stdout.length < 2048 && help('guide').stdout.length < 3072);
+  assert.match(help('workflow', 'particle').stdout, /^# .*\n\n## Particle effects\n\n> \d+ KB in this section, so here is its opening\. Its parts, .*Spell library \(\d KB\)/);
+  assert.match(help('workflow', 'spell', 'library').stdout, /^# .*\n\n## Particle effects\n\n### Spell library\n/);
+  assert.match(help('guide', 'gifScale').stdout, /> No section of guide starts with "gifScale"\. The \d+ paragraphs that mention it/);
+  assert.ok(help('workflow', 'all').stdout.length > 200000);
   // JSON topics print their file, and presets read as the presets command does.
   assert.equal(JSON.parse(help('fx').stdout).title, 'Pixelbolt particle effects');
   assert.equal(JSON.parse(help('preset', 'smoke-puff').stdout).name, 'smoke-puff');
-  for (const [args, message] of [[['nope'], /Unknown help topic "nope"; topics: quickstart, guide, workflow/], [['workflow', 'no such part'], /has no section "no such part"; its sections are /], [['schema', 'x'], /only guide, workflow and craft do/], [['preset'], /needs a preset name/]]) {
+  for (const [args, message] of [[['nope'], /Unknown help topic "nope"; topics: quickstart, guide, workflow/], [['workflow', 'no such part'], /has no section "no such part" and no paragraph that mentions it; its sections are /], [['schema', 'x'], /only guide, workflow and craft do/], [['preset'], /needs a preset name/]]) {
     const out = help(...args);
     assert.deepEqual([out.status, out.stdout], [1, ''], args.join(' '));
     assert.match(JSON.parse(out.stderr).error, message);

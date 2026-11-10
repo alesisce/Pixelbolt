@@ -221,7 +221,7 @@ test('pixel_help returns one preset\'s source with its files inlined, says what 
   const error = async args => { const result = await mcp.call(args.tool ?? 'pixel_help', { ...args, tool: undefined }); assert.equal(result.isError, true, JSON.stringify(args)); return reply(result); };
   if (entries.some(entry => entry.name === 'smoke-puff')) assert.match((await error({ topic: 'preset', name: 'smoke-puf' })).error, /no preset named "smoke-puf"; did you mean "smoke-puff"/);
   assert.equal((await error({ topic: 'preset' })).path, 'name');
-  assert.equal((await error({ topic: 'guide', name: 'smoke-puff' })).path, 'name');
+  assert.equal((await error({ topic: 'guide', name: 'no-such-heading' })).path, 'name');
   assert.match((await error({ tool: 'pixel_compile', preset: 'smoke-puff', source: { format: 'pixelforge-fluid' } })).error, /either source or preset/);
   assert.match((await error({ tool: 'pixel_compile' })).error, /either source or preset/);
   for (const name of ['../package', '../package.json', 'forest-spirit', 'caption.json']) assert.equal((await error({ tool: 'pixel_compile', preset: name })).path, 'preset', name);

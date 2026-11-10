@@ -4,6 +4,20 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Help that answers with a page, not a book; five more cold runs
+
+Five more kinds of work went to fresh agents: a platformer tile set with slopes, a jump and a run added to the knight, a title banner in the pixel font, three team colours of the hero, and a torch over MCP. All five delivered; these are what they tripped on.
+
+- `help guide` and `help workflow` (MCP `pixel_help` with `topic`) no longer print the whole document, 66 KB and 234 KB: they print its opening and the list of its sections, about 1 KB. One agent called `help guide` and got all of it. `"all"` as the section still returns everything.
+- A section over 12 KB that has parts prints its opening and the list of them, and a part is read by its heading as a section is: `help workflow "Fluid effects"` is 3 KB where it was 61 KB, and `help workflow whitewater` 2 KB. The fluid, particle, scene and rigid-body sections of the workflow gained those part headings (their paragraphs' bold labels), with no sentence changed. `"Fluid effects all"` is a whole section.
+- A word that starts no heading prints the paragraphs that mention it, cut to the table rows, list items and sentences that do: `help guide text` is the `text` operation's row and paragraph, `help workflow apex` the jump template's row. Three agents had searched the files for exactly that, and over MCP there was nothing to search.
+- The guide's "Calling the tool" section, 24 KB with paragraphs of 5, 5 and 9 KB, is now ten sections (Calling the tool, Presets, Sources, scenes and imports, Exports, The check, GIFs, Video frames, Saved names, The inline viewer, Limits), and the rig paragraphs left its opening for a section of their own. Six sentences that no longer described the tool were rewritten: `render` writes GIFs, an enlarged GIF is noted, a reply carries motion boxes only for the animations a note cites.
+- A motion that leaves the canvas says how far past which edge, what would make room and which of its settings to lower: "reach 4 px past the top of the 32x32 canvas ... for room, raise `height` by 4 and move the rest pose's `origin` and `rig.ground` down 4; or lower the motion's `apex` (the figure rises twice that) or `stretch`". It said "draw up to 31 pixels outside" (a count of pixels, read as a distance) and "change the motion's settings".
+- A compiled tile set's `tilemap` in the reply is a tilemap to paste and give rows: `{"tile": [16, 16], "legend": {"#": {...}}}`. For a set with `slopes` it is the whole legend (a character per slope, the rules for the feet under them) with a sample map; before, it was the plain entry, which drew slopes with broken joins, and the agent compiled again for the metadata.
+- A symbol with a miscounted row names the row and both widths in every source format and in a patch (`fluid.symbols.dipper[2]: all rows must be 24 characters wide, as row 0 is: row 2 has 25`), through the one check recipes use; fluid, fx, bodies and patch each said only "expected equal-width text rows".
+- A tile set's compile reply no longer suggests saving metadata when it carries the `tilemap`: an agent read the hint as something it might have missed.
+- A scene wider than 256 pixels is refused with what to do: a scene is one view, and a larger tilemap is shown a part at a time.
+
 ### Imported images, one spell of many, video frames: more cold runs
 
 Three more kinds of work went to fresh agents on the current build, with the rig and MCP tasks again (4 commands and 4 calls, no failures in either).

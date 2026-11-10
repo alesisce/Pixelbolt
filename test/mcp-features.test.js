@@ -51,17 +51,38 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
     for (const topic of topics) assert.ok(quick.includes(`\`${topic}\``), `the quick start names topic ${topic}`);
     assert.match((await help('guide'))[0], /^# Pixelbolt agent authoring guide/);
     assert.match((await help('workflow'))[0], /^# Deliberate pixel art/);
-    // The long documents list their sections, and name returns one under the document's title, so a client that keeps
-    // only the start of a long reply still reaches the fluid section at the workflow's end.
+    // No reply is a whole long document unless it is asked for. Without a name, a document is its opening and the list
+    // of its sections; a section over 12 KB is its opening and the list of its parts; a part is read as a section is;
+    // and a word that starts no heading returns the paragraphs that mention it.
     const workflow = (await help('workflow'))[0];
     assert.match(workflow.split('\n')[2], /KB in all\. To read one section, .*Fluid effects \(\d+ KB\)/);
     const section = async (topic, name) => (await mcp.request('tools/call', { name: 'pixel_help', arguments: { topic, name } })).result.content[0].text;
+    const size = value => Buffer.byteLength(value), everything = await section('workflow', 'all');
+    assert.ok(size(everything) > 200000 && size(workflow) < 2048 && size((await help('guide'))[0]) < 3072 && size((await help('craft'))[0]) < 2048);
     const fluidText = await section('workflow', 'fluid');
-    assert.match(fluidText, /^# Deliberate pixel art[^\n]*\n\n## Fluid effects\n/);
-    assert.ok(!fluidText.includes('\n## Particle effects') && Buffer.byteLength(fluidText) < Buffer.byteLength(workflow) / 2);
+    assert.match(fluidText, /^# Deliberate pixel art[^\n]*\n\n## Fluid effects\n\n> \d+ KB in this section, so here is its opening\. Its parts, [^\n]*Gases \(\d KB\); [^\n]*Whitewater \(\d KB\)[^\n]*"Fluid effects all" is the whole section\.\n/);
+    assert.ok(!fluidText.includes('\n### ') && size(fluidText) < 4096);
+    const part = await section('workflow', 'whitewater'), wholeFluid = await section('workflow', 'Fluid effects all');
+    assert.match(part, /^# Deliberate pixel art[^\n]*\n\n## Fluid effects\n\n### Whitewater\n\n`whitewater` \(liquids/);
+    assert.ok(!part.includes('\n### Air pockets') && size(part) < 4096 && wholeFluid.includes(part.slice(part.indexOf('### Whitewater'))) && wholeFluid.includes('\n### Live fluids\n') && !wholeFluid.includes('\n## Rigid bodies'));
+    // Every section's parts add up to it, so nothing is out of reach: each part of the workflow is in the whole text.
+    for (const heading of [...everything.matchAll(/^### (.*)$/gm)].map(match => match[1])) {
+      const text = await section('workflow', heading);
+      assert.ok(text.includes(`\n### ${heading}\n`) && everything.includes(text.slice(text.indexOf(`### ${heading}`)).trimEnd()), heading);
+      assert.ok(size(text) < 16384, `${heading}: ${size(text)} bytes`);
+    }
     assert.match(await section('guide', 'Calling the tool'), /\n## Calling the tool\n/);
+    assert.match(await section('workflow', 'Autotile'), /\n## Autotile templates\n\n[^>]/);
+    // A word: the table row and the paragraph that name the text operation come first, cut to what mentions it.
+    const found = await section('guide', 'text');
+    assert.match(found, /^# Pixelbolt agent authoring guide\n\n> No section of guide starts with "text"\. The \d+ paragraphs that mention it/);
+    assert.match(found, /\n## Operations\n\n\| op \| Properties \| Behavior \|\n\| --- \| --- \| --- \|\n\| `text` \|[^\n]*\n\n`text` draws the built-in font/);
+    assert.ok(!found.includes('| `rect` |') && size(found) < 8192);
+    const apex = await section('workflow', 'apex');
+    assert.match(apex, /\| `jump` \| `crouch:0\.8`, `stretch:1\.15`, `apex:4`/);
+    assert.ok(size(await section('workflow', 'the')) < 10240);
     const missing = await mcp.call('pixel_help', { topic: 'guide', name: 'no such part' });
-    assert.equal(missing.result.isError, true); assert.equal(missing.info.path, 'name'); assert.match(missing.info.error, /its sections are Project, Frames and layers/);
+    assert.equal(missing.result.isError, true); assert.equal(missing.info.path, 'name'); assert.match(missing.info.error, /no section "no such part" and no paragraph that mentions it; its sections are Project, Frames and layers/);
     assert.equal(JSON.parse((await help('schema'))[0]).title, 'Pixelbolt project');
     // The quick start's recipe and the example topic are valid recipes that draw without warnings.
     const recipe = JSON.parse(quick.match(/```json\n([\s\S]*?)\n```/)[1]), example = JSON.parse((await help('example'))[0]);

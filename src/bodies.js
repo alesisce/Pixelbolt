@@ -13,7 +13,7 @@
 // Same units as pixelforge-fluid (docs/physics-model.md, section 2): pixels, frames, pixels per frame and per frame².
 // Browser-compatible and deterministic: only + − × ÷ and sqrt, craft.js's polynomial trigonometry, fixed substeps
 // and iteration counts, and bodies, contacts and pixels visited in a fixed order.
-import { renderProject, fail, isObject } from './core.js';
+import { renderProject, fail, isObject, sameWidth } from './core.js';
 import { fields, number, integer } from './authoring.js';
 import { sinDeg, cosDeg, traceLine, turnRows, random } from './craft.js';
 import { atan2Deg } from './shapes.js';
@@ -1928,7 +1928,8 @@ function readSource(source, frames) {
   if (!isObject(symbols)) fail('bodies.symbols', 'expected named symbols for obstacles and sprites');
   for (const [name, rows] of Object.entries(symbols)) {
     identifier(name, `bodies.symbols.${name}`);
-    if (!Array.isArray(rows) || !rows.length || rows.length > 256 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string' || row.length !== rows[0].length)) fail(`bodies.symbols.${name}`, 'expected 1–256 equal-width text rows');
+    if (!Array.isArray(rows) || !rows.length || rows.length > 256 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string')) fail(`bodies.symbols.${name}`, 'expected 1–256 equal-width text rows');
+    sameWidth(rows, `bodies.symbols.${name}`);
   }
   if (!isObject(source.effects) || !Object.keys(source.effects).length || Object.keys(source.effects).length > LIMITS.effects) fail('bodies.effects', `expected 1–${LIMITS.effects} named effects`);
   const shell = { version: 1, name: source.name, width: width * n, height: height * n, palette, ...(Object.keys(symbols).length && { symbols }), ...(source.anchor !== undefined && { anchor: scaleAnchor(source.anchor, n) }) };

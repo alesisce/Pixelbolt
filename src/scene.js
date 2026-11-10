@@ -104,6 +104,8 @@ const paletteMap = (value, path) => {
 export function prepareScene(source) {
   fields(source, ['format', 'version', 'name', 'width', 'height', 'background', 'duration', 'palette', 'cues', 'assets', 'instances', 'lighting', 'haze', 'camera'], 'scene');
   if (source.format !== 'pixelforge-scene' || source.version !== 1) fail('scene', 'expected version-1 pixelforge-scene');
+  // A scene is one view. A map may be larger than it: say so where a level's whole width was given as the scene's.
+  for (const side of ['width', 'height']) if (Number.isInteger(source[side]) && source[side] > 256) fail(`scene.${side}`, 'expected an integer from 1 to 256: a scene is one view of at most 256 pixels a side. A tilemap may be larger than it, shown a part at a time (move the placement with at, or the view with camera)');
   const width = int(source.width, 1, 256, 'scene.width'), height = int(source.height, 1, 256, 'scene.height');
   const duration = int(source.duration ?? 2000, 1, 60000, 'scene.duration');
   // Reuse portable name validation.

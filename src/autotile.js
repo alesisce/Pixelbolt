@@ -76,6 +76,15 @@ export function tilemapEntry(recipe) {
   const entry = names.length === 1 ? { frame: names[0] } : { frames: names, ...(weights.some(value => value !== 1) && { weights }) };
   return { tile: [recipe.width, recipe.height], legend: { ...entry, autotile: tiles[0].mode } };
 }
+
+// What a compile reply gives of a tile set: a scene instance's `tilemap` without its rows, the cell size and the
+// legend with `#` for the terrain. A set with slopes has a character for each slope too and rules for the feet under
+// them (the legend its metadata holds), with the small map that uses every one. null where tilemapEntry is.
+export function tilemapOf(recipe, metadata) {
+  const entry = tilemapEntry(recipe);
+  if (!entry) return null;
+  return metadata?.slopes ? { tile: entry.tile, legend: metadata.slopes.legend, rows: metadata.slopes.map } : { tile: entry.tile, legend: { '#': entry.legend } };
+}
 export function quadrantPieces(mode, mask) {
   const has = key => mode === 'cardinal' ? (mask & (CARDINAL_BITS[key] ?? 0)) !== 0 : (mask & BLOB_BITS[key]) !== 0;
   return Object.fromEntries(Object.entries(QUADRANTS).map(([position, [a, b, diagonal]]) => {

@@ -7,7 +7,7 @@
 // shockwave rings, slashes, beams, lightning, magic circles, impact stars, fireballs) bake into one grid per frame
 // between `behind` particles and the rest. Browser-compatible and deterministic: seeded hashing and polynomial
 // trigonometry, no Math.random.
-import { PixelError, parseColor, renderProject, FRAME_AREA, joinErrors, fail, isObject } from './core.js';
+import { PixelError, parseColor, renderProject, FRAME_AREA, joinErrors, fail, isObject, sameWidth } from './core.js';
 import { fields, point, compilePoses, number, integer, range, pair, pick, pickWhole } from './authoring.js';
 import { patternProblem, ditherThreshold, traceLine, random, hash, sinDeg, cosDeg, ease, EASINGS, rotateRows } from './craft.js';
 import { readShapes, renderShapes, holdBands, settleHolds, tween, sample, sequenceFrame, atan2Deg, pathWalker } from './shapes.js';
@@ -891,7 +891,8 @@ export function compileEffects(source, { stats = false } = {}) {
       if (sprite.frames) { sequences[name] = sprite.frames; delete symbols[name]; } else symbols[name] = sprite.rows;
       continue;
     }
-    if (!Array.isArray(rows) || !rows.length || rows.length > 256 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string' || row.length !== rows[0].length)) fail(`fx.symbols.${name}`, 'expected 1–256 equal-width text rows, or { recipe, frame } or { recipe, animation }: a frame or an animation of a recipe or pose source');
+    if (!Array.isArray(rows) || !rows.length || rows.length > 256 || typeof rows[0] !== 'string' || !rows[0].length || rows.some(row => typeof row !== 'string')) fail(`fx.symbols.${name}`, 'expected 1–256 equal-width text rows, or { recipe, frame } or { recipe, animation }: a frame or an animation of a recipe or pose source');
+    sameWidth(rows, `fx.symbols.${name}`);
     // Every character is a palette key or a clear one ('.' or a space), checked here so the error names the fx source.
     rows.forEach((row, j) => { for (const char of row) if (char !== '.' && char !== ' ' && !Object.hasOwn(palette, char)) fail(`fx.symbols.${name}[${j}]`, `unknown palette character ${JSON.stringify(char)}; the palette has ${Object.keys(palette).join(' ')}, and . or a space is clear`); });
   }

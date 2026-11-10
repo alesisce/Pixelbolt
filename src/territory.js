@@ -7,7 +7,7 @@
 // src/bodies.js calls this from a few hooks: reading an effect, the contacts it gathers, the end of each substep and of
 // each frame, and drawing. Browser-compatible and deterministic, as bodies.js is: only + − × ÷ and sqrt, craft.js's
 // trigonometry, and cells, bodies and pickups visited in a fixed order.
-import { fail, isObject } from './core.js';
+import { fail, isObject, sameWidth } from './core.js';
 import { fields, number, integer } from './authoring.js';
 import { cosDeg, sinDeg } from './craft.js';
 import { layoutText, measureText, FONT_CAP_HEIGHT } from './font.js';
@@ -58,7 +58,8 @@ export function readTerritory(value, path, { width, height, palette }) {
   let columns, rows, start;
   if (value.rows !== undefined) {
     if (value.size !== undefined) fail(`${path}.size`, 'rows already give the size; size goes with split');
-    if (!Array.isArray(value.rows) || !value.rows.length || typeof value.rows[0] !== 'string' || !value.rows[0].length || value.rows.some(row => typeof row !== 'string' || row.length !== value.rows[0].length)) fail(`${path}.rows`, 'expected equal-width text rows, one character per cell');
+    if (!Array.isArray(value.rows) || !value.rows.length || typeof value.rows[0] !== 'string' || !value.rows[0].length || value.rows.some(row => typeof row !== 'string')) fail(`${path}.rows`, 'expected equal-width text rows, one character per cell');
+    sameWidth(value.rows, `${path}.rows`);
     columns = value.rows[0].length; rows = value.rows.length;
     start = new Int8Array(columns * rows);
     value.rows.forEach((row, j) => { for (let i = 0; i < columns; i++) {

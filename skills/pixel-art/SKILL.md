@@ -49,8 +49,8 @@ Run `help` as `node bin/pixelbolt.js help <topic> ["<section>"]`; over MCP, `pix
 
 - `help quickstart` (MCP `pixel_help` alone): the recipe format, the operations and patches. Read it before writing or editing a recipe by hand.
 - `help craft "<section>"`: one short checklist. Sections: `Rules`, `Drawing by hand`, `Characters`, `Effects`, `Tiles and scenes`, `Isometric`, `Exports and delivery` (video frames, GIF options, Godot, Tiled, Phaser), `MCP`, `Limits`.
-- `help guide "<heading>"`: every field, operation, inspection option and export. `help guide` lists its headings.
-- `help workflow "<section>"`: long techniques for poses, scenes, tiles, effects and lighting. `help workflow` lists its sections.
+- `help guide "<heading>"`: every field, operation, inspection option and export. `help guide` lists its headings, and a word that is no heading finds the paragraphs that mention it (`help guide text`, `help workflow apex`).
+- `help workflow "<section>"`: long techniques for poses, scenes, tiles, effects and lighting. `help workflow` lists its sections, and a long section lists its parts.
 - Files: `docs/agent-quick-start.md`, `docs/agent-craft.md`, `docs/agent-guide.md`, `docs/art-workflow.md`, `docs/game-integration.md`, and `schema.json` with the per-format schemas beside it.
 
 Limits: an animation frame is at most 256 × 256 pixels and a project 256 frames; `help craft "Limits"` has the rest.

@@ -164,15 +164,19 @@ function blend(data, i, color, opacity = 1) {
   for (let c = 0; c < 3; c++) data[i + c] = Math.round((color[c] * a + data[i + c] * old * (1 - a)) / out);
   data[i + 3] = Math.round(out * 255);
 }
+// Text rows are all as wide as the first: every miscounted row at once, with its own width, so a hand-typed grid is
+// fixed in one pass. What a recipe's grid, a source format's symbol and a patch's rows are checked with.
+export function sameWidth(rows, path) {
+  const width = rows[0].length, uneven = rows.flatMap((row, y) => row.length === width ? [] : [y]);
+  if (uneven.length) fail(`${path}[${uneven[0]}]`, `all rows must be ${width} characters wide, as row 0 is: ${uneven.slice(0, 8).map(y => `row ${y} has ${rows[y].length}`).join(', ')}${uneven.length > 8 ? ` and ${uneven.length - 8} more rows differ` : ''}`);
+}
 export function readRows(rows, path, palette) {
   list(rows, path, 256);
   if (!rows.length) fail(path, 'grid must contain at least one row');
   if (typeof rows[0] !== 'string' || rows[0].length < 1 || rows[0].length > 256) fail(`${path}[0]`, 'row must contain 1–256 characters');
   const width = rows[0].length;
   rows.forEach((row, y) => { if (typeof row !== 'string') fail(`${path}[${y}]`, `all rows must be ${width} characters wide`); });
-  // Every miscounted row at once, with its own width, so a hand-typed grid is fixed in one pass.
-  const uneven = rows.flatMap((row, y) => row.length === width ? [] : [y]);
-  if (uneven.length) fail(`${path}[${uneven[0]}]`, `all rows must be ${width} characters wide, as row 0 is: ${uneven.slice(0, 8).map(y => `row ${y} has ${rows[y].length}`).join(', ')}${uneven.length > 8 ? ` and ${uneven.length - 8} more rows differ` : ''}`);
+  sameWidth(rows, path);
   const unknown = new Map();
   rows.forEach((row, y) => {
     for (const char of row) if (char !== '.' && char !== ' ') {

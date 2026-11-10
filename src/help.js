@@ -138,14 +138,17 @@ export function helpSchema(topic, text, name, via = 'mcp') {
     ...(deref(node)?.description ? ['', deref(node).description] : []), '', ...Object.entries(properties).map(line)].join('\n') + '\n';
 }
 
-// The quick start has a section for each interface, and a reader gets its own: an MCP client the tools, a shell the
-// commands. The file itself holds both.
-const NOT_FOR = { mcp: 'The commands', cli: 'The tools' };
+// The quick start has sections for one interface or the other, and a reader gets its own: an MCP client the tools, a
+// shell the commands. A shell reader came by the pixel art skill, whose table already says where each kind of job
+// starts, so the starting points (written as tool calls) are left to the MCP reader. The file itself holds all of it.
+const NOT_FOR = { mcp: ['The commands'], cli: ['The tools', 'Starting points'] };
 export function quickStart(text, via = 'mcp') {
-  const lines = text.replace(/\r\n/g, '\n').split('\n'), from = lines.indexOf(`## ${NOT_FOR[via]}`);
-  if (from < 0) return text;
-  const next = lines.findIndex((line, index) => index > from && line.startsWith('## '));
-  return [...lines.slice(0, from), ...(next < 0 ? [] : lines.slice(next))].join('\n');
+  let lines = text.replace(/\r\n/g, '\n').split('\n');
+  for (const heading of NOT_FOR[via]) {
+    const from = lines.indexOf(`## ${heading}`), next = lines.findIndex((line, index) => index > from && line.startsWith('## '));
+    if (from >= 0) lines = [...lines.slice(0, from), ...(next < 0 ? [] : lines.slice(next))];
+  }
+  return lines.join('\n');
 }
 
 // A document topic as text: the quick start without a topic, a guide (its opening and sections, one section, or what

@@ -10,6 +10,7 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - The npm package and `pixelbolt skill install` leave out `examples/quality/`, the quality lab's files that no guide starts from: 16 fewer files and 300 KB less in each.
 - The plugin evals' mock server answers with the real server's tool listing again (three tools had changed since it was captured), its reply shapes match, and a test keeps the listing current (`node scripts/eval-mock.mjs`).
 - Fix: a studio that takes any free port (`preview` when 4747 is in use) no longer takes one a browser refuses to open. Windows with WSL or Hyper-V hands out free ports from 1024 up, in order, so about one start in three thousand landed on 6665 to 6669 or another refused port and the page would not load.
+- The Emberfall demo is removed from the repository: `demo/` (5.8 MB, a quarter of the tracked files by size), its six scripts, its three npm scripts and the test of its game logic. It was retired on 23 October as no longer showing what Pixelbolt makes and kept as a workload, but its generator no longer ran and its stress script failed on the current engine. The test covered the game's own movement and spells, not the toolkit. It is in the history before this commit; the reports it produced stay under `docs/`.
 - Inside: the validators that eighteen modules each defined (`fail`, `isObject`, and the source formats' `number`, `integer`, `pair` and `range`) and the table of compilers kept in three places are each defined once. No output changes.
 
 ### Isometric art to start from

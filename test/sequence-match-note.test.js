@@ -28,6 +28,11 @@ test('a match cut short by seconds still says which frames fall between video fr
   assert.equal(info.frames, 9);
   assert.deepEqual([Math.max(...frames) + 1, frames.size], [14, 9]);
   assert.deepEqual(skipped(info), [[5, 14, true]]);
+  assert.match(info.notes[0], /^5 of .* fall between video frames .* are not shown/);
+  // A match that fills part of a video frame more (61 frames of 10 ms fill 18.3) is cut by a clip of the 18 whole ones.
+  const part = sidecar(61, 10, { fps: 30, seconds: 0.6 }), partFrames = shown(61, 10, 30, part.frames);
+  assert.deepEqual([part.frames, sidecar(61, 10, { fps: 30 }).frames, Math.max(...partFrames) + 1, partFrames.size], [18, 19, 57, 18]);
+  assert.deepEqual(skipped(part), [[39, 57, true]]);
   // The case that was met: a 33 ms match at 30 frames a second loses one frame in about a hundred.
   const long = sidecar(120, 33, { fps: 30, seconds: 3.9 }), longFrames = shown(120, 33, 30, long.frames);
   assert.deepEqual([long.frames, Math.max(...longFrames) + 1, longFrames.size], [117, 118, 117]);

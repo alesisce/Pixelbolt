@@ -8,7 +8,7 @@ import { compileCrystals } from '../src/crystal.js';
 import { compilePowder } from '../src/powder.js';
 import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery, briefCheck } from '../src/check.js';
-import { resizeRecipe, resizeWarning, keepFrames } from '../src/resize.js';
+import { resizeRecipe, resizeWarning, keepFrames, keepAnimations } from '../src/resize.js';
 import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
@@ -73,7 +73,9 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            window starts)
                                            --frames (any compile) keeps that many evenly spaced frames of each
                                            animation that has more, playing as long as before: the way to fewer
-                                           frames (lowering frames in a source cuts the effect short instead)
+                                           frames (lowering frames in a source cuts the effect short instead);
+                                           --animation <name> keeps only that animation of a source that makes
+                                           several (a,b for more than one)
   pixelbolt presets [name] [--full]        List the presets, a line each (size, frames, loop, colours, what each is
                                            for; --full adds every animation and file), or print one preset's source
   pixelbolt presets --find "water splash"  Only the presets those words match: by name, else by description
@@ -117,6 +119,9 @@ Input may be a pose source, or a compiled recipe with --metadata meta.json. --gr
 metadata's ground.
 --max-cells 1-256 samples long sequences with explicit omission metadata; evenly spaced samples can alias with a
 repeating pattern (a strobe alternating A and B), so pick positions with --step and --offset.
+Patch: --changes holds a list applied in order: {"set": "palette.c", "value": "#8a5a2c"} (any path, as errors write them),
+{"insert": "frames[-]", "value": {...}}, {"remove": "animations.blink"}, {"paint": "frames[blink]", "value": [{"x": 4, "y": 5, "color": "k"}]},
+{"grid": "frames[rest]", "value": {"x": 3, "y": 4, "rows": ["kk.", ".k."]}}, and recolor, move and cleanup on regions.
 Patch accepts correction overlays as --changes; a changed base fails with a fingerprint conflict.
 A cleanup change ({"cleanup": "frames[run-2]", "value": {"corners": true, "strays": true}}) previews
 proposed fixes for doubled corners and stray pixels; --diagnostics counts both per frame.
@@ -149,7 +154,7 @@ const OPTIONS = {
   preview: ['port', 'open'],
   mcp: ['out', 'root', 'time-limit'],
   schema: [],
-  compile: ['out', 'metadata', 'preview', 'force', 'expand', 'preset', 'draft-views', 'size', 'frames'],
+  compile: ['out', 'metadata', 'preview', 'force', 'expand', 'preset', 'draft-views', 'size', 'frames', 'animation'],
   autotile: ['out', 'metadata', 'preview', 'force'],
   scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files', 'embed-recipe'],
   overlay: ['changes', 'selections', 'out', 'force'],
@@ -177,7 +182,7 @@ function asksForHelp(args) {
 // The notes under the usage list, by the words each starts with, and the commands each is about (null: every one).
 const NOTES = [['Options:', null], ['--embed-recipe on render', ['render', 'scene']], ['render and scene reply', ['render', 'scene', 'compile', 'autotile', 'import']],
   ['Palette references', null], ['Inspect:', ['inspect']], ['Patch accepts', ['patch']], ['GIF keeps', ['gif', 'render']], ['gif-frames reads', ['gif-frames']],
-  ['Sequence writes', ['sequence']], ['Command results', null]];
+  ['Sequence writes', ['sequence']], ['Command results', null], ['Patch: --changes', ['patch']]];
 // One command's help: its usage lines and the notes about it. The whole help is 11 KB, which every `<command> --help`
 // used to print; a name that is no command gets all of it.
 function commandHelp(command) {
@@ -372,6 +377,8 @@ const print = value => console.log(rowsJSON(value));
 // A path as a reply names it: from the working directory when it is inside it, as the caller wrote it, with forward
 // slashes; anywhere else, in full.
 const shown = file => { const from = path.relative(process.cwd(), file); return from && !from.startsWith('..') && !path.isAbsolute(from) ? from.split(path.sep).join('/') : file; };
+// What an imported image is called when no --name is given: its file's name, where that is a name a recipe can have.
+const nameFromFile = file => { const base = path.basename(file).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^[^A-Za-z]+/, '').slice(0, 64); return base || undefined; };
 // --frames 8: how many frames each animation keeps.
 const frameCount = value => { if (!/^\d{1,3}$/.test(value)) throw new Error('--frames expects how many frames each animation keeps, such as --frames 8'); return Number(value); };
 const summary = (project, recipe) => ({ name: project.name, width: project.width, height: project.height, frames: project.frames.length, ...describeAnimations(project, recipe), warnings: project.warnings, ...(project.clipping && { clipping: project.clipping }), ...(project.clippingOmitted && { clippingOmitted: project.clippingOmitted }) });
@@ -523,6 +530,11 @@ try {
         // A plain recipe preset compiles to itself and has no metadata to save.
         if (options.metadata && compiled.metadata === undefined) throw new Error(`${options.preset} is a plain recipe preset, which has no metadata; omit --metadata`);
         metadata = compiled.metadata; warnings = compiled.warnings ?? []; preview = compiled.preview;
+        // --animation: only the animations named (a,b for several), with the frames they play.
+        if (options.animation !== undefined) {
+          if (compile === compileAutotile) throw new Error('--animation keeps animations, and a tile set has none to choose from');
+          compiled.recipe = keepAnimations(compiled.recipe, options.animation.split(','), '--animation').recipe;
+        }
         // --frames: each animation down to that many evenly spaced frames, playing as long as before.
         if (options.frames !== undefined) {
           if (compile === compileAutotile) throw new Error('--frames thins animations, and the frames of a tile set are its tiles');
@@ -550,7 +562,7 @@ try {
         value = createOverlay(input.document, await readProject(options.changes, '--changes'), options.selections ? await readProject(options.selections, '--selections') : {});
       } else {
         if (!positional[0] || positional[0] === '-') throw new Error('import requires a PNG filename');
-        const imported = importPNG(await readFile(positional[0]), { name: options.name, atlas: options.atlas ? await readProject(options.atlas, '--atlas') : undefined });
+        const imported = importPNG(await readFile(positional[0]), { name: options.name ?? nameFromFile(positional[0]), atlas: options.atlas ? await readProject(options.atlas, '--atlas') : undefined });
         value = imported.recipe; metadata = imported.provenance;
       }
       if (options.metadata && !/\.json$/i.test(options.metadata)) throw new Error('--metadata must name a .json file');
@@ -562,8 +574,8 @@ try {
       const reads = command === 'import' ? filesRead(positional[0], options.atlas) : [...inputsOf(input), ...filesRead(options.changes, options.selections)];
       const written = await writeOutputs({ recipe: [options.out, formatJSON(value), '--out'], ...(options.metadata && { metadata: [options.metadata, formatJSON(metadata), '--metadata'] }), ...(testMap && { preview: [options.preview, encodePNG(testMap.data, testMap.width, testMap.height), '--preview'] }) }, options.force, reads);
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry. The
-      // hint to save it comes only where a next step reads it: a rig's motion review, a tile set's masks, an import.
-      const reviewed = command !== 'compile' || ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format);
+      // hint to save it comes only where a next step reads it: a rig's motion review, a tile set's masks.
+      const reviewed = command === 'autotile' || (command === 'compile' && ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format));
       // A tile set comes with how a map names its tiles: the legend entry to paste into a tilemap.
       const tilemap = preview ? tilemapEntry(value) : null;
       print({ ok: true, ...written, ...made, ...(kept && { kept }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });

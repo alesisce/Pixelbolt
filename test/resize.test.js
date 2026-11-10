@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { renderProject } from '../src/core.js';
 import { hash } from '../src/craft.js';
 import { findPreset, loadPreset, compilePreset } from '../src/presets.js';
-import { readSize, resizeRecipe, resizeWarning, keepFrames } from '../src/resize.js';
+import { readSize, resizeRecipe, resizeWarning, keepFrames, keepAnimations } from '../src/resize.js';
 import { startMCP } from '../src/mcp.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -333,6 +333,21 @@ test('compile --size and pixel_compile size put a preset on the canvas asked for
 const strip = (count, more = {}, animations) => ({ version: 1, name: 'strip', width: 4, height: 4, palette: { a: '#ff0000' }, frames: Array.from({ length: count }, (_, i) => ({ name: `f${i}`, duration: 10 * (i + 1), ops: [dot(i % 4, 0)], ...more[i] })), ...(animations && { animations }) });
 const plays = recipe => Object.fromEntries(Object.entries(renderProject(recipe).animations).map(([key, a]) => [key, a.frames.map(i => recipe.frames[i].name).join(' ')]));
 const lengths = recipe => Object.fromEntries(Object.entries(renderProject(recipe).animations).map(([key, a]) => [key, a.duration]));
+
+test('one animation of several is kept with the frames it plays or is drawn from', async () => {
+  const many = strip(6, { 3: { from: 'f0' } }, { a: { frames: ['f1', 'f2'] }, b: { frames: ['f3', 'f4'], loop: false }, c: { frames: ['f5'] } });
+  const one = keepAnimations(many, 'b');
+  assert.deepEqual([one.recipe.frames.map(frame => frame.name), one.recipe.animations, one.dropped], [['f0', 'f3', 'f4'], { b: { frames: ['f3', 'f4'], loop: false } }, ['a', 'c']]);
+  assert.deepEqual(Object.keys(keepAnimations(many, ['c', 'a']).recipe.animations), ['c', 'a']);
+  const before = renderProject(many), after = renderProject(one.recipe);
+  for (const frame of after.frames) assert.deepEqual(frame.data, before.frames.find(each => each.name === frame.name).data);
+  assert.throws(() => keepAnimations(many, 'walk'), /animation: no animation "walk"; this one has a, b, c/);
+  assert.throws(() => keepAnimations(strip(2), 'default'), /with no named animation/);
+  assert.throws(() => keepAnimations(many, []), /expected the name of an animation to keep/);
+  // A preset's one spell, then thinned: what compile --animation impact --frames 6 writes.
+  const spells = await preset('ice-spells'), impact = keepFrames(keepAnimations(spells, 'impact').recipe, 6);
+  assert.deepEqual([Object.keys(impact.recipe.animations), impact.recipe.frames.length, impact.kept], [['impact'], 6, { impact: '6 of 12' }]);
+});
 
 test('fewer frames are evenly spaced ones, lasting as long as the frames they stand for', async () => {
   // A loop steps evenly round its seam; a one-shot keeps its first and last frame.

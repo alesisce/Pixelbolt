@@ -163,14 +163,15 @@ test('CLI import --embedded recovers source, protects output and reports missing
   await assert.rejects(readEmbeddedRecipe(damaged), error => { damageError = error.message; return /damaged/.test(error.message); });
   assert.equal(cli(['import', carried, '--embedded', '--out', absent], { status: 1 }).stderr, JSON.stringify({ ok: false, error: damageError }) + '\n');
   await assert.rejects(readFile(absent), { code: 'ENOENT' });
-  const imported = importPNG(original), pixels = path.join(dir, 'pixels.json');
+  // An import is named after its file.
+  const imported = importPNG(original, { name: path.basename(plain, '.png') }), pixels = path.join(dir, 'pixels.json');
   const old = cli(['import', plain, '--out', pixels]);
-  assert.deepEqual(JSON.parse(old.stdout), { ok: true, recipe: pixels, hint: 'The metadata was not saved; pass --metadata <new.json> to keep it.' });
+  assert.deepEqual(JSON.parse(old.stdout), { ok: true, recipe: pixels });
   assert.equal(await readFile(pixels, 'utf8'), formatJSON(imported.recipe));
   // Even a recipe-carrying PNG still takes the pixel-import path unless --embedded is supplied.
   const embeddedBytes = Buffer.from(await embedRecipe(original, blink, version)); await writeFile(carried, embeddedBytes);
-  const traced = importPNG(embeddedBytes), tracedOut = path.join(dir, 'traced.json');
-  assert.deepEqual(JSON.parse(cli(['import', carried, '--out', tracedOut]).stdout), { ok: true, recipe: tracedOut, hint: 'The metadata was not saved; pass --metadata <new.json> to keep it.' });
+  const traced = importPNG(embeddedBytes, { name: path.basename(carried, '.png') }), tracedOut = path.join(dir, 'traced.json');
+  assert.deepEqual(JSON.parse(cli(['import', carried, '--out', tracedOut]).stdout), { ok: true, recipe: tracedOut });
   assert.equal(await readFile(tracedOut, 'utf8'), formatJSON(traced.recipe));
 });
 

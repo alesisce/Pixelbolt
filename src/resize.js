@@ -201,3 +201,16 @@ export function keepFrames(recipe, count, path = 'frames') {
   const explicit = recipe.animations !== undefined || frames.length > next.default.frames.length;
   return { recipe: { ...recipe, frames, ...(explicit && { animations: next }) }, kept, notes };
 }
+
+// A recipe that keeps only the animations named, and the frames they play or are drawn from: one spell out of a
+// preset that holds thirteen. Returns { recipe, dropped } (the animations left out).
+export function keepAnimations(recipe, names, path = 'animation') {
+  const wanted = (Array.isArray(names) ? names : [names]).filter(name => typeof name === 'string' && name);
+  const has = Object.keys(recipe.animations ?? {});
+  if (!wanted.length) fail(path, 'expected the name of an animation to keep');
+  for (const name of wanted) if (!has.includes(name)) fail(path, `no animation ${JSON.stringify(name)}; this one has ${has.length ? has.join(', ') : 'only its frames in order, with no named animation'}`);
+  const index = new Map(recipe.frames.map((frame, i) => [frame.name, i])), stays = new Set(wanted.flatMap(name => recipe.animations[name].frames.map(frame => index.get(frame))));
+  const sources = frame => [frame.from, ...[...(frame.ops ?? []), ...(frame.layers ?? []).flatMap(layer => layer.ops ?? [])].filter(op => op.op === 'copy').map(op => op.from)].filter(name => index.has(name)).map(name => index.get(name));
+  for (let i = recipe.frames.length - 1; i >= 0; i--) if (stays.has(i)) for (const source of sources(recipe.frames[i])) stays.add(source);
+  return { recipe: { ...recipe, frames: recipe.frames.filter((_, i) => stays.has(i)), animations: Object.fromEntries(wanted.map(name => [name, recipe.animations[name]])) }, dropped: has.filter(name => !wanted.includes(name)) };
+}

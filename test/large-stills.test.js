@@ -57,7 +57,7 @@ test('sheets that fitted before are byte-identical', async () => {
   const hd = still(1920, 1080, [{ op: 'rect', x: 0, y: 0, w: 1920, h: 1080, color: 'k' }, { op: 'dither', color: 's', density: 0.3, pattern: 'noise' }]);
   const report = compareProjects(renderProject(hd), renderProject(patchRecipe(hd, [{ set: 'palette.k', value: '#112233' }]).recipe));
   assert.deepEqual([sha(report.image.sheet.data), report.image.sheet.width, report.image.sheet.height, report.image.sheet.columns], ['611f55ec8ba5c4e3', 3846, 1084, 2]);
-  assert.deepEqual(Object.keys(report), ['frames', 'image', 'legend']);
+  assert.deepEqual(Object.keys(report), ['frames', 'image']);
   const mural = inspectProject(renderProject(filled(2560, 1440)));
   assert.deepEqual([sha(mural.sheet.data), mural.sheet.width, mural.sheet.height], ['52da730e252473c3', 2564, 1444]);
 });

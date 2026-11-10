@@ -36,7 +36,26 @@ function start(drawn, size) {
 // flood fill, a dither's pattern), so the same operation on another canvas would draw something else.
 const PLACED = new Set(['pixel', 'rect', 'ellipse', 'line', 'clear', 'grid', 'stamp', 'text', 'copy', 'autotile', 'box', 'tilemap', 'replace']);
 
-function moveOps(ops, dx, dy, path, option) {
+// What a move puts partly off the canvas keeps only its part on it, and what it puts wholly off is left out: a
+// plain grid keeps those rows and columns, a plain stamp becomes a copy of that rectangle of its symbol, a pixel
+// goes. None of it was ever drawn, and left in the recipe every later validate, render and export would report it as
+// clipped, a warning nobody can act on after asking for the cut. Anything scaled, flipped or turned is left as it is.
+function onCanvas(op, { width, height, symbols }) {
+  if (op.op === 'pixel') return op.x >= 0 && op.y >= 0 && op.x < width && op.y < height ? op : null;
+  const source = op.op === 'grid' ? op.rows : op.op === 'stamp' ? symbols?.[op.symbol] : null;
+  if ((op.scale ?? 1) !== 1 || op.flipX || op.flipY || op.rotate || !Array.isArray(source) || source.some(row => typeof row !== 'string')) return op;
+  const rows = source.map(row => [...row]), wide = Math.max(0, ...rows.map(row => row.length));
+  const top = Math.max(0, -op.y), bottom = Math.min(rows.length, height - op.y), left = Math.max(0, -op.x), right = Math.min(wide, width - op.x);
+  if (bottom <= top || right <= left) return null;
+  if (!top && !left && bottom === rows.length && right === wide) return op;
+  const at = { x: op.x + left, y: op.y + top };
+  return op.op === 'grid' ? { ...op, ...at, rows: rows.slice(top, bottom).map(row => row.slice(left, right).join('')) }
+    : { ...op, op: 'copy', ...at, sx: left, sy: top, w: right - left, h: bottom - top };
+}
+
+// `canvas`, { width, height, symbols }, also cuts what the move puts off the new canvas (not for a layer sorted by
+// ground, where a grid stands on its lowest row).
+function moveOps(ops, dx, dy, path, option, canvas = null) {
   return ops.map((op, index) => {
     const p = `${path}[${index}]`;
     if (!PLACED.has(op.op) || (op.op === 'copy' && op.symbol === undefined)) {
@@ -46,8 +65,8 @@ function moveOps(ops, dx, dy, path, option) {
     const moved = { ...op, x: (op.x ?? 0) + dx, y: (op.y ?? 0) + dy };
     if (op.op === 'line') { moved.x2 = (op.x2 ?? op.x ?? 0) + dx; moved.y2 = (op.y2 ?? op.y ?? 0) + dy; }
     if (op.ground !== undefined) moved.ground = op.ground + dy;
-    return moved;
-  });
+    return canvas ? onCanvas(moved, canvas) : moved;
+  }).filter(Boolean);
 }
 
 // { recipe, resized: { from, offset, cut } }: `offset` is where the new canvas starts in the old one, `cut` the share
@@ -97,17 +116,17 @@ export function resizeRecipe(recipe, size, path = 'size') {
   // partly clear), and in its own colour whatever the frame's palette says.
   const background = parseColor(recipe.background ?? 'transparent', project.palette), margins = outside(dx, dx + oldWidth, dy, dy + oldHeight);
   if (background[3]) margins.push(...margins.map(clear => ({ ...clear, op: 'rect', color: `#${background.map(value => value.toString(16).padStart(2, '0')).join('')}` })));
-  const point = ([x, y]) => [x + dx, y + dy];
+  const point = ([x, y]) => [x + dx, y + dy], canvas = { width, height, symbols: recipe.symbols };
   const frames = recipe.frames.map((frame, index) => {
     const p = `frames[${index}]`;
     // A frame moved after it is drawn brings in what lay beside the window, which the new canvas never drew.
     for (const key of ['flipX', 'flipY', 'wrap', 'tile', 'translate']) {
       if (key === 'translate' ? frame.translate?.some(Boolean) : frame[key]) fail(path, `${p}.${key} is tied to the canvas size, so this recipe cannot move to another one; change the size in its source instead`);
     }
-    const ops = moveOps(frame.ops ?? [], dx, dy, `${p}.ops`, path);
+    const ops = moveOps(frame.ops ?? [], dx, dy, `${p}.ops`, path, canvas);
     // A layer is drawn on a canvas of its own, cut by it, then moved by the layer's x and y and cut by the frame.
     // Here its operations take that move as well, so its canvas is the new one, and what either cut took is cleared.
-    const moved = (frame.layers ?? []).map(({ x = 0, y = 0, ops: list = [] }, li) => moveOps(list, dx + x, dy + y, `${p}.layers[${li}].ops`, path));
+    const moved = (frame.layers ?? []).map(({ x = 0, y = 0, sort, ops: list = [] }, li) => moveOps(list, dx + x, dy + y, `${p}.layers[${li}].ops`, path, sort ? null : canvas));
     const beyond = (frame.layers ?? []).map(({ x = 0, y = 0 }) => outside(dx + Math.max(0, x), dx + oldWidth + Math.min(0, x), dy + Math.max(0, y), dy + oldHeight + Math.min(0, y)));
     const cut = margins.length || beyond.some(clears => clears.length) ? cutIn(frame, index) : [];
     if (margins.length && overhangs(cut, 'ops', frame.ops ?? [])) ops.push(...margins);

@@ -118,8 +118,9 @@ test('comparison reports changed, inherited, added and retimed frames with exact
 test('comparison crops to the change, summarizes recolors and reports resized canvases', () => {
   const big = { version: 1, name: 'big', width: 32, height: 32, palette: { k: '#000', w: '#fff' }, frames: [{ name: 'a', ops: [{ op: 'rect', x: 4, y: 4, w: 20, h: 10, color: 'k' }] }, { name: 'b', ops: [{ op: 'pixel', color: 'w' }] }] };
   const recolor = compareProjects(renderProject(big), renderProject(patchRecipe(big, [{ set: 'palette.k', value: '#123456' }]).recipe));
-  assert.deepEqual(recolor.frames, { changed: [{ frame: 'a', pixels: 200, box: { x: 4, y: 4, w: 20, h: 10 }, transitions: [{ from: '0', to: 'k', pixels: 200 }] }], unchanged: ['b'] });
-  assert.deepEqual(recolor.legend, { 0: { color: '#000000' } });
+  assert.deepEqual(recolor.frames, { changed: [{ frame: 'a', pixels: 200, box: { x: 4, y: 4, w: 20, h: 10 }, transitions: [{ from: '#000000', to: 'k', pixels: 200 }] }], unchanged: ['b'] });
+  // A colour the palette no longer names is written as its hex, so the report needs no legend.
+  assert.equal(recolor.legend, undefined);
   assert.deepEqual(recolor.image.region, { x: 2, y: 2, w: 24, h: 14 });
   const resized = compareProjects(renderProject(big), renderProject(patchRecipe(big, [{ set: 'width', value: 16 }]).recipe));
   assert.deepEqual(resized.canvas, { from: { w: 32, h: 32 }, to: { w: 16, h: 32 } });

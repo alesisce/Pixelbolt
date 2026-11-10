@@ -30,6 +30,13 @@ export const isObject = value => value !== null && typeof value === 'object' && 
 // Names agents often write for a field or operation the format names differently, offered as "did you mean".
 const FIELD_ALIASES = { width: 'w', height: 'h', x1: 'x', y1: 'y', x0: 'x', y0: 'y', colour: 'color', fill: 'filled', frame: 'from', name: 'symbol' };
 const OP_ALIASES = { circle: 'ellipse', oval: 'ellipse', rectangle: 'rect', square: 'rect', point: 'pixel', dot: 'pixel', flood: 'fill', floodfill: 'fill', erase: 'clear', label: 'text', print: 'text', sprite: 'stamp', image: 'grid', recolor: 'replace', recolour: 'replace', border: 'outline' };
+// What the operations those names mean take, said with the suggestion: a circle is written with a centre and a radius,
+// an ellipse with its box, and the name alone left an agent to look the fields up.
+const OP_FIELDS = {
+  ellipse: 'x, y, w, h (the box it fills, not a centre and radius), color and optionally filled', rect: 'x, y, w, h, color and optionally filled', pixel: 'x, y, color',
+  fill: 'x, y, color (a flood fill from that pixel)', clear: 'x, y, w, h', text: 'x, y, text, color and optionally align', stamp: 'symbol, x, y', grid: 'x, y, rows',
+  replace: 'from, to (two colours)', outline: 'color and optionally position, width'
+};
 // One letter changed, added or removed: a typo of the other name.
 const oneEdit = (a, b) => {
   if (Math.abs(a.length - b.length) > 1 || a === b) return false;
@@ -46,7 +53,7 @@ function meant(key, names, aliases) {
 function unknownName(kind, key, names, aliases = FIELD_ALIASES) {
   const guess = meant(key, names, aliases);
   const listed = kind === 'operation' ? 'operations' : 'fields here';
-  return `unknown ${kind}${kind === 'operation' ? ` ${JSON.stringify(key)}` : ''}${guess ? `; did you mean "${guess}"?` : ''}${names.length <= 24 ? (guess ? ` ${listed[0].toUpperCase()}${listed.slice(1)}` : `; ${listed}`) + `: ${names.join(', ')}` : ''}`;
+  return `unknown ${kind}${kind === 'operation' ? ` ${JSON.stringify(key)}` : ''}${guess ? `; did you mean "${guess}"?${kind === 'operation' && own(OP_FIELDS, guess) ? ` It takes ${OP_FIELDS[guess]}.` : ''}` : ''}${names.length <= 24 ? (guess ? ` ${listed[0].toUpperCase()}${listed.slice(1)}` : `; ${listed}`) + `: ${names.join(', ')}` : ''}`;
 }
 function object(value, path, keys) {
   if (!isObject(value)) fail(path, 'expected an object');
@@ -741,7 +748,10 @@ export function renderProject(spec, options = {}) {
   }
   const frames = checked(() => spec.frames.map((frame, index) => {
     const p = `project.frames[${index}]`;
-    object(frame, p, ['name', 'duration', 'from', 'translate', 'wrap', 'flipX', 'flipY', 'palette', 'anchor', 'points', 'tile', 'ops', 'layers', 'pixels']);
+    // A field a frame doesn't have is noted like a broken operation and the frame is read without it, so the same
+    // reply still names what else is wrong: another frame's operations, an animation that lists a missing frame.
+    try { object(frame, p, ['name', 'duration', 'from', 'translate', 'wrap', 'flipX', 'flipY', 'palette', 'anchor', 'points', 'tile', 'ops', 'layers', 'pixels']); }
+    catch (error) { if (!isObject(frame) || !error.message.includes('unknown field')) throw error; note(error, p); }
     const frameName = name(frame.name, `${p}.name`);
     if (frameNames.has(frameName.toLowerCase())) fail(`${p}.name`, `duplicate frame ${frameName}; names must also be unique ignoring case`);
     frameNames.add(frameName.toLowerCase());
@@ -1808,7 +1818,10 @@ export function compareProjects(before, after) {
       if (stacked) report.imageNote = `before above after: side by side, two ${region.w}-pixel frames would pass the 4096-pixel sheet limit`;
     }
   }
-  const legend = namer.legend();
-  if (Object.keys(legend).length) report.legend = legend;
+  // A colour with no one-letter palette key is written out where it is reported: its palette name, or its hex. Only
+  // "?" (more colours than there are symbols) still needs a legend.
+  const legend = namer.legend(), written = symbol => (symbol !== '?' && own(legend, symbol) ? legend[symbol].palette ?? legend[symbol].color : symbol);
+  for (const frame of changed) for (const item of frame.changes ?? frame.transitions ?? []) { item.from = written(item.from); item.to = written(item.to); }
+  if (own(legend, '?')) report.legend = { '?': legend['?'] };
   return report;
 }

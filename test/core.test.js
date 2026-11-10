@@ -17,6 +17,17 @@ test('grid dots skip existing pixels, with exact palette colors', () => {
   assert.deepEqual(pixel(f, 1, 0), [0, 0, 255, 255]);
   assert.deepEqual(pixel(f, 1, 1), [0, 255, 0, 255]);
 });
+test('a field a frame does not have is reported with what else is wrong, an animation\'s missing frame included', () => {
+  const recipe = { ...make([{ op: 'pixel', x: 0, y: 0, color: 'nope' }]), animations: { idle: { frames: ['missing'] } } };
+  recipe.frames[0].hold = 2;
+  assert.throws(() => renderProject(recipe), error => {
+    assert.deepEqual(error.errors.map(item => item.path), ['project.frames[0].hold', 'project.frames[0].ops[0].color', 'project.animations.idle.frames[0]']);
+    return true;
+  });
+  // A frame that is not an object, or holds a null, still stops at once.
+  assert.throws(() => renderProject({ ...make([]), frames: ['rest'] }), error => error.errors === undefined && error.path === 'project.frames[0]');
+  assert.throws(() => renderProject({ ...make([]), frames: [{ name: 'a', duration: null }] }), error => error.errors === undefined && /null is not supported/.test(error.message));
+});
 test('grid shape and color errors include the exact source path', () => {
   assert.throws(() => renderProject(make([{ op: 'grid', rows: ['rr', 'r'] }])), /project.frames\[0\].ops\[0\].rows\[1\]: all rows must be 2/);
   assert.throws(() => renderProject(make([{ op: 'grid', rows: ['z'] }])), /unknown palette character "z"/);
@@ -135,7 +146,15 @@ test('an unknown field or operation names the one most likely meant and what is 
   // No likely match: only the accepted fields.
   assert.equal(message({ op: 'pixel', x: 0, y: 0, color: 'r', zz: 1 }), 'project.frames[0].ops[0].zz: unknown field; fields here: op, x, y, color, ground');
   // Operations: a common other name, a one-letter typo and another case.
-  assert.match(message({ op: 'circle', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /\.op: unknown operation "circle"; did you mean "ellipse"\? Operations: pixel, rect, ellipse, /);
+  assert.match(message({ op: 'circle', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /\.op: unknown operation "circle"; did you mean "ellipse"\? It takes x, y, w, h \(the box it fills, not a centre and radius\), color and optionally filled\. Operations: pixel, rect, ellipse, /);
+  // The fields said with a suggestion are fields that operation has: each other name an agent might write, drawn with
+  // the fields its hint names, is refused only for a value, never for an unknown field.
+  for (const [other, fields] of [['oval', 'ellipse'], ['square', 'rect'], ['dot', 'pixel'], ['flood', 'fill'], ['erase', 'clear'], ['label', 'text'], ['sprite', 'stamp'], ['image', 'grid'], ['recolour', 'replace'], ['border', 'outline']]) {
+    const hint = /did you mean "([a-z]+)"\? It takes ([^.]+)\./.exec(message({ op: other }));
+    assert.equal(hint?.[1], fields, other);
+    const named = hint[2].replace(/\([^)]*\)/g, '').split(/,| and optionally /).map(field => field.trim()).filter(Boolean);
+    assert.doesNotMatch(message({ op: fields, ...Object.fromEntries(named.map(field => [field, 0])) }) ?? '', /unknown field/, `${fields}: ${named}`);
+  }
   assert.match(message({ op: 'elipse', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /did you mean "ellipse"\?/);
   assert.match(message({ op: 'Rect', x: 0, y: 0, w: 2, h: 2, color: 'r' }), /did you mean "rect"\?/);
   assert.match(message({ op: 'polygon' }), /unknown operation "polygon"; operations: pixel, /);

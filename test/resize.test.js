@@ -253,6 +253,12 @@ test('presets of every kind move to another canvas pixel for pixel', async () =>
       assert.equal(differing(recipe, moved, resized.offset), 0, `${name} at ${size.join('x')}`);
     }
   }
+  // What a cut leaves outside is taken out of the grids, stamps and pixels, so the moved recipe draws nothing past its canvas and no
+  // later validate, render or export warns about clipping the cut already reported.
+  for (const name of ['campfire', 'interference', 'fireball', 'knight']) {
+    const cut = renderProject(resizeRecipe(await preset(name), '24x24').recipe);
+    assert.deepEqual([cut.clipping, cut.warnings.filter(text => /falls outside the canvas/.test(text))], [undefined, []], name);
+  }
   // The campfire asked for at 32×32 keeps its logs and the floor, and loses only wisps of smoke off the top.
   const { resized } = resizeRecipe(await preset('campfire'), '32x32');
   assert.deepEqual([resized.from, resized.offset], [[32, 48], [0, 16]]);

@@ -4,6 +4,16 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### What six cold runs still tripped on
+
+Three tasks were given to fresh agents on the checkout from before this work and on the current one. The campfire and the potion took fewer commands with no failed one (5 against 8 and two helper scripts; 8 against 12 with one failure); fixing a broken recipe did not get shorter, and both runs named why. These follow from what they reported.
+
+- One validate names everything wrong it can find: a field a frame doesn't have is reported with the broken operations, and so is an animation that lists a missing frame. Before, the frame field stopped the check, and the missing frame only showed on the next run.
+- An unknown operation that has another name says what that operation takes: `unknown operation "circle"; did you mean "ellipse"? It takes x, y, w, h (the box it fills, not a centre and radius), color and optionally filled.` An agent told only the name spent three commands finding the fields.
+- A recipe put on a smaller canvas with `--size` no longer warns about clipping in every later validate, render and GIF: what the cut leaves outside is taken out of its grids, stamps and pixels, and the cut is reported once, where it is made. (A turned or scaled part that hangs over the edge still says so.)
+- A patch's report writes a colour the palette no longer names as its hex (`"from": "#d9a566"`), where it wrote `"0"` and explained it in a `legend`.
+- The quick start says that `from` copies a frame as it was finally drawn, its `pixels` corrections too.
+
 ### A quick start for each reader, and less to carry
 
 - `pixelbolt help quickstart` gives a shell its commands (`validate`, `inspect`, `patch`, `render`, `gif`, `compile`, `scene`, `import`, with their options) where it gave the MCP tools and one line saying the commands were the same. MCP `pixel_help` still gives the tools. Patch changes and source formats are one section both read.

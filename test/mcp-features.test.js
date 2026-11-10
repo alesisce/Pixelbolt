@@ -39,6 +39,8 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
     const [quick, ...more] = await help();
     assert.equal(more.length, 0);
     assert.match(quick, /^# Pixelbolt quick start/);
+    // An MCP client reads the tools, not the shell's commands; the file holds both.
+    assert.ok(quick.includes('\n## The tools\n') && !quick.includes('\n## The commands\n'));
     assert.ok(Buffer.byteLength(quick) < 12288, `${Buffer.byteLength(quick)} bytes of quick start`);
     // Every topic the tool offers is named in the quick start and serves its document.
     const topics = listed.find(tool => tool.name === 'pixel_help').inputSchema.properties.topic.enum;

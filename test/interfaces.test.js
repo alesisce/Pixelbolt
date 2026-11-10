@@ -119,6 +119,11 @@ test('CLI help topics print what pixel_help returns, and one section of a long g
   const quick = help('quickstart');
   assert.equal(quick.status, 0, quick.stderr);
   assert.match(quick.stdout, /^# Pixelbolt quick start\n/);
+  // A shell reads the commands, not the MCP tools, and every command it names is one the CLI has.
+  assert.ok(quick.stdout.includes('\n## The commands\n') && !quick.stdout.includes('\n## The tools\n'));
+  const named = [...quick.stdout.slice(quick.stdout.indexOf('## The commands'), quick.stdout.indexOf('## Changes and sources')).matchAll(/`([a-z][a-z-]*) (?:<|--preset)/g)].map(match => match[1]);
+  assert.deepEqual([...new Set(named)].sort(), ['autotile', 'compile', 'gif', 'import', 'inspect', 'patch', 'render', 'scene', 'sequence', 'validate']);
+  for (const command of new Set(named)) assert.doesNotMatch(quietCLI('pixelbolt', [command]).stderr, /Unknown command/);
   // A long guide lists its sections with the shell's way to ask for one; a section prints alone under the title.
   const workflow = help('workflow');
   assert.match(workflow.stdout, /^# .*\n\n> \d+ KB in all\. To read one section, run pixelbolt help workflow "<heading>" .*Particle effects \(\d+ KB\)/);

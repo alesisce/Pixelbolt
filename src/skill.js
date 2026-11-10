@@ -74,7 +74,9 @@ export function standaloneProblems(text, { skill = true } = {}) {
 export async function skillFiles(version) {
   const { files } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const schemas = files.filter(file => /(?:^|\.)schema\.json$/.test(file)).sort();
-  const sources = [...DOCS, ...schemas, ...(await filesUnder('examples')).filter(file => file.endsWith('.json')).sort(), 'LICENSE'];
+  // The examples the package ships: an entry starting with "!" names a folder it leaves out, in a checkout too.
+  const left = files.filter(file => file.startsWith('!')).map(file => `${file.slice(1)}/`);
+  const sources = [...DOCS, ...schemas, ...(await filesUnder('examples')).filter(file => file.endsWith('.json') && !left.some(folder => file.startsWith(folder))).sort(), 'LICENSE'];
   const copied = new Map([[SKILL_SOURCE, 'SKILL.md'], ...sources.map(file => [file, file])]), command = skillCommand(version), out = new Map();
   for (const [source, target] of copied) {
     let data = await readFile(path.join(ROOT, source));

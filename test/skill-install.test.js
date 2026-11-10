@@ -71,8 +71,12 @@ test('skill install writes a standalone skill to Claude Code\'s skills folder in
 
 test('the installed skill reaches every guide, schema and example it names, and runs every command through npx at this version', async () => {
   const files = await skillFiles(version);
-  // Every example ships with it: the skill tells the agent to begin from one.
-  const examples = (await listed(path.join(root, 'examples'))).filter(file => file.endsWith('.json')).map(file => `examples/${file}`);
+  // Every example the package ships comes with it: the skill tells the agent to begin from one. The quality lab's
+  // files, which the package leaves out and no guide starts from, stay in the repository.
+  const examples = (await listed(path.join(root, 'examples'))).map(file => `examples/${file.split(path.sep).join('/')}`).filter(file => file.endsWith('.json'));
+  const lab = examples.filter(file => file.startsWith('examples/quality/'));
+  assert.ok(lab.length > 0 && lab.every(file => !files.has(file)));
+  for (const file of lab) examples.splice(examples.indexOf(file), 1);
   for (const file of [...examples, 'schema.json', 'docs/agent-guide.md', 'docs/art-workflow.md', 'docs/agent-craft.md', 'docs/agent-quick-start.md', 'LICENSE']) assert.ok(files.has(file), `${file} is installed`);
   for (const [file, data] of files) {
     if (!file.endsWith('.md')) continue;

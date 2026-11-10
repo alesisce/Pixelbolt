@@ -132,13 +132,14 @@ async function walk(base, relative) {
   }
   return found;
 }
-// Everything `npm pack` ships: package.json and the entries of its `files` list. A test compares this with npm's own list.
+// Everything `npm pack` ships: package.json and the entries of its `files` list, less what an entry starting with "!"
+// leaves out (a folder or a file). A test compares this with npm's own list.
 export async function packageFiles(base = root) {
-  const found = [];
-  for (const entry of ['package.json', ...JSON.parse(await readFile(path.join(base, 'package.json'), 'utf8')).files]) {
+  const found = [], listed = JSON.parse(await readFile(path.join(base, 'package.json'), 'utf8')).files, left = listed.filter(entry => entry.startsWith('!')).map(entry => entry.slice(1));
+  for (const entry of ['package.json', ...listed.filter(entry => !entry.startsWith('!'))]) {
     if ((await stat(path.join(base, entry))).isDirectory()) found.push(...await walk(base, entry)); else found.push(entry);
   }
-  return found.sort();
+  return found.filter(file => !left.some(out => file === out || file.startsWith(`${out}/`))).sort();
 }
 // The Studio is a user's download, so it leaves out the files written for contributors in a checkout: AGENTS.md (the
 // maintainer rules, which a user's coding agent would read as its own in that folder) and llms.txt (a checkout's

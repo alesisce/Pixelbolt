@@ -376,7 +376,7 @@ async function helpTopic([topic, ...words]) {
   const name = words.length ? words.join(' ') : undefined;
   if (['quickstart', 'quick-start', 'start'].includes(topic)) {
     if (name !== undefined) throw new Error('the quick start has no sections; run pixelbolt help quickstart');
-    return helpText(undefined);
+    return helpText(undefined, undefined, 'cli');
   }
   if (!TOPICS.includes(topic)) throw new Error(`Unknown help topic "${topic}"; topics: quickstart, ${TOPICS.join(', ')}`);
   if (topic === 'presets' || topic === 'preset') {

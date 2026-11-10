@@ -41,9 +41,20 @@ export function helpDocument(topic, text, name, via = 'mcp') {
   return [lines[0], '', ...lines.slice(sections[i].index, end(i))].join('\n').trimEnd() + '\n';
 }
 
+// The quick start has a section for each interface, and a reader gets its own: an MCP client the tools, a shell the
+// commands. The file itself holds both.
+const NOT_FOR = { mcp: 'The commands', cli: 'The tools' };
+export function quickStart(text, via = 'mcp') {
+  const lines = text.replace(/\r\n/g, '\n').split('\n'), from = lines.indexOf(`## ${NOT_FOR[via]}`);
+  if (from < 0) return text;
+  const next = lines.findIndex((line, index) => index > from && line.startsWith('## '));
+  return [...lines.slice(0, from), ...(next < 0 ? [] : lines.slice(next))].join('\n');
+}
+
 // A document topic as text: the quick start without a topic, a guide (whole with its sections listed, or one section),
 // a schema or the example as written.
 export async function helpText(topic, name, via = 'mcp') {
   const file = topic === undefined ? QUICK_START : HELP_TOPICS[topic], text = await readFile(new URL(file, import.meta.url), 'utf8');
+  if (topic === undefined) return quickStart(text, via);
   return SECTIONED.has(topic) ? helpDocument(topic, text.replace(/\r\n/g, '\n'), name, via) : text;
 }

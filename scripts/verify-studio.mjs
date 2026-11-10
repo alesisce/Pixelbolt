@@ -147,7 +147,10 @@ async function verify({ archive, dir, pinned = true, allowDev = false, keep = fa
     return `${info.Target}`;
   });
   await check(`app/ holds every entry of package.json's files list but the contributor files (${NOT_IN_STUDIO.join(', ')}), and no demo, test or development script`, () => {
-    assert.deepEqual(pkg.files.filter(entry => !NOT_IN_STUDIO.includes(entry) && !files.some(file => file === `app/${entry}` || file.startsWith(`app/${entry}/`))), []);
+    const holds = entry => files.some(file => file === `app/${entry}` || file.startsWith(`app/${entry}/`));
+    assert.deepEqual(pkg.files.filter(entry => !entry.startsWith('!') && !NOT_IN_STUDIO.includes(entry) && !holds(entry)), []);
+    // An entry starting with "!" names what the package leaves out.
+    assert.deepEqual(pkg.files.filter(entry => entry.startsWith('!') && holds(entry.slice(1))), []);
     assert.deepEqual(NOT_IN_STUDIO.filter(entry => files.includes(`app/${entry}`)), []);
     assert.deepEqual(files.filter(file => FORBIDDEN.some(folder => file.startsWith(`${folder}/`) || file.startsWith(`app/${folder}/`)) || /\.test\.[cm]?js$/.test(file)), []);
     return `${files.filter(file => file.startsWith('app/')).length} files`;

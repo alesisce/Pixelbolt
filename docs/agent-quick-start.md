@@ -1,6 +1,6 @@
 # Pixelbolt quick start
 
-Pixelbolt turns a small JSON recipe into exact pixels: sprites, sprite sheets, tiles, icons, effects and short animations, exported as PNG, atlas JSON, APNG, GIF or numbered frames for video. It is local and deterministic, and no image model is involved. You write the recipe, look at what it draws, fix it with small patches, then export. This page covers most tasks. Call `pixel_help` with a `topic` only when you need more (see the last section).
+Pixelbolt turns a small JSON recipe into exact pixels: sprites, sprite sheets, tiles, icons, effects and short animations, exported as PNG, atlas JSON, APNG, GIF or numbered frames for video. It is local and deterministic, and no image model is involved. You write the recipe, look at what it draws, fix it with small patches, then export. This page covers most tasks; the last section lists the longer references for when you need more.
 
 ## A complete recipe
 
@@ -45,16 +45,32 @@ Coordinates are whole pixels from the top-left, and y points down. Shapes are ne
 
 1. **`pixel_validate`** `{project}` checks a recipe without images and returns a `revision` id. Every tool that takes `project` also takes `revision`, so send the full recipe once and use the id afterwards. Revisions persist in the server's output folder.
 2. **`pixel_inspect`** returns a PNG contact sheet of every frame. Options: `animation` (playback order), `frames`, `region: {x, y, w, h}` to zoom, `grid: true` for exact palette-key rows with rulers, `view: silhouette | grayscale | onion | tile | parts` (parts colours each pixel by the part that drew it), `native: true`, `diagnostics: true` and `guides` (a horizon, vanishing points or an isometric grid drawn over the image).
-3. **`pixel_patch`** `{revision, changes}` edits in order and returns a before/after image listing every pixel that changed:
-   - `{"paint": "frames[blink]", "value": [{"x": 4, "y": 5, "color": "k"}]}` sets exact pixels after all layers (`transparent` erases).
-   - `{"grid": "frames[rest]", "value": {"x": 3, "y": 4, "rows": ["kk.", ".k."]}}` paints a small region; dots keep pixels.
-   - `{"set": "frames[up].duration", "value": 250}`, `{"insert": "frames[-]", "value": {...}}` and `{"remove": "animations.blink"}` edit the source by path.
-   - `recolor`, `move` and `cleanup` (proposed fixes for doubled corners and stray pixels) work on regions.
+3. **`pixel_patch`** `{revision, changes}` applies the changes below in order and returns a before/after image listing every pixel that changed.
 4. **`pixel_render`** `{revision}` exports a new folder: sprite sheet, atlas, Godot 4 SpriteFrames (`.tres`), frames, APNG animations, CSS and a preview page. Add `gif: {}` for GIFs at the frames' own size (`gif: {scale: 8}` only to enlarge one for posting), or `sequence: {fps: 30, size: "1080p"}` for PNG frames for a video editor. Pass `expect` with what the user asked for (`{width, height, frames, colors, transparent, loop, gifScale}`; `frames` is what each animation plays, or per animation such as `{"idle": 4, "walk": 8}`): the reply's `check` lists every file that misses it and the call that fixes it. When the user named files, add `saveAs: {sheet: "assets/hero.png", gif: "assets/hero.gif"}` to write them there too (`godot: "assets/hero.tres"` for Godot, beside the sheet; an autotile set also has `tileset`).
-5. **`pixel_compile`** `{source}` builds an ordinary recipe from a source format: `pixelforge-fluid` (simulated fire, smoke, explosions, steam, magic, water, honey, slime), `pixelforge-wave` (looping interference and portals), `pixelforge-bodies` (balls and blocks that bounce, stack, topple and rest), `pixelforge-crystal` (crystals, geodes and snowflakes that grow and rest), `pixelforge-powder` (falling-sand sandboxes: burning, collapse, lava meeting water, blasts), `pixelforge-fx` (particles such as sparks and debris, and spell shapes: slashes, shockwave rings, beams, lightning, magic circles, impact stars, fireballs, cel water streams and drops; reviewed sources in `examples/*.fx.json`), `pixelforge-poses` (characters from parts and bones, with walk, run and attack templates), `pixelforge-autotile` (47- or 16-tile terrain sets, drawn from a `terrain` description; a second image shows every tile over a test map) or `pixelforge-normals` (a lighting normal pass). The matching topic has the format. `{preset: "smoke-puff"}` compiles a shipped preset instead (below); `size` and `frames` fit either to the canvas and frame count asked for.
+5. **`pixel_compile`** `{source}` builds an ordinary recipe from one of the source formats below and returns its contact sheet; `{preset: "smoke-puff"}` compiles a shipped preset instead. `size` and `frames` fit either to the canvas and frame count asked for.
 6. **`pixel_scene`** composes assets into a room with tilemaps, cues and lighting (`view: "depth"` shows what is drawn in front of what); **`pixel_import`** turns a native PNG into an editable recipe.
 
-From a shell, the same commands are `node bin/pixelbolt.js validate | inspect | patch | render | compile | scene | import`, with `--help` for options; `autotile <source> --out <new.json> --preview <new.png>` also writes a tileset's test map.
+## The commands
+
+Run each as `node bin/pixelbolt.js <command>`; `--help` lists every option. Replies are JSON, a recipe is a file, and no command writes over an existing file without `--force`: save each edit and each export under a new name.
+
+1. **`validate <recipe.json>`** checks a recipe without images: its size, frames and animations, or every error with its path.
+2. **`inspect <recipe.json> --out <sheet.png>`** writes a PNG contact sheet of every frame to look at. Options: `--animation <name>` (playback order), `--frames a,b`, `--region x,y,w,h` to zoom, `--grid` for exact palette-key rows with rulers, `--view silhouette|grayscale|onion|tile|parts` (parts colours each pixel by the part that drew it), `--native` (a 1× sheet beside it), `--diagnostics` and `--guides` (a horizon, vanishing points or an isometric grid drawn over the image).
+3. **`patch <recipe.json> --changes <changes.json> --out <new.json> --image <diff.png>`** applies the changes below in order, saves the new recipe and a before/after image, and lists every pixel that changed.
+4. **`render <recipe.json> --out <new folder>`** exports a sprite sheet, atlas, Godot 4 SpriteFrames (`.tres`), frames, APNG animations, CSS and a preview page. Pass `--expect '{"width":32,"height":32,"frames":8}'` with what the user asked for (`width, height, frames, colors, transparent, loop`; `frames` is what each animation plays, or per animation such as `{"idle": 4, "walk": 8}`): the reply's `check` lists every file that misses it and how to fix it. `gif <recipe.json> --out <new.gif>` makes a GIF at the frames' own size (`--scale 8` only to enlarge one for posting), and `sequence <recipe.json> --out <new folder> --fps 30 --size 1080p` PNG frames for a video editor.
+5. **`compile <source.json> --out <recipe.json>`** builds an ordinary recipe from one of the source formats below; `compile --preset smoke-puff --out <recipe.json>` compiles a shipped preset instead. `--size 32x32` and `--frames 8` fit either to the canvas and frame count asked for. `autotile <source.json> --out <recipe.json> --preview <map.png>` also draws a tile set over a test map.
+6. **`scene <scene.json> --image <view.png>`** composes assets into a room with tilemaps, cues and lighting (`--view depth` shows what is drawn in front of what; `--out <new folder>` exports it); **`import <image.png> --out <recipe.json>`** turns a native PNG into an editable recipe.
+
+## Changes and sources
+
+A patch's changes are a list, applied in order:
+
+- `{"paint": "frames[blink]", "value": [{"x": 4, "y": 5, "color": "k"}]}` sets exact pixels after all layers (`transparent` erases).
+- `{"grid": "frames[rest]", "value": {"x": 3, "y": 4, "rows": ["kk.", ".k."]}}` paints a small region; dots keep pixels.
+- `{"set": "frames[up].duration", "value": 250}`, `{"insert": "frames[-]", "value": {...}}` and `{"remove": "animations.blink"}` edit the source by path.
+- `recolor`, `move` and `cleanup` (proposed fixes for doubled corners and stray pixels) work on regions.
+
+A source is a document whose `format` names what compiles it: `pixelforge-fluid` (simulated fire, smoke, explosions, steam, magic, water, honey, slime), `pixelforge-wave` (looping interference and portals), `pixelforge-bodies` (balls and blocks that bounce, stack, topple and rest), `pixelforge-crystal` (crystals, geodes and snowflakes that grow and rest), `pixelforge-powder` (falling-sand sandboxes: burning, collapse, lava meeting water, blasts), `pixelforge-fx` (particles such as sparks and debris, and spell shapes: slashes, shockwave rings, beams, lightning, magic circles, impact stars, fireballs, cel water streams and drops; reviewed sources in `examples/*.fx.json`), `pixelforge-poses` (characters from parts and bones, with walk, run and attack templates), `pixelforge-autotile` (47- or 16-tile terrain sets, drawn from a `terrain` description, shown over a test map) or `pixelforge-normals` (a lighting normal pass). The matching help topic has each format.
 
 ## Working well
 

@@ -43,12 +43,14 @@ Coordinates are whole pixels from the top-left, and y points down. Shapes are ne
 
 ## The tools
 
-1. **`pixel_validate`** `{project}` checks a recipe without images and returns a `revision` id. Every tool that takes `project` also takes `revision`, so send the full recipe once and use the id afterwards. Revisions persist in the server's output folder.
-2. **`pixel_inspect`** returns a PNG contact sheet of every frame. Options: `animation` (playback order), `frames`, `region: {x, y, w, h}` to zoom, `grid: true` for exact palette-key rows with rulers, `view: silhouette | grayscale | onion | tile | parts` (parts colours each pixel by the part that drew it), `native: true`, `diagnostics: true` and `guides` (a horizon, vanishing points or an isometric grid drawn over the image).
-3. **`pixel_patch`** `{revision, changes}` applies the changes below in order and returns a before/after image listing every pixel that changed.
-4. **`pixel_render`** `{revision}` exports a new folder: sprite sheet, atlas, Godot 4 SpriteFrames (`.tres`), frames, APNG animations, CSS and a preview page. Add `gif: {}` for GIFs at the frames' own size (`gif: {scale: 8}` only to enlarge one for posting), or `sequence: {fps: 30, size: "1080p"}` for PNG frames for a video editor. Pass `expect` with what the user asked for (`{width, height, frames, colors, transparent, loop, gifScale}`; `frames` is what each animation plays, or per animation such as `{"idle": 4, "walk": 8}`): the reply's `check` lists every file that misses it and the call that fixes it. When the user named files, add `saveAs: {sheet: "assets/hero.png", gif: "assets/hero.gif"}` to write them there too (`godot: "assets/hero.tres"` for Godot, beside the sheet; an autotile set also has `tileset`).
-5. **`pixel_compile`** `{source}` builds an ordinary recipe from one of the source formats below and returns its contact sheet; `{preset: "smoke-puff"}` compiles a shipped preset instead. `size` and `frames` fit either to the canvas and frame count asked for.
-6. **`pixel_scene`** composes assets into a room with tilemaps, cues and lighting (`view: "depth"` shows what is drawn in front of what); **`pixel_import`** turns a native PNG into an editable recipe.
+The tool list you loaded says what each tool takes. This is the order to use them in, and what the list leaves out.
+
+1. **`pixel_validate`** `{project}` checks a recipe and returns a `revision` id. Send the full recipe once and the id afterwards: every tool that takes `project` takes `revision`, and revisions persist in the server's output folder.
+2. **`pixel_inspect`** `{revision}` returns a contact sheet of every frame to look at; `grid: true` with a `region` reads exact palette-key rows before you change pixels.
+3. **`pixel_patch`** `{revision, changes}` applies the changes below in order and returns a before/after image: check it changed only what you meant.
+4. **`pixel_render`** `{revision, expect}` exports the files. `expect` holds what the user asked for (`{width, height, frames, colors, transparent, loop, gifScale}`; `frames` is what each animation plays, or per animation such as `{"idle": 4, "walk": 8}`), and the reply's `check` lists every file that misses it with the call that fixes it. `gif: {}` adds GIFs at the frames' own size (`gif: {scale: 8}` only to enlarge them for posting, with `gifScale: 8` in `expect`); `saveAs` writes files where the user named them.
+5. **`pixel_compile`** `{source}` builds an ordinary recipe from one of the source formats below, and `{preset: "smoke-puff"}` compiles a shipped preset; `size` and `frames` fit either to the canvas and frame count asked for.
+6. **`pixel_scene`** composes assets into a room with tilemaps, cues and lighting; **`pixel_import`** turns a native PNG into an editable recipe.
 
 ## The commands
 

@@ -4,6 +4,16 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### Scenes, tile sets and the MCP route, run cold
+
+Four kinds of work that had not been tried by a fresh agent (a character from a rig, a terrain tile set, a lit scene, and everything through the MCP server) were, on the build from before this work and on the current one. The rig took 5 commands where it had taken about 12; tiles, scenes and MCP took as many as before, and these come from what both said.
+
+- A compiled tile set says how a map names its tiles: the reply's `tilemap` holds the cell size and the legend entry to paste into a tilemap (`{"frames": ["meadow-{mask}-a", ...], "weights": [4, 4, 4, 1], "autotile": "blob"}`). An agent laying a grass floor listed the set's 188 frames with a script to find that a tile is `meadow-255-a`.
+- The craft notes carry a scene to start from (a tile floor, a fire, a lit character, a light), which a test draws as written, and say what makes a night: `scope: "all"` lights assets without a normal pass, `lit: false` leaves a fire its colours. Both agents had hunted through the scene schema, and neither got the ground to darken. The notes also say what lies under a terrain (rock under snow is a tile on a layer below, or a `layers` set), which both tile runs had missed.
+- The skill has a row each for tiles and for scenes, with the command that shows the result (`autotile ... --preview <map.png>`, `scene <scene.json> --image <view.png>`); the scene command was nowhere in it.
+- A render names its sheet and its atlas (`"sheet": "goblin.png", "atlas": "goblin.atlas.json"`) ahead of the list of files.
+- The quick start an MCP client reads no longer repeats the tool list it has already loaded: its tools section is the order to work in and what the list leaves out, about 1 KB shorter.
+
 ### What six cold runs still tripped on
 
 Three tasks were given to fresh agents on the checkout from before this work and on the current one. The campfire and the potion took fewer commands with no failed one (5 against 8 and two helper scripts; 8 against 12 with one failure); fixing a broken recipe did not get shorter, and both runs named why. These follow from what they reported.

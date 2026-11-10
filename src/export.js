@@ -390,7 +390,10 @@ export function outputSummary(out, files, listFiles) {
   // What the preview page runs on (its player, a scene's copies of the modules it draws with) and the README are in
   // the folder for the page, not to deliver: a reply lists what a game, a site or a post takes.
   const support = file => !file.includes('/') && (file.endsWith('.js') || file === 'README.txt');
+  // The two files a game takes first, by what they are: among a dozen names an agent asked which one was the sheet.
+  const atlas = relative.find(file => !file.includes('/') && file.endsWith('.atlas.json')), sheet = atlas && `${atlas.slice(0, -'.atlas.json'.length)}.png`;
   return {
+    ...(atlas && relative.includes(sheet) && { sheet, atlas }),
     files: listFiles ? relative : relative.filter(file => !file.startsWith('frames/') && !(file.startsWith('animations/') && animations > 16) && !support(file)),
     folders: { frames: count('frames'), animations },
     ...(files.removed && { removed: files.removed.map(file => path.relative(out, file).split(path.sep).join('/')) })

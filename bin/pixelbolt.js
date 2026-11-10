@@ -12,7 +12,7 @@ import { resizeRecipe, resizeWarning, keepFrames } from '../src/resize.js';
 import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
-import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
+import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, tilemapEntry, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 // A reader that stops early (`| head -1`) closes the pipe: stop quietly, as other command-line tools do. Commands print
 // their reply after writing their files, so only the rest of the reply is lost.
@@ -245,7 +245,7 @@ async function readResolved(file, input = INPUT_FILE) {
 const inputsOf = input => [...(input.file === '-' ? [] : [path.resolve(input.file)]), ...input.resolution.files];
 // A bundle's files relative to its folder, leaving out each frame (frames/<name>.png) and, past 16, each animation
 // unless --list-files: the reply already names the frames and animations.
-const bundleFiles = (directory, files, options) => { const { files: listed, removed } = outputSummary(directory, files, options['list-files'] === true); return { directory: shown(directory), files: listed, ...(removed && { removed }) }; };
+const bundleFiles = (directory, files, options) => { const { files: listed, removed, sheet, atlas } = outputSummary(directory, files, options['list-files'] === true); return { directory: shown(directory), ...(sheet && { sheet, atlas }), files: listed, ...(removed && { removed }) }; };
 // The documents whose shared-palette link carries over to the recipe they are or compile to (a normal source's recipe
 // and a scene's assets do not): every kind src/resolve.js resolves a palette for but powder, whose source has no
 // palette to link (its colours are its materials', and the compiler refuses a `palette` field).
@@ -537,7 +537,9 @@ try {
       // The metadata goes to a file or nowhere: a rig's runs to a hundred kilobytes, which no reply should carry. The
       // hint to save it comes only where a next step reads it: a rig's motion review, a tile set's masks, an import.
       const reviewed = command !== 'compile' || ['pixelforge-poses', 'pixelforge-autotile', undefined].includes(input.document?.format);
-      print({ ok: true, ...written, ...(kept && { kept }), ...(resized && { width: value.width, height: value.height }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
+      // A tile set comes with how a map names its tiles: the legend entry to paste into a tilemap.
+      const tilemap = preview ? tilemapEntry(value) : null;
+      print({ ok: true, ...written, ...(kept && { kept }), ...(resized && { width: value.width, height: value.height }), ...(tilemap && { tilemap }), ...(warnings && { warnings }), ...(((metadata && !options.metadata && reviewed) || (preview && !options.preview)) && { hint: [metadata && !options.metadata && reviewed && `The metadata${warnings ? ' (what review tools and engines read: loop seams, pose contacts, tile masks)' : ''} was not saved; pass --metadata <new.json> to keep it.`, preview && !options.preview && 'Pass --preview <new.png> to see every tile in a test map.'].filter(Boolean).join(' ') }), ...(input && referenced(input)) });
     } else if (command === 'scene' && options.image !== undefined) {
       // One image at one time, as MCP pixel_scene returns it: color, grayscale or depth, with optional guides.
       if (options.out !== undefined || options['embed-recipe']) throw new Error('scene --image writes one image; export a bundle with --out instead');

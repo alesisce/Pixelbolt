@@ -137,6 +137,7 @@ Change a recipe with small edits instead of rewriting it. Over MCP, send the ful
 | `{"set": path, "value": v}` | Replace a value, or add an object field |
 | `{"insert": path, "value": v}` | Insert into a list before the selected item; `[-]` appends |
 | `{"remove": path}` | Delete an object field or list item |
+| `{"set": "frames[*].layers[plume].palette", "value": {"s": "#6a2c91"}}` | `[*]` is every item of a list, in a `set` or `remove`: here one layer recoloured in every frame, leaving other layers that use the same key. Items without what the rest of the path names are passed over |
 | `{"paint": "frames[blink]", "value": [{"x": 9, "y": 7, "color": "k"}]}` | Set exact pixels in final canvas coordinates after all layers; `transparent` erases |
 | `{"grid": "frames[blink]", "value": {"x": 9, "y": 7, "rows": [".kk", "~k."], "erase": "~"}}` | Compact correction; dots/spaces preserve, explicit erase clears |
 | `{"move": "frames[blink]", "value": {"x": 9, "y": 7, "w": 3, "h": 2, "dx": 1, "dy": 0}}` | Move selected RGBA, clearing source; overlapping moves retain corrections |

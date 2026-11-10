@@ -8,6 +8,8 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 - `inspect <recipe> --palette` (MCP `pixel_inspect` `palette: true`) lists each palette key with its colour, its pixels and the layers or pose parts it colours, a ramp's keys together dark to light: for the fox, `R r o y` on the chest, hips and head, `v w` on the tail tip and bib. Two agents asked for a colour variant rendered the sheet and guessed which keys were the fur.
 - The rows of `inspect --beside` carry their names in the image, above each sheet.
+- A patch path takes `[*]`, every item of a list, in a `set` or `remove`: `{"set": "frames[*].layers[plume].palette", "value": {"s": "#6a2c91"}}` recolours the knight's plume in all 18 frames and leaves the shield's emblem, drawn with the same key. An agent asked for that copied the pose source and gave the shield keys of its own. The reply counts the places matched.
+- The workflow shows where slope characters go in a map as a picture of the rows, with the rule in a sentence, in place of an escaped one-line example.
 - A tile template draws a level of your own: `"preview": {"rows": [...]}` (`#` terrain, `.` nothing, the set's slope characters) is drawn by `--preview` in place of the test map, up to 4096 pixels a side, so a level strip needs no scene file. A fresh agent asked for one wrote a script to build the scene JSON.
 
 ### Help that answers with a page, not a book; five more cold runs

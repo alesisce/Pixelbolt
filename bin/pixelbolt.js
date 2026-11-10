@@ -124,7 +124,8 @@ Input may be a pose source, or a compiled recipe with --metadata meta.json. --gr
 metadata's ground.
 --max-cells 1-256 samples long sequences with explicit omission metadata; evenly spaced samples can alias with a
 repeating pattern (a strobe alternating A and B), so pick positions with --step and --offset.
-Patch: --changes holds a list applied in order: {"set": "palette.c", "value": "#8a5a2c"} (any path, as errors write them),
+Patch: --changes holds a list applied in order: {"set": "palette.c", "value": "#8a5a2c"} (any path, as errors write them;
+[*] is every item of a list: {"set": "frames[*].layers[plume].palette", "value": {"s": "#6a2c91"}} recolours one layer),
 {"insert": "frames[-]", "value": {...}}, {"remove": "animations.blink"}, {"paint": "frames[blink]", "value": [{"x": 4, "y": 5, "color": "k"}]},
 {"grid": "frames[rest]", "value": {"x": 3, "y": 4, "rows": ["kk.", ".k."]}}, and recolor, move and cleanup on regions.
 Patch accepts correction overlays as --changes; a changed base fails with a fingerprint conflict.

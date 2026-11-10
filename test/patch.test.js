@@ -149,3 +149,24 @@ test('a change to many frames is one summary in a reply, and a change to a few s
   const partly = briefComparison(compareProjects(renderProject(before), renderProject(after)));
   assert.deepEqual([partly.frames.changed.count, partly.frames.changed.frames, partly.frames.changed.pixels, partly.frames.unchanged], [12, 'f-0 … f-11', 12, { count: 18, frames: 'f-12 … f-29' }]);
 });
+
+test('[*] in a set or remove reaches every item of a list, and passes over items that lack the rest of the path', () => {
+  const layer = (name, color) => ({ name, ops: [{ op: 'rect', x: name === 'coat' ? 0 : 2, y: 0, w: 2, h: 2, color }] });
+  const recipe = { version: 1, name: 'pair', width: 4, height: 2, palette: { r: '#ff0000', p: '#8000ff' },
+    frames: [{ name: 'a', layers: [layer('coat', 'r'), layer('plume', 'r')] }, { name: 'b', duration: 80, layers: [layer('coat', 'r')] }, { name: 'c', layers: [layer('plume', 'r'), layer('coat', 'r')] }] };
+  const { recipe: next, edits } = patchRecipe(recipe, [{ set: 'frames[*].layers[plume].palette', value: { r: 'p' } }, { set: 'frames[*].duration', value: 120 }]);
+  // The plume alone changes colour, in the two frames that have one; every frame takes the duration.
+  assert.deepEqual(edits, [{ set: 'frames[*].layers[plume].palette', matched: 2 }, { set: 'frames[*].duration', matched: 3 }]);
+  assert.deepEqual(next.frames.map(frame => [frame.duration, frame.layers.map(each => each.palette ?? null)]), [[120, [null, { r: 'p' }]], [120, [null]], [120, [{ r: 'p' }, null]]]);
+  const drawn = renderProject(next).frames.map(frame => [[...frame.data.subarray(0, 4)], [...frame.data.subarray(8, 12)]]);
+  assert.deepEqual(drawn, [[[255, 0, 0, 255], [128, 0, 255, 255]], [[255, 0, 0, 255], [0, 0, 0, 0]], [[255, 0, 0, 255], [128, 0, 255, 255]]]);
+  // remove: only where the field is; then nothing is left to match.
+  const cleared = patchRecipe(next, [{ remove: 'frames[*].layers[*].palette' }]);
+  assert.deepEqual([cleared.edits, cleared.recipe.frames.flatMap(frame => frame.layers.map(each => each.palette))], [[{ remove: 'frames[*].layers[*].palette', matched: 2 }], [undefined, undefined, undefined, undefined, undefined]]);
+  assert.throws(() => patchRecipe(cleared.recipe, [{ remove: 'frames[*].layers[*].palette' }]), /changes\[0\]\.remove: no item has what this path names/);
+  assert.throws(() => patchRecipe(recipe, [{ set: 'frames[*].layers[cape].palette', value: {} }]), /no item has what this path names/);
+  assert.throws(() => patchRecipe(recipe, [{ set: 'frames[*]', value: {} }]), /\[\*\] is followed by what to change in each item/);
+  assert.throws(() => patchRecipe(recipe, [{ set: 'palette[*].x', value: 1 }]), /\[\*\] needs a list, and palette is not one/);
+  assert.throws(() => patchRecipe(recipe, [{ insert: 'frames[*].layers[-]', value: layer('hat', 'r') }]), /\[\*\] is every item of a list, for set and remove/);
+  assert.throws(() => patchRecipe(recipe, [{ paint: 'frames[*]', value: [{ x: 0, y: 0, color: 'p' }] }]), /\[\*\] is every item of a list, for set and remove/);
+});

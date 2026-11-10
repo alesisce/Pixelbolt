@@ -137,6 +137,8 @@ test('CLI help topics print what pixel_help returns, and one section of a long g
   assert.ok(workflow.stdout.length < 2048 && help('guide').stdout.length < 3072);
   assert.match(help('workflow', 'particle').stdout, /^# .*\n\n## Particle effects\n\n> \d+ KB in this section, so here is its opening\. Its parts, .*Spell library \(\d KB\)/);
   assert.match(help('workflow', 'spell', 'library').stdout, /^# .*\n\n## Particle effects\n\n### Spell library\n/);
+  // A part is also reached through its section: help workflow "Rigid bodies" "Shapes".
+  assert.match(help('workflow', 'Rigid bodies', 'Shapes').stdout, /^# .*\n\n## Rigid bodies\n\n### Shapes, materials and walls\n/);
   assert.match(help('guide', 'gifScale').stdout, /> No section of guide starts with "gifScale"\. The \d+ paragraphs that mention it/);
   assert.ok(help('workflow', 'all').stdout.length > 200000);
   // JSON topics print their file, and presets read as the presets command does.

@@ -60,11 +60,15 @@ test('inspect --beside and pixel_inspect beside draw the variants in one image a
   const tool = async (name, args) => { const result = (await call('tools/call', { name, arguments: args })).result; return { ...result, info: JSON.parse(result.content[0].text) }; };
   const blue = (await tool('pixel_validate', { project: sprite('blue', '#0000ff') })).info.revision, green = (await tool('pixel_validate', { project: sprite('green', '#00ff00') })).info.revision;
   const both = await tool('pixel_inspect', { project: sprite('red', '#ff0000'), beside: [blue, green], frames: ['one'], scale: 2 });
-  assert.deepEqual(both.info.stack, [{ name: 'red', y: band, height: alone.height }, { name: blue, y: 2 * band + alone.height, height: alone.height }, { name: green, y: 3 * band + alone.height * 2, height: alone.height }]);
+  assert.deepEqual(both.info.stack, [{ name: 'red', y: band, height: alone.height }, { name: `blue ${blue}`, y: 2 * band + alone.height, height: alone.height }, { name: `green ${green}`, y: 3 * band + alone.height * 2, height: alone.height }]);
   const picture = decodePNG(Buffer.from(both.content.find(item => item.type === 'image').data, 'base64'));
   assert.deepEqual(pixel(picture, alone.gap + 2, both.info.stack[2].y + alone.gap + 2), [0, 255, 0, 255]);
   const refused = await tool('pixel_inspect', { project: sprite('red', '#ff0000'), beside: ['nosuchrevision'] });
   assert.equal(refused.isError, true);
+  // An option a tool lacks is named, with the options it has.
+  const guessed = await call('tools/call', { name: 'pixel_inspect', arguments: { project: sprite('red', '#ff0000'), besides: [blue], colours: true } });
+  assert.equal(guessed.error.code, -32602);
+  assert.match(guessed.error.message, /^Invalid tool arguments: pixel_inspect has no option "besides", "colours"; its options are .*\bbeside\b.*\bpalette\b/);
 });
 
 test('the palette report says which keys colour which layers, ramps together, for a colour variant', async t => {

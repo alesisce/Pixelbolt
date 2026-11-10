@@ -378,7 +378,7 @@ export function createToolRunner({ directory, root, version }) {
           if (beside !== undefined) {
             if (inspection.native || inspection.grid) throw new PixelError('beside', 'beside draws several recipes in one sheet; native and grid read one recipe at a time');
             const others = [];
-            for (const id of beside) { const other = renderProject(await read(id), layers === undefined ? {} : { layers }); others.push({ ...inspectProject(other, inspection), name: id }); }
+            for (const id of beside) { const other = renderProject(await read(id), layers === undefined ? {} : { layers }); others.push({ ...inspectProject(other, inspection), name: `${other.name} ${id}` }); }
             view = stackViews([{ ...view, name: project.name }, ...others]);
           }
         }
@@ -680,7 +680,10 @@ export async function startMCP({ directory = 'output', root = process.cwd(), inp
     const tool = tools.find(t => t.name === params?.name);
     if (!tool) { error(-32602, 'Unknown tool'); return; }
     let args = params.arguments ?? {}, parsed;
-    if (typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(k => !Object.hasOwn(tool.inputSchema.properties, k))) { error(-32602, 'Invalid tool arguments'); return; }
+    if (typeof args !== 'object' || args === null || Array.isArray(args)) { error(-32602, 'Invalid tool arguments: expected an object'); return; }
+    // An option the tool lacks is named, with the ones it has: an agent that guessed one reads what to use instead.
+    const unknown = Object.keys(args).filter(key => !Object.hasOwn(tool.inputSchema.properties, key));
+    if (unknown.length) { error(-32602, `Invalid tool arguments: ${tool.name} has no option ${unknown.map(key => JSON.stringify(key)).join(', ')}; its options are ${Object.keys(tool.inputSchema.properties).join(', ')}`); return; }
     try { ({ args, parsed } = parseTextArguments(args, tool.inputSchema.properties)); } catch (cause) { result({ isError: true, content: [textContent({ error: cause.message, path: cause.path })] }); return; }
     if (deeperThan(args, MAX_ARGUMENT_DEPTH)) { error(-32602, `Invalid tool arguments: nested more than ${MAX_ARGUMENT_DEPTH} levels deep`); return; }
     let reply;

@@ -289,7 +289,7 @@ export function briefListing({ guide, presets, note }) {
 // The presets a few words mean, so an agent reads the lines it can use and not the whole listing (8 KB for 73 presets,
 // read for one line): the presets whose names hold the most of the words, or, when no name holds any, those whose
 // lines do. Words are matched as written, ignoring case.
-export const FIND_NOTE = 'Matched by name, or by description when no name matches. Each reads: kind, size, frames, loop or one-shot, colours, what it is for. pixel_compile {"preset": "<name>"} (pixelbolt compile --preset <name> --out <new.json>) compiles one as it ships, with size and frames (--size, --frames) for the canvas and frame count asked for; pixel_help {"topic": "preset", "name": "<name>"} (pixelbolt presets <name>) returns its source to edit.';
+export const FIND_NOTE = 'Matched by name, or by description when no name matches. Each reads: kind, size, frames, loop or one-shot, colours, what it is for. pixel_compile {"preset": "<name>"} (pixelbolt compile --preset <name> --out <new.json>) compiles one as it ships, with size and frames (--size, --frames) for the canvas and frame count asked for; pixel_help {"topic": "preset", "name": "<name>"} (pixelbolt presets <name>) returns its source to edit. A colour is changed after compiling, with a patch of the palette: pixel_inspect with palette: true (inspect --palette) says which keys colour what.';
 export function presetWords(query, where = 'find') {
   const words = typeof query === 'string' ? query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean) : [];
   if (!words.length) throw new PixelError(where, 'expected words to look for, such as "fire" or "water splash"');

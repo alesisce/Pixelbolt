@@ -88,8 +88,10 @@ export function helpDocument(topic, text, name, via = 'mcp') {
     if (whole || first === undefined || Buffer.byteLength(lines.slice(section.index, section.end).join('\n')) <= PART_BYTES) return page(lines.slice(section.index, section.end));
     return page([lines[section.index], '', `> ${kilobytes(lines.slice(section.index, section.end))} in this section, so here is its opening. Its parts, each read by its heading as a section is: ${section.parts.map(sized).join('; ')}. "${section.heading} all" is the whole section.`, ...lines.slice(section.index + 1, first)]);
   }
+  // A part by its heading, or by its section's heading and then its own ("Rigid bodies Shapes").
   for (const parent of wanted ? sections : []) {
-    const part = pick(parent.parts);
+    const own = parent.heading.toLowerCase(), within = wanted.startsWith(`${own} `) ? wanted.slice(own.length).trim() : null;
+    const part = pick(parent.parts) ?? (within ? parent.parts.find(item => item.heading.toLowerCase().startsWith(within)) : undefined);
     if (part) return page([lines[parent.index], '', ...lines.slice(part.index, part.end)]);
   }
   const { found, more } = wanted ? mentions(lines, sections, name.trim()) : { found: [] };

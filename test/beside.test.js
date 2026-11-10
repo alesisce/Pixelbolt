@@ -76,13 +76,13 @@ test('the palette report says which keys colour which layers, ramps together, fo
   const use = paletteUse(renderProject(figure, { owners: true }));
   // The coat's ramp dark to light with the layers each key colours, most first; then the rest by pixels; then what
   // draws nothing; a translucent key over another colour is a blend that no key names.
-  assert.deepEqual(use, { ramps: [['a #802020: 13 px on coat, head', 'b #c04040: 3 px on coat']], others: ['s #e0b090: 2 px on head', 'k #101010: 1 px on head'], unused: ['x', 'glass'], blended: 1 });
+  assert.deepEqual(use, { ramps: [['a #802020: 13 px on coat, head', 'b #c04040: 3 px on coat']], others: ['s #e0b090: 2 px on head', 'k #101010: 1 px on head'], unused: ['x', 'glass'], blended: 1, layers: 'coat, head, visor' });
   assert.throws(() => paletteUse(renderProject(figure)), /palette needs the project rendered with \{ owners: true \}/);
   // Two keys of one colour can't be told apart in the pixels: the first is counted, and `same` says so.
   const twin = paletteUse(renderProject({ ...figure, palette: { ...figure.palette, x: '#802020' } }, { owners: true }));
   assert.deepEqual([twin.same, twin.unused, twin.ramps], [['x is the colour of a, and counted there'], ['glass'], use.ramps]);
   // A recipe without ramps lists its keys under `keys`.
-  assert.deepEqual(Object.keys(paletteUse(renderProject({ ...figure, ramps: undefined }, { owners: true }))), ['keys', 'unused', 'blended']);
+  assert.deepEqual(Object.keys(paletteUse(renderProject({ ...figure, ramps: undefined }, { owners: true }))), ['keys', 'unused', 'blended', 'layers']);
   // inspect --palette and pixel_inspect palette carry it.
   const dir = await mkdtemp(path.join(os.tmpdir(), 'pixelbolt-palette-')); t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(path.join(dir, 'figure.json'), JSON.stringify(figure));

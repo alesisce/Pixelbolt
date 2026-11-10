@@ -1477,7 +1477,8 @@ export function pictureSheet({ palette = {}, headings = [], rows: lines, scale =
 // parts) it colours most, so "the fur" or "the jacket" is a set of keys to change together. Keys of one ramp are
 // listed together, dark to light, then the rest by pixels; `unused` names keys that draw nothing and `blended` counts
 // pixels whose colour is no key's (two translucent colours over each other). Pixels are told apart by colour, so keys
-// that share a colour are counted under the first of them, and `same` says which. The project is rendered with owners.
+// that share a colour are counted under the first of them, and `same` says which. `layers` names every layer that
+// draws, in drawing order: what frames[*].layers[<name>].palette recolours alone. The project is rendered with owners.
 export function paletteUse(project) {
   if (!project.ownerNames) fail('inspect.palette', 'palette needs the project rendered with { owners: true }, which records the layer that drew each pixel');
   const pack = (r, g, b, a) => ((r * 256 + g) * 256 + b) * 256 + a, keyOf = new Map(), use = new Map();
@@ -1502,7 +1503,7 @@ export function paletteUse(project) {
   };
   const ramps = (project.ramps ?? []).map(ramp => ramp.filter(key => use.has(key))).filter(ramp => ramp.length), ramped = new Set(ramps.flat());
   const others = [...use.keys()].filter(key => !ramped.has(key)).sort((a, b) => use.get(b).pixels - use.get(a).pixels), twins = new Set(same.map(text => text.split(' ')[0])), unused = Object.keys(project.palette).filter(key => !use.has(key) && !twins.has(key));
-  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(same.length && { same }), ...(unused.length && { unused }), ...(blended && { blended }) };
+  return { ...(ramps.length && { ramps: ramps.map(ramp => ramp.map(line)) }), ...(others.length && { [ramps.length ? 'others' : 'keys']: others.map(line) }), ...(same.length && { same }), ...(unused.length && { unused }), ...(blended && { blended }), layers: project.ownerNames.join(', ') };
 }
 
 // The same view of several recipes as one image, each sheet under the one before and left-aligned, with its name

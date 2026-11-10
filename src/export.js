@@ -386,8 +386,11 @@ export function outputSummary(out, files, listFiles) {
   const relative = files.map(file => path.relative(out, file).split(path.sep).join('/'));
   const count = prefix => relative.filter(file => file.startsWith(`${prefix}/`)).length;
   const animations = count('animations');
+  // What the preview page runs on (its player, a scene's copies of the modules it draws with) and the README are in
+  // the folder for the page, not to deliver: a reply lists what a game, a site or a post takes.
+  const support = file => !file.includes('/') && (file.endsWith('.js') || file === 'README.txt');
   return {
-    files: listFiles ? relative : relative.filter(file => !file.startsWith('frames/') && !(file.startsWith('animations/') && animations > 16)),
+    files: listFiles ? relative : relative.filter(file => !file.startsWith('frames/') && !(file.startsWith('animations/') && animations > 16) && !support(file)),
     frames: { directory: 'frames', count: count('frames') }, animations: { directory: 'animations', count: animations },
     ...(files.removed && { removed: files.removed.map(file => path.relative(out, file).split(path.sep).join('/')) })
   };

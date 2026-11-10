@@ -13,6 +13,7 @@ Three tasks were given to fresh agents on the checkout from before this work and
 - A recipe put on a smaller canvas with `--size` no longer warns about clipping in every later validate, render and GIF: what the cut leaves outside is taken out of its grids, stamps and pixels, and the cut is reported once, where it is made. (A turned or scaled part that hangs over the edge still says so.)
 - A patch's report writes a colour the palette no longer names as its hex (`"from": "#d9a566"`), where it wrote `"0"` and explained it in a `legend`.
 - The quick start says that `from` copies a frame as it was finally drawn, its `pixels` corrections too.
+- A render's or a scene's `files` lists what to deliver. The preview page's scripts and README.txt are in the folder but not in the list (a lit scene listed 13 of them); `--list-files` (MCP `listFiles`) still lists every file.
 
 ### A quick start for each reader, and less to carry
 

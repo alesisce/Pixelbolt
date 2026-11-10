@@ -94,8 +94,8 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
 
 Options: --force allows overwriting exported files, and removes an earlier export's frames the new one no longer has. No command writes over a file it reads, however the path is spelled (patch may save over the recipe it edits). '-' reads JSON from stdin, for one input a call. An option is given once; a list goes in one value, separated by commas.
 --embed-recipe on render or scene embeds the resolved recipe in exported PNGs (not scene asset passes).
-render and scene reply with their folder once and the files in it, leaving out frames/<name>.png and, past 16, each
-animation; --list-files lists every file. compile, autotile and import save their metadata only with --metadata <new.json>.
+render and scene reply with their folder once and the files in it to deliver, leaving out frames/<name>.png, past 16
+each animation, and what the preview page runs on (its scripts, README.txt); --list-files lists every file. compile, autotile and import save their metadata only with --metadata <new.json>.
 Palette references ({"$ref": "palette.json"}), scene asset files and a normals source's recipe resolve from the
 input file's folder.
 Inspect: --frames a,b or --animation name picks cells (* and ? in a name match frames: --frames 'flash-*');

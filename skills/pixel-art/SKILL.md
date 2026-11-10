@@ -25,7 +25,7 @@ Begin from the closest row. A preset or example compiled as it ships needs nothi
 | Terrain tiles | One material over another (snow over rock): the two-layer set in `help craft "Tiles and scenes"`. One material with its own edge: `examples/meadow.autotile.json`. Then `autotile <template.json> --out <recipe.json> --preview <map.png>`: look at the test map, and `render` the recipe for the sheet with its Godot TileSet and Tiled tileset |
 | A scene from pieces, a lit scene | `examples/forest-spirit-lit.scene.json`, then `scene <scene.json> --image <view.png> --scale 4` to look and `--out <directory>` to export. `help craft "Tiles and scenes"` has a scene to start from. Isometric: `examples/iso-tiles.json` laid out by `examples/iso-glade.scene.json` (`help craft "Isometric"`) |
 | An icon, a hand-drawn sprite, a caption | `examples/coin.json`, `examples/forest-spirit.json`, `examples/caption.json`, or `init <recipe.json>`. Read `help quickstart` first: it is the recipe format. |
-| An existing PNG to edit | `import <image.png> --out <recipe.json>` |
+| An existing PNG to edit | `import <image.png> --out <recipe.json>`; a sheet of frames takes `--frame 24x24` (the size of one frame) or `--atlas <atlas.json>` when it has one |
 | Frames for a video editor | `sequence <recipe> --out <directory> --fps 30 --size 1080p --seconds 4` (a preset or source works too): numbered PNGs with alpha, enlarged by a whole number, and a README with the ffmpeg command for one video file. `help craft "Exports and delivery"` |
 
 ## The loop

@@ -8,7 +8,7 @@ import { compileCrystals } from '../src/crystal.js';
 import { compilePowder } from '../src/powder.js';
 import { compileBodies } from '../src/bodies.js';
 import { readExpect, checkDelivery, briefCheck } from '../src/check.js';
-import { resizeRecipe, resizeWarning, resizeMargins, keepFrames, keepAnimations } from '../src/resize.js';
+import { readSize, resizeRecipe, resizeWarning, resizeMargins, keepFrames, keepAnimations } from '../src/resize.js';
 import { embedBundleRecipe, sameFiles, outputSummary, describeAnimations } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
 import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
@@ -88,7 +88,8 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
   pixelbolt scene <scene.json> --image view.png [--time ms] [--view color|grayscale|depth] [--scale 1-8]
                     [--guides json]        One enlarged view at one time; depth lists who covers whom
   pixelbolt overlay <recipe.json> --changes edits.json --out fixes.json [--selections regions.json]
-  pixelbolt import <image.png> --out recipe.json [--atlas atlas.json] [--name imported]
+  pixelbolt import <image.png> --out recipe.json [--atlas atlas.json | --frame 24x24 [--padding 1]] [--name imported]
+                                           A sprite sheet becomes its frames by its atlas, or by the size of one frame
                     [--embedded]         Recover the recipe carried inside the PNG instead of its pixels
   pixelbolt preview [file.json] [--port N] [--open]
                                            Studio for a recipe or scene; sources open as their compiled recipe.
@@ -165,7 +166,7 @@ const OPTIONS = {
   autotile: ['out', 'metadata', 'preview', 'force'],
   scene: ['out', 'force', 'image', 'time', 'view', 'scale', 'guides', 'list-files', 'embed-recipe'],
   overlay: ['changes', 'selections', 'out', 'force'],
-  import: ['out', 'name', 'atlas', 'metadata', 'force', 'embedded'],
+  import: ['out', 'name', 'atlas', 'frame', 'padding', 'metadata', 'force', 'embedded'],
   presets: ['full', 'find'],
   share: [],
   skill: ['project', 'dir', 'force']
@@ -397,8 +398,8 @@ async function presetsText(name, full = false, find) {
   if (find !== undefined) {
     if (name !== undefined || full) throw new Error('--find goes on its own: pixelbolt presets --find "water splash" lists the presets those words match');
     // Names are known without compiling anything, so a name match measures only the presets it lists.
-    const named = new Set(namedLike(await presetEntries(), presetWords(find, '--find')).map(entry => entry.name));
-    return rowsJSON(findListing(await listPresets({ budget: Infinity, ...(named.size && { only: entry => named.has(entry.name) }) }), find, '--find'));
+    const every = await presetEntries(), named = new Set(namedLike(every, presetWords(find, '--find')).map(entry => entry.name));
+    return rowsJSON(findListing(await listPresets({ budget: Infinity, ...(named.size && { only: entry => named.has(entry.name) }) }), find, '--find', every));
   }
   if (name === undefined) { const listing = await listPresets({ budget: Infinity }); return rowsJSON(full ? listing : briefListing(listing)); }
   if (full) throw new Error('--full goes with the listing (pixelbolt presets --full); pixelbolt presets <name> prints one preset\'s source');
@@ -571,7 +572,8 @@ try {
         value = createOverlay(input.document, await readProject(options.changes, '--changes'), options.selections ? await readProject(options.selections, '--selections') : {});
       } else {
         if (!positional[0] || positional[0] === '-') throw new Error('import requires a PNG filename');
-        const imported = importPNG(await readFile(positional[0]), { name: options.name ?? nameFromFile(positional[0]), atlas: options.atlas ? await readProject(options.atlas, '--atlas') : undefined });
+        const imported = importPNG(await readFile(positional[0]), { name: options.name ?? nameFromFile(positional[0]), atlas: options.atlas ? await readProject(options.atlas, '--atlas') : undefined,
+          ...(options.frame !== undefined && { frame: readSize(options.frame, '--frame') }), ...(options.padding !== undefined && { padding: Number(options.padding) }) });
         value = imported.recipe; metadata = imported.provenance;
       }
       if (options.metadata && !/\.json$/i.test(options.metadata)) throw new Error('--metadata must name a .json file');

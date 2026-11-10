@@ -102,3 +102,12 @@ test('a template draws a level of its own rows in place of the test map, as a sc
   assert.throws(() => compileAutotile({ ...ground, preview: { rows: ['#'.repeat(257)] } }), /257 by 1 tiles of 16 pixels is more than one picture holds/);
   assert.throws(() => compileAutotile({ ...ground, preview: { rows: [] } }), /autotile\.preview\.rows: expected 1–256 equal-width text rows of # \. \//);
 });
+
+test('a starter material given only new colours is told that it replaced the table\'s, with the fields to repeat', async () => {
+  const { compilePowder } = await import('../src/powder.js');
+  const source = materials => ({ format: 'pixelforge-powder', version: 1, name: 'glass', base: 'sandbox', width: 16, height: 16, background: 'transparent', materials, scene: [{ material: 'sand', rect: [4, 2, 8, 4] }], clips: { fall: { frames: 4 } } });
+  assert.throws(() => compilePowder(source({ sand: { colors: ['#f2c14e'] } })), /powder\.materials\.sand\.state: expected one of powder, liquid, gas, solid, fire; a material named as the starter table's replaces it whole, so repeat the fields it should keep: the table's sand is \{"state":"powder","density":16/);
+  // A material of the source's own gets the plain message, and the repeated fields compile.
+  assert.throws(() => compilePowder(source({ gold: { colors: ['#f2c14e'] } })), /powder\.materials\.gold\.state: expected one of powder, liquid, gas, solid, fire$/);
+  assert.equal(compilePowder(source({ sand: { state: 'powder', density: 16, colors: ['#f2c14e'] } })).recipe.frames.length, 4);
+});

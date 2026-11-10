@@ -111,7 +111,7 @@ const SCHEMA_ASK = {
   mcp: (topic, path) => `call pixel_help with topic "${topic}" and name "${path}"`,
   cli: (topic, path) => `run pixelbolt help ${topic} ${path}`
 };
-export function helpSchema(topic, text, name, via = 'mcp') {
+export function helpSchema(topic, text, name, via = 'mcp', presets = []) {
   const schema = JSON.parse(text), asked = name?.trim();
   if (asked?.toLowerCase() === 'all') return text;
   const deref = node => { while (node && typeof node.$ref === 'string' && node.$ref.startsWith('#/$defs/')) node = schema.$defs?.[node.$ref.slice(8)]; return node; };
@@ -135,7 +135,9 @@ export function helpSchema(topic, text, name, via = 'mcp') {
   // The example path is the largest part: the one a reader most often needs.
   const first = Object.entries(properties).sort((a, b) => bytes(b[1]) - bytes(a[1]))[0][0];
   return [`# ${schema.title ?? topic}${path ? `: ${path}` : ''}`, '', `> A schema of ${size(node)}, outlined. To read one part as JSON, ${SCHEMA_ASK[via](topic, under(first))} (a path of property names); "all" is the whole schema.`,
-    ...(deref(node)?.description ? ['', deref(node).description] : []), '', ...Object.entries(properties).map(line)].join('\n') + '\n';
+    ...(deref(node)?.description ? ['', deref(node).description] : []),
+    ...(!path && presets.length ? ['', `Shipped sources in this format, to start from (${via === 'mcp' ? 'pixel_help with topic "preset" and name' : 'pixelbolt presets <name>'}): ${presets.join(', ')}.`] : []),
+    '', ...Object.entries(properties).map(line)].join('\n') + '\n';
 }
 
 // The quick start has sections for one interface or the other, and a reader gets its own: an MCP client the tools, a
@@ -156,5 +158,9 @@ export function quickStart(text, via = 'mcp') {
 export async function helpText(topic, name, via = 'mcp') {
   const file = topic === undefined ? QUICK_START : HELP_TOPICS[topic], text = await readFile(new URL(file, import.meta.url), 'utf8');
   if (topic === undefined) return quickStart(text, via);
-  return SECTIONED.has(topic) ? helpDocument(topic, text.replace(/\r\n/g, '\n'), name, via) : isSchema(topic) ? helpSchema(topic, text, name, via) : text;
+  if (SECTIONED.has(topic)) return helpDocument(topic, text.replace(/\r\n/g, '\n'), name, via);
+  if (!isSchema(topic)) return text;
+  // The presets written in this format are the examples of it, named without compiling any.
+  const presets = name === undefined ? (await (await import('./presets.js')).presetEntries()).filter(entry => entry.kind === topic).map(entry => entry.name) : [];
+  return helpSchema(topic, text, name, via, presets);
 }

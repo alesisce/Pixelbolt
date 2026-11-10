@@ -69,7 +69,7 @@ A patch's changes are a list, applied in order:
 
 - `{"paint": "frames[blink]", "value": [{"x": 4, "y": 5, "color": "k"}]}` sets exact pixels after all layers (`transparent` erases).
 - `{"grid": "frames[rest]", "value": {"x": 3, "y": 4, "rows": ["kk.", ".k."]}}` paints a small region; dots keep pixels.
-- `{"set": "frames[up].duration", "value": 250}`, `{"insert": "frames[-]", "value": {...}}` and `{"remove": "animations.blink"}` edit the source by path.
+- `{"set": "frames[up].duration", "value": 250}`, `{"insert": "frames[-]", "value": {...}}` and `{"remove": "animations.blink"}` edit the source by path. A frame added to a recipe that names its animations plays only once its name is in one: `{"insert": "animations.spin.frames[-]", "value": "sparkle"}`.
 - `{"set": "palette.c", "value": "#8a5a2c"}` recolours everything drawn with that key, in every frame, without redrawing; `{"set": "frames[*].layers[plume].palette", "value": {"s": "#6a2c91"}}` recolours one layer alone (`[*]` is every item of a list).
 - `recolor`, `move` and `cleanup` (proposed fixes for doubled corners and stray pixels) work on regions.
 

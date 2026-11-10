@@ -193,7 +193,8 @@ function readPowder(given) {
     const m = n + 1, def = source.materials[name], path = `powder.materials.${name}`;
     if (!isObject(def)) fail(path, 'expected a material object');
     known(def, MATERIAL_FIELDS, path);
-    if (!Object.hasOwn(STATE_CODE, def.state)) fail(`${path}.state`, `expected one of ${POWDER_STATES.join(', ')}`);
+    // A starter material named again replaces the table's whole, so one given only new colours has lost its state.
+    if (!Object.hasOwn(STATE_CODE, def.state)) fail(`${path}.state`, `expected one of ${POWDER_STATES.join(', ')}${def.state === undefined && given.base === 'sandbox' && Object.hasOwn(SANDBOX.materials, name) ? `; a material named as the starter table's replaces it whole, so repeat the fields it should keep: the table's ${name} is ${JSON.stringify(SANDBOX.materials[name])}` : ''}`);
     const state = STATE_CODE[def.state];
     t.state[m] = state;
     // A solid that falls drops as a rigid piece, with every solid that falls touching it, once no fixed solid (one

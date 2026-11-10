@@ -262,6 +262,18 @@ test('finding presets by words lists the names that hold the most of them, else 
   assert.throws(() => findListing(listing, '--'), /find: expected words/);
 });
 
+test('a search word that names a kind of preset has that kind\'s presets named beside the name matches', () => {
+  const entry = (name, kind) => ({ name, kind, size: '8x8', frames: 4, plays: 'loop', colors: 3, for: `${name}.`, animations: { [name]: 4 } });
+  const listing = { guide: 'g', presets: [entry('sand-gate', 'fluid'), entry('hut-fire', 'powder'), entry('lava-falls', 'powder'), entry('portal', 'wave'), entry('campfire', 'fluid')] };
+  const sand = findListing(listing, 'sand');
+  assert.deepEqual([Object.keys(sand.presets), sand.also], [['sand-gate'], 'Kinds of preset those words also name: powder: hut-fire, lava-falls.']);
+  // A kind already among the matches is not named again, and a word that names no kind adds nothing.
+  assert.equal(findListing(listing, 'portal').also, undefined);
+  assert.equal(findListing(listing, 'campfire').also, undefined);
+  // The shell measures only the presets a name matches; every preset's name and kind is passed beside them.
+  assert.equal(findListing({ ...listing, presets: [listing.presets[0]] }, 'sand', 'find', listing.presets).also, sand.also);
+});
+
 test('finding a character lists the rigs, never the liquids that say they are not one, and a miss names the rigs to redraw', () => {
   const entry = (name, kind, about) => ({ name, kind, file: `examples/${name}.${kind}.json`, for: about, size: '8x8', frames: 2, plays: 'loop', colors: 3, animations: { main: '2 frames, loop' } });
   const listing = { guide: 'g', presets: [entry('honey', 'fluid', 'Honey: viscous liquid. A liquid, not a character.'), entry('pool', 'fluid', 'A simulated liquid, not a character.'),

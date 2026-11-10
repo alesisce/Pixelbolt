@@ -7,6 +7,8 @@ import path from 'node:path';
 import { crc32 } from '../src/png.js';
 import { decodePNG, importPNG } from '../src/import.js';
 import { renderProject } from '../src/core.js';
+import { encodePNG } from '../src/png.js';
+import { createBundle } from '../src/export.js';
 import { folderGIF } from '../src/frame-folder.js';
 
 // PNGs written by hand, so every colour type, bit depth and filter is exercised without another encoder.
@@ -125,4 +127,27 @@ test('gif-frames reads indexed and greyscale frames', async () => {
     const gif = folderGIF(directory, { fps: 10 });
     assert.deepEqual([gif.frames, gif.width, gif.height, gif.transparent, gif.colors], [2, 2, 2, true, 3]);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('a sheet with no atlas imports by the size of one frame: every drawn cell in reading order, pixel for pixel', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const coin = JSON.parse(await readFile(new URL('../examples/coin.json', import.meta.url), 'utf8')), project = renderProject(coin);
+  // The sheet Pixelbolt itself writes has a border of one pixel round each frame; it is found without being given.
+  const sheet = (await createBundle(coin)).files.get('coin.png'), made = importPNG(sheet, { name: 'coin', frame: [project.width, project.height] }).recipe;
+  const back = renderProject(made);
+  assert.deepEqual([back.width, back.height, back.frames.map(frame => frame.name)], [project.width, project.height, project.frames.map((_, index) => `coin-${index}`)]);
+  back.frames.forEach((frame, index) => assert.deepEqual(frame.data, project.frames[index].data, `frame ${index}`));
+  // No animation is written, so a frame added later plays with the rest.
+  assert.equal(made.animations, undefined);
+  // Frames flush to each other in two rows, the last cell empty: three frames, and a stated padding of 0.
+  const data = new Uint8ClampedArray(4 * 4 * 4);
+  for (const [x, y, color] of [[0, 0, [255, 0, 0, 255]], [3, 1, [0, 255, 0, 255]], [1, 2, [0, 0, 255, 255]]]) data.set(color, (y * 4 + x) * 4);
+  const grid = importPNG(encodePNG(data, 4, 4), { name: 'dots', frame: [2, 2], padding: 0 }).recipe;
+  assert.deepEqual(renderProject(grid).frames.map(frame => [frame.name, [...frame.data].filter(Boolean).length]), [['dots-0', 2], ['dots-1', 2], ['dots-2', 2]]);
+  // What does not fit says so, and frame and atlas are one or the other.
+  assert.throws(() => importPNG(sheet, { frame: [25, 24] }), /frame: frames of 25×24 with a border of 0 to 8 pixels do not tile the 156×26 image; give the padding its sheet has, or its atlas/);
+  assert.throws(() => importPNG(sheet, { frame: [24, 24], padding: 0 }), /frames of 24×24 with a border of 0 do not tile/);
+  assert.throws(() => importPNG(sheet, { frame: [24, 24], atlas: { frames: {} } }), /an atlas already says where the frames are/);
+  assert.throws(() => importPNG(sheet, { padding: 1 }), /padding: goes with frame/);
+  assert.throws(() => importPNG(sheet, { frame: [0, 24] }), /frame: expected the size of one frame/);
 });

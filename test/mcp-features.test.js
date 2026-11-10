@@ -98,6 +98,9 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
       const text = (await help(topic))[0];
       assert.ok(/^# /.test(text) && size(text) < 8192, `${topic}: ${size(text)} bytes of outline`);
     }
+    // A source format's outline names the presets written in it: the examples of the format.
+    assert.match((await help('wave'))[0], /Shipped sources in this format, to start from \(pixel_help with topic "preset" and name\): interference, portal\./);
+    assert.doesNotMatch(outline, /Shipped sources/);
     // One part: a body's fields as JSON, under 12 KB; a path that is not there names what is.
     const body = JSON.parse(await section('bodies', 'effects.bodies'));
     assert.ok(body.type === 'array' && Object.hasOwn(body.items.properties, 'radius') && size(await section('bodies', 'effects.bodies')) < 12288);

@@ -218,6 +218,6 @@ test('MCP pixel_compile returns an autotile set with its test map', async t => {
   assert.match(info.testMap, /second image/);
   assert.deepEqual(compiled.content.map(item => item.type), ['text', 'image', 'image']);
   // Other sources keep one image.
-  const help = JSON.parse((await request('tools/call', { name: 'pixel_help', arguments: { topic: 'autotile' } })).result.content[0].text);
+  const help = JSON.parse((await request('tools/call', { name: 'pixel_help', arguments: { topic: 'autotile', name: 'all' } })).result.content[0].text);
   assert.ok(help.properties.terrain && help.properties.ops);
 });

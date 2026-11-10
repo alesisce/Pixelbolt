@@ -12,7 +12,7 @@ Short checklists by subject, for the pixel art skill: read the one section the j
 - Stay in the palette: no gradients, anti-aliasing or subpixel positions. Export at scale 1 for game assets unless the user asks for enlarged pixels baked into the files.
 - If the request leaves size or use open, pick a sensible default (for example 16 to 64 px for a game sprite, 4 to 16 colours), state it in one line, and build. Ask only when the answer changes the build.
 - Words on screen (titles, captions, counters) use the `text` operation, not hand-drawn letters.
-- Errors name their path, such as `project.frames[1].ops[0].rows[2]`, and come back together. Fix them all, then validate again. Don't guess field names; check `help guide` or `schema`.
+- Errors name their path, such as `project.frames[1].ops[0].rows[2]`, and come back together. Fix them all, then validate again. Don't guess field names; check `help guide <word>` or `help schema` (a source format's fields: `help fluid`, `help bodies effects.bodies`).
 - GIF keeps exact colours but drops partial transparency and rounds timing to 10 ms. Report the `notes` it returns.
 - If asked to match a named game's quality, make original art and report what the visible evidence supports.
 
@@ -92,7 +92,7 @@ Start from `examples/iso-tiles.json` (the tile set) and `examples/iso-glade.scen
 
 | Task | CLI | MCP tool |
 |---|---|---|
-| Learn the format | `help quickstart`, `help guide`, `schema` | `pixel_help` (topics such as `guide`, `workflow`, `craft`, `schema`, `example`, `presets`) |
+| Learn the format | `help quickstart`, `help guide`, `help schema` | `pixel_help` (topics such as `guide`, `workflow`, `craft`, `schema`, `example`, `presets`) |
 | Check a recipe | `validate` | `pixel_validate` |
 | See the frames | `inspect` | `pixel_inspect` |
 | Edit | `patch` | `pixel_patch` |

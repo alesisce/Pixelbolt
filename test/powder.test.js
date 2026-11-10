@@ -464,7 +464,7 @@ test('MCP and the CLI compile powder sources and presets', async t => {
   startMCP({ input, output, root: dir, directory: dir }); t.after(() => input.end());
   const call = (method, params) => new Promise(resolve => { waiting.set(++id, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
   await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'powder-test', version: '1' } });
-  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'powder' } });
+  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'powder', name: 'all' } });
   assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt falling sand');
   const s = tiny({ inputs: [{ frames: [0, 20], paint: { material: 'sand', x: 20, y: 2, radius: 1.5 } }], clips: { pour: { frames: 10 } } });
   const compiled = JSON.parse((await call('tools/call', { name: 'pixel_compile', arguments: { source: s, metadata: true } })).result.content[0].text);

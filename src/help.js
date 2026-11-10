@@ -3,6 +3,7 @@
 // from examples/ when asked (presets.js), so they are listed here but served by the caller.
 import { readFile } from 'node:fs/promises';
 import { PixelError } from './core.js';
+import { formatJSON } from './export.js';
 
 export const QUICK_START = '../docs/agent-quick-start.md';
 export const HELP_TOPICS = {
@@ -101,6 +102,42 @@ export function helpDocument(topic, text, name, via = 'mcp') {
   return page(out);
 }
 
+// The schemas run from 12 to 142 KB, so a schema topic is read as the guides are. Without a name it is an outline:
+// each property with its type, what it holds, and for a large one its size and the properties inside it. `name` is a
+// path of property names ("effects.bodies") and returns that part, as JSON when it is under PART_BYTES and as its own
+// outline when it is not; "all" is the whole schema.
+export const isSchema = topic => jsonTopic(topic) && topic !== 'example';
+const SCHEMA_ASK = {
+  mcp: (topic, path) => `call pixel_help with topic "${topic}" and name "${path}"`,
+  cli: (topic, path) => `run pixelbolt help ${topic} ${path}`
+};
+export function helpSchema(topic, text, name, via = 'mcp') {
+  const schema = JSON.parse(text), asked = name?.trim();
+  if (asked?.toLowerCase() === 'all') return text;
+  const deref = node => { while (node && typeof node.$ref === 'string' && node.$ref.startsWith('#/$defs/')) node = schema.$defs?.[node.$ref.slice(8)]; return node; };
+  // The properties a reader may write under a node: its own, its items' or its named entries'.
+  const inside = node => { const at = deref(node); return at?.properties ?? deref(at?.items)?.properties ?? deref(at?.additionalProperties)?.properties ?? null; };
+  const bytes = node => Buffer.byteLength(JSON.stringify(node)), size = node => `${Math.ceil(bytes(node) / 1024)} KB`;
+  const kind = node => { const at = deref(node) ?? {}; return at.const !== undefined ? JSON.stringify(at.const) : at.enum ? at.enum.map(value => JSON.stringify(value)).join(' | ') : at.type === 'array' ? `list of ${deref(at.items)?.type ?? 'values'}` : Array.isArray(at.type) ? at.type.join(' or ') : at.type ?? (at.oneOf || at.anyOf ? 'one of several forms' : 'value'); };
+  let node = schema, path = '';
+  for (const segment of asked ? asked.split('.').filter(Boolean) : []) {
+    const properties = inside(node);
+    if (!properties || !Object.hasOwn(properties, segment)) throw new PixelError('name', `the ${topic === 'schema' ? 'recipe' : topic} schema has no ${JSON.stringify(path ? `${path}.${segment}` : segment)}; ${path || 'it'} holds ${properties ? Object.keys(properties).join(', ') : 'no named properties'}`);
+    node = properties[segment]; path = path ? `${path}.${segment}` : segment;
+  }
+  const properties = inside(node);
+  if (path && (!properties || bytes(node) <= PART_BYTES)) return formatJSON(deref(node));
+  const required = new Set(deref(node)?.required ?? deref(deref(node)?.items)?.required ?? []), under = key => (path ? `${path}.${key}` : key);
+  const line = ([key, child]) => {
+    const kids = inside(child), large = kids && bytes(child) > 2048, text = deref(child)?.description ?? '';
+    return `- \`${key}\`${required.has(key) ? ' (required)' : ''}: ${kind(child)}${large ? `, ${size(child)}` : ''}${text ? `. ${text.length > 220 ? `${text.slice(0, 200).replace(/\s+\S*$/, '')} …` : text}` : '.'}${kids ? ` Holds ${Object.entries(kids).map(([name, each]) => (bytes(each) > 2048 ? `${name} (${size(each)})` : name)).join(', ')}.` : ''}`;
+  };
+  // The example path is the largest part: the one a reader most often needs.
+  const first = Object.entries(properties).sort((a, b) => bytes(b[1]) - bytes(a[1]))[0][0];
+  return [`# ${schema.title ?? topic}${path ? `: ${path}` : ''}`, '', `> A schema of ${size(node)}, outlined. To read one part as JSON, ${SCHEMA_ASK[via](topic, under(first))} (a path of property names); "all" is the whole schema.`,
+    ...(deref(node)?.description ? ['', deref(node).description] : []), '', ...Object.entries(properties).map(line)].join('\n') + '\n';
+}
+
 // The quick start has a section for each interface, and a reader gets its own: an MCP client the tools, a shell the
 // commands. The file itself holds both.
 const NOT_FOR = { mcp: 'The commands', cli: 'The tools' };
@@ -112,9 +149,9 @@ export function quickStart(text, via = 'mcp') {
 }
 
 // A document topic as text: the quick start without a topic, a guide (its opening and sections, one section, or what
-// mentions a word), a schema or the example as written.
+// mentions a word), a schema (its outline, or one part by its path) or the example as written.
 export async function helpText(topic, name, via = 'mcp') {
   const file = topic === undefined ? QUICK_START : HELP_TOPICS[topic], text = await readFile(new URL(file, import.meta.url), 'utf8');
   if (topic === undefined) return quickStart(text, via);
-  return SECTIONED.has(topic) ? helpDocument(topic, text.replace(/\r\n/g, '\n'), name, via) : text;
+  return SECTIONED.has(topic) ? helpDocument(topic, text.replace(/\r\n/g, '\n'), name, via) : isSchema(topic) ? helpSchema(topic, text, name, via) : text;
 }

@@ -182,7 +182,7 @@ test('MCP and the CLI compile bodies sources and presets', async t => {
   startMCP({ input, output, root: dir, directory: dir }); t.after(() => input.end());
   const call = (method, params) => new Promise(resolve => { waiting.set(++id, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
   await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'bodies-test', version: '1' } });
-  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'bodies' } });
+  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'bodies', name: 'all' } });
   assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt rigid bodies');
   const source = scene({ frames: 12, walls: ['bottom'], bodies: [{ name: 'ball', shape: 'circle', radius: 2, at: [24, 8], fill: 'r' }] });
   const compiled = JSON.parse((await call('tools/call', { name: 'pixel_compile', arguments: { source, metadata: true } })).result.content[0].text);

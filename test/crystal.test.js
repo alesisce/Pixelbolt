@@ -307,7 +307,7 @@ test('MCP and the CLI compile crystal sources and presets', async t => {
   startMCP({ input, output, root: dir, directory: dir }); t.after(() => input.end());
   const call = (method, params) => new Promise(resolve => { waiting.set(++id, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
   await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'crystal-test', version: '1' } });
-  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'crystal' } });
+  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'crystal', name: 'all' } });
   assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt crystal growth');
   const s = source([{ habit: 'prism', at: [24, 36], length: 20, width: 6, grow: 20 }], { frames: 30 });
   const compiled = JSON.parse((await call('tools/call', { name: 'pixel_compile', arguments: { source: s, metadata: true } })).result.content[0].text);

@@ -32,7 +32,7 @@ Begin from the closest row. A preset or example compiled as it ships needs nothi
 
 A pose, effect or other source is not a recipe: compile it first. Then:
 
-1. **Validate.** `node bin/pixelbolt.js validate <recipe>`. Errors name their paths and come back together; fix them all. Don't guess field names: check `help guide` or `schema`.
+1. **Validate.** `node bin/pixelbolt.js validate <recipe>`. Errors name their paths and come back together; fix them all. Don't guess field names: check `help guide <word>` or `help schema`.
 2. **Inspect.** `node bin/pixelbolt.js inspect <recipe> --out <frames.png> --native --diagnostics`, and look at the image. A valid recipe can still look bad.
 3. **Patch.** Edit through the recipe, never the exported files: `node bin/pixelbolt.js patch <recipe> --changes <changes.json> --out <new recipe>` (the quick start has the change format).
 4. **Render.** `node bin/pixelbolt.js render <recipe> --out <directory> --look --expect '{"width":24,"height":24,"frames":6}'`, with what the user asked for in `--expect` (`frames` is what each animation plays, not the sheet's total). Look at `look.png` in the folder (the frames enlarged; the sprite sheet beside it is at game size), read the `check`, fix every mismatch it lists, and render again.

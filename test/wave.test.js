@@ -174,7 +174,7 @@ test('MCP compiles wave revisions and exposes the wave schema', async t => {
   startMCP({ input, output, root: dir, directory: dir }); t.after(() => input.end());
   const call = (method, params) => new Promise(resolve => { waiting.set(++id, resolve); input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
   await call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'wave-test', version: '1' } });
-  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'wave' } });
+  const help = await call('tools/call', { name: 'pixel_help', arguments: { topic: 'wave', name: 'all' } });
   assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt wave effects');
   const compiled = await call('tools/call', { name: 'pixel_compile', arguments: { source: tiny(), metadata: true } });
   const info = JSON.parse(compiled.result.content[0].text);

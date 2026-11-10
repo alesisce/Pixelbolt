@@ -1478,7 +1478,7 @@ test('MCP pixel_compile builds fluid sources and pixel_help serves their schema'
   const tools = (await request('tools/list')).result.tools, compile = tools.find(tool => tool.name === 'pixel_compile');
   assert.match(compile.description, /smoke, fire, explosions/);
   assert.ok(tools.find(tool => tool.name === 'pixel_help').inputSchema.properties.topic.enum.includes('fluid'));
-  const help = await request('tools/call', { name: 'pixel_help', arguments: { topic: 'fluid' } });
+  const help = await request('tools/call', { name: 'pixel_help', arguments: { topic: 'fluid', name: 'all' } });
   assert.equal(JSON.parse(help.result.content[0].text).title, 'Pixelbolt fluid effects');
   const source = (await example('torch')).source, compiled = await request('tools/call', { name: 'pixel_compile', arguments: { source, metadata: true } });
   const info = JSON.parse(compiled.result.content[0].text);

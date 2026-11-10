@@ -96,6 +96,6 @@ A source is a document whose `format` names what compiles it: `pixelforge-fluid`
 - `craft`: short checklists (characters, effects, tiles and scenes, delivery, limits); `name` picks one.
 - `guide`: the full authoring reference (every field and operation, inspection, patch paths, exports), read by `name` as the workflow is.
 - `workflow`: the art workflow for advanced formats: poses and motion review, scenes and tilemaps, particle effects, fluids, lighting and normal passes, PNG import. With `name`, one section (`"Depth and perspective"`), a part of a long one (`"Whitewater"`), or the paragraphs that mention a word (`"apex"`).
-- `schema`: the recipe's complete JSON Schema.
+- `schema`: the recipe's JSON Schema, as an outline of its properties; `name` is a path for one part as JSON (`frames`), and `all` the whole schema.
 - `example`: a complete multi-frame recipe with layers.
-- `poses`, `scenes`, `autotile`, `fx`, `fluid`, `wave`, `crystal`, `powder`, `bodies`, `normals`: the JSON Schema of each source format.
+- `poses`, `scenes`, `autotile`, `fx`, `fluid`, `wave`, `crystal`, `powder`, `bodies`, `normals`: the JSON Schema of each source format, read the same way (`bodies` with `name: "effects.bodies"` is every field a body takes).

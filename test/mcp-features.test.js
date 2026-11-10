@@ -88,7 +88,22 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
     assert.ok(size(await section('workflow', 'the')) < 10240);
     const missing = await mcp.call('pixel_help', { topic: 'guide', name: 'no such part' });
     assert.equal(missing.result.isError, true); assert.equal(missing.info.path, 'name'); assert.match(missing.info.error, /no section "no such part" and no paragraph that mentions it; its sections are Project, Frames and layers/);
-    assert.equal(JSON.parse((await help('schema'))[0]).title, 'Pixelbolt project');
+    // A schema is read as the guides are: an outline, one part by its path, or all of it.
+    const outline = (await help('schema'))[0], whole = JSON.parse(await section('schema', 'all'));
+    assert.equal(whole.title, 'Pixelbolt project');
+    assert.match(outline, /^# Pixelbolt project\n\n> A schema of \d+ KB, outlined\. To read one part as JSON, call pixel_help with topic "schema" and name "[a-z.]+"/);
+    for (const key of Object.keys(whole.properties)) assert.ok(outline.includes(`- \`${key}\``), key);
+    assert.ok(size(outline) < 6144, `${size(outline)} bytes of schema outline`);
+    for (const topic of topics.filter(each => !['guide', 'workflow', 'craft', 'example', 'presets', 'preset'].includes(each))) {
+      const text = (await help(topic))[0];
+      assert.ok(/^# /.test(text) && size(text) < 8192, `${topic}: ${size(text)} bytes of outline`);
+    }
+    // One part: a body's fields as JSON, under 12 KB; a path that is not there names what is.
+    const body = JSON.parse(await section('bodies', 'effects.bodies'));
+    assert.ok(body.type === 'array' && Object.hasOwn(body.items.properties, 'radius') && size(await section('bodies', 'effects.bodies')) < 12288);
+    assert.match(await section('fx', 'effects'), /^# [^\n]*: effects\n\n> A schema of \d+ KB, outlined/);
+    const lost = await mcp.call('pixel_help', { topic: 'bodies', name: 'effects.body' });
+    assert.equal(lost.result.isError, true); assert.match(lost.info.error, /the bodies schema has no "effects\.body"; effects holds frames, duration, .*\bbodies\b/);
     // The quick start's recipe and the example topic are valid recipes that draw without warnings.
     const recipe = JSON.parse(quick.match(/```json\n([\s\S]*?)\n```/)[1]), example = JSON.parse((await help('example'))[0]);
     for (const project of [recipe, example]) {
@@ -270,7 +285,7 @@ test('MCP imports PNGs, applies overlays, explains topics and resolves palettes 
   const patched = await mcp.call('pixel_patch', { project: edited, overlay });
   assert.equal(patched.info.rebased, true); assert.deepEqual(patched.info.frames.changed.map(f => f.frame), ['a']);
   assert.equal((await mcp.call('pixel_patch', { project: strip })).info.path, 'arguments');
-  const topic = (await mcp.request('tools/call', { name: 'pixel_help', arguments: { topic: 'autotile' } })).result;
+  const topic = (await mcp.request('tools/call', { name: 'pixel_help', arguments: { topic: 'autotile', name: 'all' } })).result;
   assert.equal(JSON.parse(topic.content[0].text).title, 'Pixelbolt autotile template');
   await writeFile(path.join(dir, 'shared.json'), JSON.stringify({ palette: { k: '#123456', w: '#fff' } }));
   const linked = await mcp.call('pixel_validate', { project: { ...strip, palette: { $ref: 'shared.json', x: '#f0f' } } });
@@ -315,7 +330,7 @@ test('MCP compiles particle effects, explains the fx topic and previews cleanup 
   assert.ok(!compiled.result.isError, JSON.stringify(compiled.info));
   assert.deepEqual([compiled.info.frames, Object.keys(compiled.info.animations), compiled.info.metadata.effects.pop.emitters[0].spawned], [4, ['pop'], 5]);
   assert.equal(compiled.result.content[1].mimeType, 'image/png');
-  const topic = (await mcp.request('tools/call', { name: 'pixel_help', arguments: { topic: 'fx' } })).result;
+  const topic = (await mcp.request('tools/call', { name: 'pixel_help', arguments: { topic: 'fx', name: 'all' } })).result;
   assert.equal(JSON.parse(topic.content[0].text).title, 'Pixelbolt particle effects');
   const stair = { version: 1, name: 'stair', width: 5, height: 4, palette: { k: '#000' }, frames: [{ name: 'a', ops: [{ op: 'grid', rows: ['k....', 'kk...', '.kk..', '..k..'] }] }] };
   const inspected = await mcp.call('pixel_inspect', { project: stair, diagnostics: true });

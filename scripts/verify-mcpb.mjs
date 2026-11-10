@@ -112,10 +112,11 @@ export async function verifyMcpb(bundle, { stuckAfter = STUCK_AFTER } = {}) {
     assert.deepEqual(new Set(listed.tools.map(tool => tool.name)), new Set(manifest.tools.map(tool => tool.name)));
     const help = await call('pixel_help');
     assert.match(help.content[0].text, /^# Pixelbolt quick start/);
-    const topic = async name => (await call('pixel_help', { topic: name })).content[0].text;
-    assert.ok(JSON.parse(await topic('schema')).properties.frames && JSON.parse(await topic('example')).frames, 'pixel_help must serve the schema and an editable example');
+    const topic = async (name, part) => (await call('pixel_help', { topic: name, ...(part && { name: part }) })).content[0].text;
+    assert.ok(JSON.parse(await topic('schema', 'all')).properties.frames && JSON.parse(await topic('example')).frames, 'pixel_help must serve the schema and an editable example');
+    assert.match(await topic('schema'), /^# /, 'pixel_help topic schema must serve its outline');
     for (const name of ['guide', 'workflow']) assert.match(await topic(name), /^# /, `pixel_help topic ${name} must serve its guide`);
-    for (const name of ['poses', 'scenes', 'autotile', 'fx', 'fluid', 'normals']) assert.ok(JSON.parse(await topic(name)));
+    for (const name of ['poses', 'scenes', 'autotile', 'fx', 'fluid', 'normals']) assert.ok(JSON.parse(await topic(name, 'all')));
     const checkFiles = async result => {
       const info = JSON.parse(result.content[0].text);
       assert.equal(info.ok, true);

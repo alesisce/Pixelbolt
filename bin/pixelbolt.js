@@ -28,7 +28,8 @@ const HELP = `Pixelbolt — text to pixels, without dependencies
                                            craft, schema, example, presets, preset <name>, poses, scenes, autotile, fx,
                                            fluid, wave, crystal, powder, bodies or normals. guide, workflow and craft list
                                            their sections; name one to print it (help craft "Characters"), or give a
-                                           word to print the paragraphs that mention it (help guide text)
+                                           word to print the paragraphs that mention it (help guide text). A schema
+                                           prints its outline; a path prints one part (help bodies effects.bodies)
   pixelbolt validate <file.json|-> [--fps 30]
                                            Validate and describe a project; --fps lists durations off that video frame grid
   pixelbolt inspect <file.json|-> [--out sheet.png] [--grid]
@@ -407,7 +408,7 @@ async function presetsText(name, full = false, find) {
 // `help <topic> [section]`: what MCP pixel_help returns for the topic, so a shell reads one section of a long guide
 // instead of the whole file. A section name may be quoted or not.
 async function helpTopic([topic, ...words]) {
-  const { TOPICS, SECTIONED, helpText } = await import('../src/help.js');
+  const { TOPICS, SECTIONED, isSchema, helpText } = await import('../src/help.js');
   const name = words.length ? words.join(' ') : undefined;
   if (['quickstart', 'quick-start', 'start'].includes(topic)) {
     if (name !== undefined) throw new Error('the quick start has no sections; run pixelbolt help quickstart');
@@ -420,7 +421,7 @@ async function helpTopic([topic, ...words]) {
     if (topic === 'presets' && name !== undefined && !full) throw new Error('help presets lists every preset (--full adds every animation and file); for one preset\'s source run pixelbolt help preset <name>');
     return `${await presetsText(full ? undefined : name, full)}\n`;
   }
-  if (name !== undefined && !SECTIONED.has(topic)) throw new Error(`help ${topic} has no sections; only guide, workflow and craft do`);
+  if (name !== undefined && !SECTIONED.has(topic) && !isSchema(topic)) throw new Error(`help ${topic} has no sections; guide, workflow and craft do, and a schema takes a path such as effects`);
   return helpText(topic, name, 'cli');
 }
 try {

@@ -149,7 +149,7 @@ test('MCP compiles a normals source from a saved revision and explains the norma
   assert.ok(!compiled.result.isError, JSON.stringify(compiled.info));
   assert.deepEqual([compiled.info.name, compiled.info.frames, compiled.info.metadata.detail], ['shape-normal', 1, 0]);
   assert.equal(compiled.result.content[1].mimeType, 'image/png');
-  const topic = (await request('tools/call', { name: 'pixel_help', arguments: { topic: 'normals' } })).result;
+  const topic = (await request('tools/call', { name: 'pixel_help', arguments: { topic: 'normals', name: 'all' } })).result;
   assert.equal(JSON.parse(topic.content[0].text).title, 'Pixelbolt normal pass');
   input.end(); await running;
 });

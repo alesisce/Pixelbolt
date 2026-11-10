@@ -284,8 +284,11 @@ export function createBodiesSequence(source, options = {}, { budget = Infinity, 
   }, { ...options, rate, palette: match.palette }, { source: 'bodies', bodies: match.name, effect: match.effect }, stream);
   const notes = [];
   if (built.place.cropped) notes.push(cropNote('match', built.info));
-  const steps = plan.timing.filter(entry => entry.frames > 0).length;
-  if (steps < match.frames && options.seconds === undefined) notes.push(`${match.frames - steps} of the match's ${match.frames} frames (${match.duration} ms each) fall between video frames at ${rate.label} frames per second and are not shown; give the effect a duration of at least one video frame (${Math.ceil(1000 * rate.denominator / rate.numerator)} ms at this rate).`);
+  // A clip that `seconds` ends before the match does (fewer video frames than the match fills) cuts the frames after
+  // the last one it shows: those are not skipped, so the skipped ones are counted up to it. Any other clip, held past
+  // the match's end or not, is counted over the whole match.
+  const reach = plan.count < Math.ceil(plan.exactFrames) ? plan.poses[plan.poses.length - 1] + 1 : match.frames, missed = reach - different;
+  if (missed > 0) notes.push(`${missed} of the match's ${reach < match.frames ? `first ${reach}` : match.frames} frames (${match.duration} ms each) ${missed === 1 ? 'falls' : 'fall'} between video frames at ${rate.label} frames per second and ${missed === 1 ? 'is' : 'are'} not shown; give the effect a duration of at least one video frame (${Math.ceil(1000 * rate.denominator / rate.numerator)} ms at this rate).`);
   built.info.loop = { loops: 1, plays: 'once', passFrames: Math.round(plan.exactFrames * 1e6) / 1e6, seamless: false };
   return finish(built, notes, () => { built.info.figures = match.figures(); });
 }

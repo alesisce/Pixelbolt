@@ -40,7 +40,6 @@ Short checklists by subject, for the pixel art skill: read the one section the j
 - **Order.** A pose's `parts` are drawn in the order listed, far side first: far arm, far leg, body, near leg, head, near arm, then what covers them (a shield, a pauldron).
 - **Something carried still** (a shield, a lantern, a banner) hangs from an arm left out of `rig.arms`. No template swings that arm, so it stays as posed while the arms in `rig.arms` swing and strike (`motions.attack.arm` counts within `rig.arms`).
 - **Thick limbs** of one colour merge into a block. End a shin with a `flat` cap no wider than its boot, so it does not poke under the sole, and hang the two thighs a pixel or two apart (`at` beside `attach`), so two legs show at rest.
-- **A colour variant of the same character** (a team, a season, an arctic fox) is a `patch` of the compiled recipe's palette, `[{"set": "palette.o", "value": "#d8e0ea"}, ...]`, which keeps every frame and animation. `inspect <recipe> --palette` says which keys colour which parts, a ramp's keys together dark to light, so change a whole ramp together (where a part that should stay shares a key with one that changes, the red of a shield's emblem and of the plume, recolour the one part's layer in every frame instead, by a name from the report's `layers`: `{"set": "frames[*].layers[plume].palette", "value": {"s": "#6a2c91", "t": "#9b59d0"}}`); `inspect <recipe> --beside <variant.json>,<other.json> --animation run` then shows the versions in one image.
 - A cape, plume, scarf or ponytail is `rig.tail`: bones the templates leave alone and springs carry after the body.
 - Compile with `pixelbolt compile <source.poses.json> --out <recipe.json> --metadata <new.json>` so review tools keep the pose data.
 - Assign rig roles and use the idle, walk, run, jump, attack and hurt templates as starting points. Set speed, stride, lift and frame timing for the body, and fix compile warnings (a pose off the canvas, a foot out of reach) before adding detail.
@@ -49,6 +48,17 @@ Short checklists by subject, for the pixel art skill: read the one section the j
 - For a four-legged animal, start from `examples/fox.poses.json`: `rig.fore` and `rig.hind` take the place of `legs`, and the templates `walk`, `trot` and `run` set the gait.
 - Start any turned part (boots, hands, held weapons, a tilted head) from a draft, never from nothing: `pixelbolt compile <source.poses.json> --draft-views boot:15,345 --preview <drafts.png>` (MCP `pixel_compile` with `draftViews`) prints the turned rows to correct by eye and paste into `parts.<name>.views`.
 - Review the silhouette, the difference between key poses, planted contacts, the loop join and the gait with `pixelbolt inspect <source> --motion run --speed 48`, and `--view parts` to name the part behind a stray pixel. Don't infer contact quality from a still sheet. More in `help workflow "Authored poses, attachments and cues"`.
+
+## Colour variants
+
+A team colour, a season, an enemy version, an arctic fox: the same sprite or character with some colours changed, every frame and animation kept.
+
+- Work on the compiled recipe (`compile <source or --preset name> --out <recipe.json>`), not the source: a variant is a `patch` of it.
+- `inspect <recipe> --palette` says which keys colour which parts, a ramp's keys together dark to light, and lists the `layers` by name.
+- Everything drawn with a key: `[{"set": "palette.o", "value": "#d8e0ea"}, ...]`. Change a whole ramp together, keeping it dark to light.
+- One part and not another that shares its key (the plume, not the shield's emblem in the same red): recolour that part's layer in every frame, `{"set": "frames[*].layers[plume].palette", "value": {"s": "#6a2c91", "t": "#9b59d0"}}`.
+- `inspect <recipe> --beside <variant.json>,<other.json> --animation run --out <compare.png>` shows the versions in one image, each under its file name.
+- Name the variant in the same patch, `{"set": "name", "value": "fox-arctic"}`, so its sheet and atlas carry the name, and render each into its own folder. The patch reply says how many frames and pixels changed and which colours.
 
 ## Effects
 

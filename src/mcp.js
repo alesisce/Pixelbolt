@@ -43,7 +43,6 @@ function gridText({ region, legend, grids }) {
   for (const { frame, rows } of grids) lines.push('', frame, ...rulers, ...rows.map((row, y) => `${String(region.y + y).padStart(label)}  ${row}`));
   return lines.join('\n');
 }
-// Bundles can hold thousands of files; list the ones an agent opens and count the rest.
 // JSON-RPC clients normally send "id" before "params", so an oversized request's id is usually in its first bytes.
 function leadingId(prefix) {
   const head = prefix.split('"params"')[0], match = /"id"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?)/.exec(head);
@@ -78,8 +77,6 @@ export function parseTextArguments(args, properties) {
   }
   return { args, parsed };
 }
-// pixel_help returns the short quick start by default; each topic is one longer document, read only when needed
-// (help.js, which `pixelbolt help <topic>` shares).
 
 const sequenceSummary = info => ({ directory: 'sequence', pattern: info.pattern, first: info.first, frames: info.frames, fps: info.fps.label, seconds: info.seconds, width: info.width, height: info.height, alpha: info.alpha, placement: info.placement, loop: info.loop, notes: info.notes, ffmpeg: info.commands });
 // An MCP call writes at most this much sequence: the studio's download cap. Longer or larger shots go through

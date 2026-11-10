@@ -260,11 +260,11 @@ function inspectOptions({ frames, animation, region, grid, scale, background, vi
   const [x, y, w, h] = region?.split(',').map(Number) ?? [];
   return { ...(frames !== undefined && { frames: frames.split(',') }), ...(animation !== undefined && { animation }), ...(region !== undefined && { region: { x, y, w, h } }), ...(grid && { grid }), ...(scale !== undefined && { scale: Number(scale) }), ...(background !== undefined && { background }), ...(view !== undefined && { view }), ...(native && { native }), ...(diagnostics && { diagnostics }), ...(maxCells !== undefined && { maxCells: Number(maxCells) }), ...(step !== undefined && { step: Number(step) }), ...(offset !== undefined && { offset: Number(offset) }), ...(every !== undefined && { every: Number(every) }) };
 }
-// The named files a command reads (stdin aside), so its outputs can be kept off them.
 // A folder output named like a file (scene.png) is a mix-up that would make a folder of that name: name what to use.
 function folderOut(command, out, instead) {
   if (/\.(?:png|apng|gif|jpe?g|webp|json|tres|tsx|tmx|mov|mp4)$/i.test(out)) throw new Error(`${command} --out takes a folder, and ${out} names a file: ${instead}`);
 }
+// The named files a command reads (stdin aside), so its outputs can be kept off them.
 const filesRead = (...files) => files.filter(file => file !== undefined && file !== '-').map(file => path.resolve(file));
 // Why a file could not be written, in a few words.
 const WRITE_FAILURES = { EACCES: 'permission was denied', EPERM: 'permission was denied', EROFS: 'the disk is read-only', ENOSPC: 'the disk is full', EISDIR: 'a folder has that name', ENOTDIR: 'a folder in its path is a file', EEXIST: 'something of that name appeared while this ran', ENAMETOOLONG: 'the name is too long', ENOENT: 'this system cannot make that path (a name too long, a character it does not allow or a drive that is not there)', EINVAL: 'the name has a character this system does not allow', EBUSY: 'the file is in use by another program' };
@@ -622,10 +622,10 @@ try {
       }
       const project = renderProject(recipe), names = Object.keys(project.animations);
       const { data, ...gif } = animationGIF(project, options.animation, { ...(options.scale !== undefined && { scale: Number(options.scale) }), ...(options.background !== undefined && { background: options.background }) });
-      // The cut is already said once: the clipping it causes is not a second problem.
       // --sheet: the frames of that animation as a contact sheet, to look at before delivering.
       const sheet = options.sheet !== undefined ? inspectProject(project, { animation: gif.animation }).sheet : null;
       const written = await writeOutputs({ file: [options.out, data, '--out'], ...(sheet && { sheet: [options.sheet, encodePNG(sheet.data, sheet.width, sheet.height), '--sheet'] }) }, options.force, inputsOf(input));
+      // The cut is already said once: the clipping it causes is not a second problem.
       print({ ok: true, name: project.name, ...gif, ...(names.length > 1 && { animations: names }), ...(kept && { kept }), ...(resized && { resized }), ...written, warnings: [...warnings, ...project.warnings.filter(text => !(resized?.cut && text.startsWith('Some drawing falls outside the canvas')))], ...(options.preset === undefined && referenced(input)) });
     } else if (command === 'gif-frames') {
       if (!positional[0] || positional[0] === '-') throw new Error('gif-frames requires a folder of numbered PNG frames');

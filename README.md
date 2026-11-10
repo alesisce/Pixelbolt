@@ -210,7 +210,7 @@ node bin/pixelbolt.js preview showcase/diorama/art/room.scene.json
 
 By night, each torch and candle light follows its placement and flickers on its own seed, and a light at the pot flashes on the strike cue: [moving scene lights](docs/art-workflow.md#aligned-material-passes), still in exactly the palette's colours.
 
-[Study details and images](https://github.com/skulitom/Pixelbolt/blob/main/showcase/diorama/README.md) · [Feasibility report: what the style asked of Pixelbolt](docs/reports/diorama-feasibility-2026-10-07.md)
+[Study details and images](https://github.com/skulitom/Pixelbolt/blob/main/showcase/diorama/README.md) · [Feasibility report: what the style asked of Pixelbolt](https://github.com/skulitom/Pixelbolt/blob/main/docs/reports/diorama-feasibility-2026-10-07.md)
 
 ## Art quality workflow
 

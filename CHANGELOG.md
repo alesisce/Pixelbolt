@@ -20,6 +20,13 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 - Several errors are each said once: `errors` is a list of messages that start with their paths, and `error` counts them. Before, the combined message said them all and `errors` said them again with the path twice.
 - The CLI prints every reply one way: an object or list that fits a line is on one line, longer lists of names wrap, and a path inside the working directory is written from it with forward slashes (`"recipe": "out/hero.json"`). `validate` and `render` no longer print one long line, and `patch`, `gif` and `compile` no longer print a line per number.
 - A frames mismatch in a render's `check` gives the per-animation hint once, with the first animation, not on every one.
+- A render's `check` carries the silhouette boxes (`motion`) only of the animations one of its notes is about. Beside a clean animation they were rows of numbers with nothing to say.
+- `compile` suggests `--metadata` only for a rig or a tile set, whose metadata a motion review or a game engine reads. An effect's compile reply is one line.
+- The skill says that `gif --sheet` writes a contact sheet to look at, and that a game's sprite sheet and atlas come from `render`.
+
+### A smaller package
+
+- The npm package ships the eight documents the tools and contributors read, not the whole `docs/` folder: 52 fewer files and about 400 KB less to download (reports, bug reports, tutorial images and publishing notes stay in the repository).
 
 ### Fewer frames in one option
 

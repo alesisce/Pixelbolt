@@ -11,19 +11,14 @@
 // a fixed scan order, and there is no Math.random and no trigonometry of its own (tumbling pieces turn by craft.js's
 // polynomial sines and bodies.js's solver, + − × ÷ and sqrt). Temperatures are kept in sixteenths of a degree and
 // velocities in 256ths of a pixel per frame.
-import { PixelError, parseColor, renderProject, CANVAS_SIDE, FRAME_AREA } from './core.js';
+import { parseColor, renderProject, CANVAS_SIDE, FRAME_AREA, fail, isObject } from './core.js';
 import { hash, ditherThreshold, sinDeg, cosDeg } from './craft.js';
 import { atan2Deg } from './shapes.js';
 import { createBodyWorld, polygonPart, areaBeyond } from './bodies.js';
+import { number } from './authoring.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const known = (object, keys, path) => {
   for (const key of Object.keys(object)) if (!keys.includes(key)) fail(`${path}.${key}`, `unknown field; expected one of ${keys.join(', ')}`);
-};
-const number = (value, path, min, max) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(path, `expected a number from ${min} to ${max}`);
-  return value;
 };
 const integer = (value, path, min, max) => {
   if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected a whole number from ${min} to ${max}`);

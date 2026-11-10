@@ -11,6 +11,7 @@ import { MAX_REQUEST_BYTES } from '../src/core.js';
 import { encodePNG } from '../src/png.js';
 import { createOverlay } from '../src/overlays.js';
 import { skinkRig, heroRig } from '../scripts/figure-rigs.mjs';
+import { MOCK_TOOLS, mockTools } from '../scripts/eval-mock.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temp = async (t, label) => {
@@ -35,6 +36,8 @@ test('MCP keeps what an agent reads small: brief tool schemas, a quick start, an
     const listed = (await mcp.request('tools/list', {})).result.tools, bytes = Buffer.byteLength(JSON.stringify(listed));
     assert.ok(bytes < 24576, `${bytes} bytes of tool listings`);
     assert.ok(listed.every(tool => !JSON.stringify(tool.inputSchema).includes('$defs')));
+    // The plugin evals' mock server answers with this same listing.
+    assert.equal(await readFile(MOCK_TOOLS, 'utf8'), await mockTools(), 'evals/mocks/pixelbolt/_tools.json is behind the server: run node scripts/eval-mock.mjs');
     const help = async topic => (await mcp.request('tools/call', { name: 'pixel_help', arguments: topic ? { topic } : {} })).result.content.map(block => block.text);
     const [quick, ...more] = await help();
     assert.equal(more.length, 0);

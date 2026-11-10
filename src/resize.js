@@ -3,9 +3,8 @@
 // offset (a layer's by its own x and y as well), and the result renders exactly as that window of the original does:
 // a margin shows the background, or nothing. With fewer frames (`keepFrames`): evenly spaced frames of each
 // animation, playing as long as before. Browser-compatible.
-import { PixelError, CANVAS_SIDE, FRAME_AREA, parseColor, renderProject } from './core.js';
+import { CANVAS_SIDE, FRAME_AREA, parseColor, renderProject, fail } from './core.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
 
 // "32x32", "32×32" or [32, 32].
 export function readSize(value, path = 'size') {

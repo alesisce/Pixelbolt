@@ -4,6 +4,13 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 ## Unreleased
 
+### A quick start for each reader, and less to carry
+
+- `pixelbolt help quickstart` gives a shell its commands (`validate`, `inspect`, `patch`, `render`, `gif`, `compile`, `scene`, `import`, with their options) where it gave the MCP tools and one line saying the commands were the same. MCP `pixel_help` still gives the tools. Patch changes and source formats are one section both read.
+- The npm package and `pixelbolt skill install` leave out `examples/quality/`, the quality lab's files that no guide starts from: 16 fewer files and 300 KB less in each.
+- The plugin evals' mock server answers with the real server's tool listing again (three tools had changed since it was captured), its reply shapes match, and a test keeps the listing current (`node scripts/eval-mock.mjs`).
+- Inside: the validators that eighteen modules each defined (`fail`, `isObject`, and the source formats' `number`, `integer`, `pair` and `range`) and the table of compilers kept in three places are each defined once. No output changes.
+
 ### Isometric art to start from
 
 - `examples/iso-tiles.json` is an isometric tile set on a 32×16 diamond: grass in four variants, stepping stones, a pond with moving glints, a wall block and a step, a crate, pines and saplings, bushes, boulders and contact shadows, all 32×64 frames with the cell in the last 16 rows. `examples/iso-glade.scene.json` lays them out as a small island: the ground, shadows that darken it one ramp step, what stands on it sorted by depth, and a coin hovering over a paver. The set is listed as a preset (`presets --find iso`), and both ship with the skill.

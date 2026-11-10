@@ -31,12 +31,15 @@ Simulated and drawn output is pinned by golden hashes in `test/goldens/<set>.jso
 | a `.tres`, a `.tscn`, the atlas, normal passes, autotile masks, scene planes | `node scripts/verify-godot.mjs` (a real headless Godot 4) |
 | a `.tsx`, a `.tmx`, the atlas, autotile masks, scene drawing | `node scripts/verify-tiled.mjs` (a real headless Tiled) |
 | `studio/` | `node scripts/qa-studio.mjs` (an installed Edge or Chrome, headless) |
+| an MCP tool's description or options | `node scripts/eval-mock.mjs` (the plugin evals' copy of the listing; a test compares them) |
 | `packaging/`, the portable build scripts | `node scripts/build-studio.mjs`, then `node scripts/verify-studio.mjs` on the built archive |
 | binary exports (PNG, APNG, GIF, ZIP) | also check with an independent image decoder |
 
 ## Rules
 
 - **The same output on every JavaScript engine.** New randomness is seeded (craft's hashing), new maths is polynomial or `+ − × ÷` and `sqrt` with craft's trigonometry, never `Math.sin`, `Math.hypot` or the like, and steps, iterations and visiting orders are fixed.
+- **One copy of a helper.** `fail` and `isObject` come from `core.js`; `fields`, `number`, `integer`, `pair` and `range` (what the source formats read numbers with) from `authoring.js`; `COMPILERS` (what compiles each source format) from `presets.js`. Import them rather than writing another.
+- **Replies are shaped in one place each**: `briefCells`, `briefDiagnostics` and `errorReply` in `core.js`, `briefCheck` in `check.js`, and the CLI's one printer (`print`) and option table (`OPTIONS`) in `bin/pixelbolt.js`. A reply says a thing once, and a field that is noise beside a clean result is left out.
 - **Browser-compatible modules import no Node API.** The renderer never reads files: `resolve.js` does, on the Node side.
 - **New fluid, powder or body physics follows [docs/physics-model.md](docs/physics-model.md)**: looks and satisfying motion first, then one set of units, one heat scale, one solid layer, one notion of air, one step order and a matter ledger, so features written apart still agree.
 - **MCP tool code keeps no state between calls** other than files on disk; only `ping` and cancellations skip the queue.

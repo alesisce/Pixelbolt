@@ -8,7 +8,7 @@ export class PixelError extends Error {
 // Largest JSON request accepted by the MCP server and the studio export endpoint. It exceeds the largest single
 // frame the format allows (a 256x256 frame of explicit pixel corrections serializes to about 2.5 MB).
 export const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
-const fail = (path, message) => { throw new PixelError(path, message); };
+export const fail = (path, message) => { throw new PixelError(path, message); };
 // Several errors as one: the first, naming the others in its message and listing every one in `errors`. `stopped`
 // says checking stopped at the cap of ten. Recipes and compiled sources report broken parts this way.
 export function joinErrors(all, stopped = false) {
@@ -26,7 +26,7 @@ export const errorReply = error => error.errors
   : { error: error.message, ...(error.path && { path: error.path }) };
 
 const own = (obj, key) => Object.hasOwn(obj, key);
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+export const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 // Names agents often write for a field or operation the format names differently, offered as "did you mean".
 const FIELD_ALIASES = { width: 'w', height: 'h', x1: 'x', y1: 'y', x0: 'x', y0: 'y', colour: 'color', fill: 'filled', frame: 'from', name: 'symbol' };
 const OP_ALIASES = { circle: 'ellipse', oval: 'ellipse', rectangle: 'rect', square: 'rect', point: 'pixel', dot: 'pixel', flood: 'fill', floodfill: 'fill', erase: 'clear', label: 'text', print: 'text', sprite: 'stamp', image: 'grid', recolor: 'replace', recolour: 'replace', border: 'outline' };

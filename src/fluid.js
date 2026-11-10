@@ -12,8 +12,8 @@
 // ramps and ordered dither. Browser-compatible and deterministic: only + − × ÷ and sqrt, craft.js's polynomial
 // trigonometry and seeded hash, a fixed timestep and fixed iteration counts.
 // createLiveFluid runs the same simulation a frame at a time for interactive pages, with pushes, puffs and boosts.
-import { PixelError, renderProject, parseColor } from './core.js';
-import { fields } from './authoring.js';
+import { renderProject, parseColor, fail, isObject } from './core.js';
+import { fields, number, integer, pair, pick, pickWhole } from './authoring.js';
 import { patternProblem, ditherThreshold, cleanupIds, traceLine, random, sinDeg, cosDeg } from './craft.js';
 import { atan2Deg } from './shapes.js';
 import { readElectric, readElectrode, createElectric, stepElectric, electricFields, electricWork, ELECTRODE_FIELDS, MATTER } from './electric.js';
@@ -52,25 +52,11 @@ const WAKE = 24;
 // How far (pixels) liquid a body moves onto may go back into a cell the body has just left.
 const REFILL = 3;
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const identifier = (value, path) => {
   if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) fail(path, 'expected a name of letters, digits, hyphens or underscores, starting with a letter');
   return value;
 };
-const number = (value, path, min, max) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(path, `expected a number from ${min} to ${max}`);
-  return value;
-};
-const integer = (value, path, min, max) => {
-  if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected an integer from ${min} to ${max}`);
-  return value;
-};
 const boolean = (value, path) => { if (typeof value !== 'boolean') fail(path, 'expected true or false'); return value; };
-const pair = (value, path, min, max) => {
-  if (!Array.isArray(value) || value.length !== 2) fail(path, 'expected [x, y]');
-  return [number(value[0], `${path}[0]`, min, max), number(value[1], `${path}[1]`, min, max)];
-};
 // A number, or [min, max] sampled per spark.
 const range = (value, path, min, max, whole = false) => {
   const check = whole ? integer : number;
@@ -83,8 +69,6 @@ const range = (value, path, min, max, whole = false) => {
   const v = check(value, path, min, max);
   return [v, v];
 };
-const pick = ([a, b], r) => a + (b - a) * r;
-const pickWhole = ([a, b], r) => a + Math.min(b - a, Math.floor(r * (b - a + 1)));
 // Grid rows name colours by character, so every colour a fluid draws is a one-character palette key.
 const paletteKey = (value, path, palette) => {
   if (typeof value !== 'string' || value.length !== 1 || value === '.' || value === ' ' || !Object.hasOwn(palette, value)) fail(path, 'expected a one-character palette key; grid rows name colours by character');

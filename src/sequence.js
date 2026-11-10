@@ -1,12 +1,11 @@
 // Image sequences for video editors: one numbered PNG per video frame at a constant frame rate, on a canvas of the
 // video's size. Editors read these directly and keep the alpha; nothing here encodes video. Timing is exact integer
 // arithmetic on the frame rate as a fraction, so 29.97 means 30000/1001 and a sequence is the same on every machine.
-import { PixelError, parseColor } from './core.js';
+import { parseColor, fail } from './core.js';
 import { renderScene } from './scene.js';
 import { bodiesFrames } from './bodies.js';
 import { encodePNG } from './png.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
 export const MAX_SEQUENCE_FRAMES = 18000;
 const MAX_UNIQUE_PIXELS = 4294967296;
 export const VIDEO_SIZES = { '720p': [1280, 720], '1080p': [1920, 1080], '1440p': [2560, 1440], '4k': [3840, 2160], vertical: [1080, 1920], square: [1080, 1080] };

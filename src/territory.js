@@ -7,8 +7,8 @@
 // src/bodies.js calls this from a few hooks: reading an effect, the contacts it gathers, the end of each substep and of
 // each frame, and drawing. Browser-compatible and deterministic, as bodies.js is: only + − × ÷ and sqrt, craft.js's
 // trigonometry, and cells, bodies and pickups visited in a fixed order.
-import { PixelError } from './core.js';
-import { fields } from './authoring.js';
+import { fail, isObject } from './core.js';
+import { fields, number, integer } from './authoring.js';
 import { cosDeg, sinDeg } from './craft.js';
 import { layoutText, measureText, FONT_CAP_HEIGHT } from './font.js';
 
@@ -17,16 +17,6 @@ const LIMITS = { teams: 8, cells: 65536, pickups: 64, events: 64, strikes: 16, h
 // Labels the news line shows for a power that names none.
 const LABELS = { split: 'SPLIT', grow: 'GROW', speed: 'SPEED', warp: 'WARP', magnet: 'MAGNET', vanish: 'GONE', break: 'BREAK' };
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const number = (value, path, min, max) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(path, `expected a number from ${min} to ${max}`);
-  return value;
-};
-const integer = (value, path, min, max) => {
-  if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected an integer from ${min} to ${max}`);
-  return value;
-};
 const pair = (value, path, min, max, whole = false) => {
   if (!Array.isArray(value) || value.length !== 2) fail(path, 'expected [x, y]');
   return value.map((n, i) => (whole ? integer : number)(n, `${path}[${i}]`, min, max));

@@ -2,13 +2,11 @@
 // description drawn into a template two tiles wide and three tall, the seam check that compares every quarter join a
 // map can make with the way the template itself continues, and a test map that shows every tile of a set. Seeded
 // hashing and + − × ÷ only, as in craft.js, so a description always draws the same pixels. No I/O.
-import { PixelError } from './core.js';
+import { fail, isObject } from './core.js';
 import { hash, random } from './craft.js';
 import { tilePieces, templatePiece, neighbourMask } from './autotile.js';
 import { slopeLegend, SLOPE_MAP } from './slopes.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 function fields(value, keys, path) {
   if (!isObject(value)) fail(path, 'expected an object');
   for (const key of Object.keys(value)) if (!keys.includes(key) || value[key] === null) fail(`${path}.${key}`, `unknown or null field; use ${keys.join(', ')}`);

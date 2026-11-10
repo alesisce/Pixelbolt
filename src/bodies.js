@@ -13,8 +13,8 @@
 // Same units as pixelforge-fluid (docs/physics-model.md, section 2): pixels, frames, pixels per frame and per frame².
 // Browser-compatible and deterministic: only + − × ÷ and sqrt, craft.js's polynomial trigonometry, fixed substeps
 // and iteration counts, and bodies, contacts and pixels visited in a fixed order.
-import { PixelError, renderProject } from './core.js';
-import { fields } from './authoring.js';
+import { renderProject, fail, isObject } from './core.js';
+import { fields, number, integer } from './authoring.js';
 import { sinDeg, cosDeg, traceLine, turnRows, random } from './craft.js';
 import { atan2Deg } from './shapes.js';
 import { readTerritory, readPickups, readEvents, readStrikes, readHud, createTerritory } from './territory.js';
@@ -43,16 +43,6 @@ const GONE = 16;
 // Walls and obstacles without their own bounce and friction.
 const SURFACE = { bounce: 0, friction: 0.5 };
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const number = (value, path, min, max) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(path, `expected a number from ${min} to ${max}`);
-  return value;
-};
-const integer = (value, path, min, max) => {
-  if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected an integer from ${min} to ${max}`);
-  return value;
-};
 const boolean = (value, path) => { if (typeof value !== 'boolean') fail(path, 'expected true or false'); return value; };
 const pair = (value, path, min, max) => {
   if (!Array.isArray(value) || value.length !== 2) fail(path, 'expected [x, y]');

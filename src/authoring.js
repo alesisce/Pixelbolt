@@ -1,5 +1,5 @@
 // Optional authoring compilers. All output is ordinary, editable version-1 recipe data.
-import { PixelError, CANVAS_SIDE, parseColor, renderProject, describeStampRecipe, readRows, pictureSheet } from './core.js';
+import { PixelError, CANVAS_SIDE, parseColor, renderProject, describeStampRecipe, readRows, pictureSheet, fail } from './core.js';
 import { AUTOTILE_MODES, MODE_MASKS, MODE_BITS, tilePieces, templatePiece } from './autotile.js';
 import { terrainTemplate, mergeTerrain, normalTerrain, readTerrain, templateSeams, seamWarnings, testMapRecipe, layeredTestMapRecipe } from './terrain.js';
 import { slopeTiles, slopeCollision, slopeLegend, SLOPE_MAP } from './slopes.js';
@@ -7,7 +7,6 @@ import { EASINGS, ease, rotateRows, draftTurn, rasterizeBone, rasterizeMass } fr
 import { turn, angleDelta, solveReach } from './pose-geometry.js';
 import { expandMotions, validateRig, MOTION_TEMPLATES } from './motions.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
 export function fields(value, keys, path, nullable = []) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(path, 'expected an object');
   for (const key of Object.keys(value)) if (!keys.includes(key) || (value[key] === null && !nullable.includes(key))) fail(`${path}.${key}`, 'unknown or null field');
@@ -16,6 +15,34 @@ export function point(value, path, bound = 4096) {
   if (!Array.isArray(value) || value.length !== 2 || value.some(v => !Number.isInteger(v) || Math.abs(v) > bound)) fail(path, `expected two integer coordinates within ±${bound}`);
   return value;
 }
+// What the source formats share when they read a number: one within bounds, a whole one, [x, y], and a value or a
+// [min, max] range with the draw that samples it. Declared as functions, so modules that import each other can use them.
+export function number(value, path, min, max) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(path, `expected a number from ${min} to ${max}`);
+  return value;
+}
+export function integer(value, path, min, max) {
+  if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected an integer from ${min} to ${max}`);
+  return value;
+}
+export function pair(value, path, min, max) {
+  if (!Array.isArray(value) || value.length !== 2) fail(path, 'expected [x, y]');
+  return [number(value[0], `${path}[0]`, min, max), number(value[1], `${path}[1]`, min, max)];
+}
+// A number, or [min, max] sampled per particle.
+export function range(value, path, min, max, whole = false) {
+  const check = whole ? integer : number;
+  if (Array.isArray(value)) {
+    if (value.length !== 2) fail(path, 'expected a number or [min, max]');
+    const [a, b] = [check(value[0], `${path}[0]`, min, max), check(value[1], `${path}[1]`, min, max)];
+    if (a > b) fail(path, 'min must not exceed max');
+    return [a, b];
+  }
+  const v = check(value, path, min, max);
+  return [v, v];
+}
+export function pick([a, b], r) { return a + (b - a) * r; }
+export function pickWhole([a, b], r) { return a + Math.min(b - a, Math.floor(r * (b - a + 1))); }
 const identifier = (value, path) => {
   if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) fail(path, 'expected a named part, pose or marker');
   return value;

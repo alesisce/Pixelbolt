@@ -6,8 +6,8 @@
 // pixel short of whatever it would touch, with mirror symmetry across both axes. Growth runs on a fixed timeline that
 // eases into rest: the last frames hold a still, finished picture.
 // Browser-compatible and deterministic: craft.js trigonometry, seeded hashing, + − × ÷ and sqrt only.
-import { PixelError, renderProject, readRows, parseColor } from './core.js';
-import { fields } from './authoring.js';
+import { renderProject, readRows, parseColor, fail } from './core.js';
+import { fields, number as num, integer as int, pair } from './authoring.js';
 import { sinDeg, cosDeg, ease, EASINGS, random } from './craft.js';
 import { atan2Deg } from './shapes.js';
 
@@ -15,19 +15,6 @@ export const CRYSTAL_HABITS = ['prism', 'cube', 'octahedron', 'snowflake'];
 const LIMITS = { crystals: 32, total: 256, looks: 8, colors: 6 };
 const MAX_FRAMES = 256; // the most frames an effect has
 const MIN_LIGHT = 0.001; // the shortest light direction read: a shorter one has too little length to divide by
-const fail = (path, message) => { throw new PixelError(path, message); };
-const num = (v, path, min, max) => {
-  if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) fail(path, `expected a number from ${min} to ${max}`);
-  return v;
-};
-const int = (v, path, min, max) => {
-  if (!Number.isInteger(v) || v < min || v > max) fail(path, `expected an integer from ${min} to ${max}`);
-  return v;
-};
-const pair = (v, path, min, max) => {
-  if (!Array.isArray(v) || v.length !== 2) fail(path, 'expected [x, y]');
-  return v.map((n, i) => num(n, `${path}[${i}]`, min, max));
-};
 // A number, or [low, high] drawn per crystal from the effect's seed.
 const span = (v, path, min, max, whole = false) => {
   const one = (n, p) => (whole ? int(n, p, min, max) : num(n, p, min, max));

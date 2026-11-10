@@ -1,10 +1,9 @@
 // Bounded scene review, not a game engine. In-memory recipes only; no filesystem or network access.
-import { PixelError, renderProject, parseColor, animationPosition, tileRepeat, tileReport, rampShifter, reviewPixels, scalePixels, readGuides, drawGuides, CANVAS_SIDE } from './core.js';
+import { renderProject, parseColor, animationPosition, tileRepeat, tileReport, rampShifter, reviewPixels, scalePixels, readGuides, drawGuides, CANVAS_SIDE, fail } from './core.js';
 import { EASINGS, ease, pixelId, random, nearestColor } from './craft.js';
 import { fields, point } from './authoring.js';
 import { expandTilemap, isoLayout } from './autotile.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
 const int = (v, min, max, path) => { if (!Number.isInteger(v) || v < min || v > max) fail(path, `expected an integer from ${min} to ${max}`); return v; };
 const num = (v, min, max, path) => { if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) fail(path, `expected a number from ${min} to ${max}`); return v; };
 const smooth = t => t * t * (3 - 2 * t);

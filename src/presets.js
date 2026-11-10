@@ -12,7 +12,7 @@ import { availableParallelism } from 'node:os';
 import { measurePresets } from './preset-pool.js';
 import { PixelError, renderProject } from './core.js';
 import { resolveReferences } from './resolve.js';
-import { compilePoses } from './authoring.js';
+import { compilePoses, compileAutotile, compileNormals } from './authoring.js';
 import { compileEffects } from './fx.js';
 import { compileFluid } from './fluid.js';
 import { compileWaves } from './wave.js';
@@ -25,7 +25,8 @@ import { POWDER_PRESETS } from '../studio/powder-controls.js';
 
 export const PRESET_FOLDER = fileURLToPath(new URL('../examples/', import.meta.url));
 const SOURCE = /^(.+)\.(fluid|fx|wave|crystal|powder|bodies|poses)\.json$/;
-const COMPILERS = { 'pixelforge-fluid': compileFluid, 'pixelforge-fx': compileEffects, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-powder': compilePowder, 'pixelforge-bodies': compileBodies, 'pixelforge-poses': compilePoses };
+// What compiles each source format: the one table, which the CLI and the MCP server use too.
+export const COMPILERS = { 'pixelforge-poses': compilePoses, 'pixelforge-autotile': compileAutotile, 'pixelforge-fx': compileEffects, 'pixelforge-fluid': compileFluid, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-powder': compilePowder, 'pixelforge-bodies': compileBodies, 'pixelforge-normals': compileNormals };
 const TITLES = new Map([...FLUID_PRESETS.map(entry => [`fluid:${entry.file}`, entry]), ...EFFECT_PRESETS.map(entry => [`fx:${entry.file}`, entry]), ...POWDER_PRESETS.map(entry => [`powder:${entry.file}`, entry])]);
 
 // How to use the listing. Fewer frames come from compiling with `frames`: a source's own `frames` is its simulation

@@ -1,8 +1,7 @@
 // Motion templates lower to editable poses. Kept separate from rasterization and file I/O.
-import { PixelError } from './core.js';
+import { PixelError, fail } from './core.js';
 import { sinDeg, cosDeg, rasterizeMass } from './craft.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
 const id = (value, path) => { if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) fail(path, 'expected a name of at most 64 characters'); return value; };
 const object = (value, keys, path) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(path, 'expected an object');

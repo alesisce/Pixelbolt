@@ -11,8 +11,8 @@ import { readExpect, checkDelivery, briefCheck } from '../src/check.js';
 import { resizeRecipe, resizeWarning, keepFrames } from '../src/resize.js';
 import { embedBundleRecipe, sameFiles, outputSummary, withRates } from '../src/export.js';
 import { shareLink, readEmbeddedRecipe, recipeKind } from '../src/share.js';
-import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext } from '../src/presets.js';
-import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, compileEffects, compileFluid, compileNormals, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
+import { PRESET_FOLDER, listPresets, briefListing, findListing, namedLike, presetWords, presetEntries, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from '../src/presets.js';
+import { renderProject, animationGIF, createSequence, frameGrid, createSceneSequence, createBodiesSequence, figuresSummary, prepareScene, renderScene, sceneImage, createBundle, writeBundle, inspectProject, briefDiagnostics, briefCells, errorReply, compareProjects, patchRecipe, encodePNG, compilePoses, draftViews, compileAutotile, formatJSON, createSceneBundle, createOverlay, applyOverlay, importPNG, resolveReferences, restorePaletteReference, testMapScale } from '../src/index.js';
 
 // A reader that stops early (`| head -1`) closes the pipe: stop quietly, as other command-line tools do. Commands print
 // their reply after writing their files, so only the rest of the reply is lost.
@@ -326,8 +326,6 @@ async function writeOutputs(targets, force, inputs = []) {
   }
   return Object.fromEntries(entries.map(([label, target]) => [label, shown(target)]));
 }
-// Sidecar sources compile by their format; `autotile` remains a dedicated command for templates.
-const COMPILERS = { 'pixelforge-poses': compilePoses, 'pixelforge-autotile': compileAutotile, 'pixelforge-fx': compileEffects, 'pixelforge-fluid': compileFluid, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-powder': compilePowder, 'pixelforge-bodies': compileBodies, 'pixelforge-normals': compileNormals };
 // Every reply is printed one way: like JSON.stringify(value, null, 2), but an object or array that fits in ROW
 // characters is written on one line, and a longer list of names or numbers is wrapped to lines of that length rather
 // than a line an item. Grid rows (`rows`, strings that must line up under each other) are always a line each.

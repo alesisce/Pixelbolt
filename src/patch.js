@@ -1,9 +1,7 @@
 // Browser-compatible recipe patching: targeted edits addressed by readable paths. No I/O.
-import { PixelError, parseColor, renderProject } from './core.js';
+import { parseColor, renderProject, fail, isObject } from './core.js';
 import { pixelId, colorOf, idsOf, cleanupIds } from './craft.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const define = (target, key, value) => Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 const summarize = value => {
   const text = JSON.stringify(value);

@@ -7,45 +7,17 @@
 // shockwave rings, slashes, beams, lightning, magic circles, impact stars, fireballs) bake into one grid per frame
 // between `behind` particles and the rest. Browser-compatible and deterministic: seeded hashing and polynomial
 // trigonometry, no Math.random.
-import { PixelError, parseColor, renderProject, FRAME_AREA, joinErrors } from './core.js';
-import { fields, point, compilePoses } from './authoring.js';
+import { PixelError, parseColor, renderProject, FRAME_AREA, joinErrors, fail, isObject } from './core.js';
+import { fields, point, compilePoses, number, integer, range, pair, pick, pickWhole } from './authoring.js';
 import { patternProblem, ditherThreshold, traceLine, random, hash, sinDeg, cosDeg, ease, EASINGS, rotateRows } from './craft.js';
 import { readShapes, renderShapes, holdBands, settleHolds, tween, sample, sequenceFrame, atan2Deg, pathWalker } from './shapes.js';
 import { compileFluid } from './fluid.js';
 import { compileWaves } from './wave.js';
 
-const fail = (path, message) => { throw new PixelError(path, message); };
-const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const identifier = (value, path) => {
   if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) fail(path, 'expected a name of letters, digits, hyphens or underscores, starting with a letter');
   return value;
 };
-const number = (value, path, min, max) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) fail(path, `expected a number from ${min} to ${max}`);
-  return value;
-};
-const integer = (value, path, min, max) => {
-  if (!Number.isInteger(value) || value < min || value > max) fail(path, `expected an integer from ${min} to ${max}`);
-  return value;
-};
-// A number, or [min, max] sampled per particle.
-const range = (value, path, min, max, whole = false) => {
-  const check = whole ? integer : number;
-  if (Array.isArray(value)) {
-    if (value.length !== 2) fail(path, 'expected a number or [min, max]');
-    const [a, b] = [check(value[0], `${path}[0]`, min, max), check(value[1], `${path}[1]`, min, max)];
-    if (a > b) fail(path, 'min must not exceed max');
-    return [a, b];
-  }
-  const v = check(value, path, min, max);
-  return [v, v];
-};
-const pair = (value, path, min, max) => {
-  if (!Array.isArray(value) || value.length !== 2) fail(path, 'expected [x, y]');
-  return [number(value[0], `${path}[0]`, min, max), number(value[1], `${path}[1]`, min, max)];
-};
-const pick = ([a, b], r) => a + (b - a) * r;
-const pickWhole = ([a, b], r) => a + Math.min(b - a, Math.floor(r * (b - a + 1)));
 // Salts keep each sampled property independent, so changing one range does not reshuffle the others.
 const SALT = { x: 1, y: 2, angle: 3, speed: 4, life: 5, variant: 6, remap: 7, phase: 8, offset: 9, ring: 10, radius: 11, along: 12, pixel: 13, release: 14, share: 15, size: 16, turn: 17, spin: 18 };
 // Which of a sprite's pixels its emitter spawns from: every visible pixel, the visible pixels on its edge, or the empty

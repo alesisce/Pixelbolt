@@ -14,21 +14,15 @@ import { shareLink } from './share.js';
 import { animationGIF } from './gif.js';
 import { readExpect, checkDelivery, briefCheck } from './check.js';
 import { createSequence, createSceneSequence, createBodiesSequence, figuresSummary, frameGrid } from './sequence.js';
-import { compilePoses, draftViews, compileAutotile, compileNormals } from './authoring.js';
+import { compilePoses, draftViews } from './authoring.js';
 import { testMapScale } from './terrain.js';
-import { compileEffects } from './fx.js';
-import { compileFluid } from './fluid.js';
-import { compileWaves } from './wave.js';
-import { compileCrystals } from './crystal.js';
-import { compilePowder } from './powder.js';
-import { compileBodies } from './bodies.js';
 import { prepareScene, renderScene, sceneImage } from './scene.js';
 import { createSceneBundle } from './scene-export.js';
 import { importPNG } from './import.js';
 import { applyOverlay } from './overlays.js';
 import { resolveReferences, assertInside } from './resolve.js';
 import { resizeRecipe, resizeWarning, keepFrames } from './resize.js';
-import { listPresets, briefListing, findListing, findPreset, loadPreset, compilePreset, presetNext } from './presets.js';
+import { listPresets, briefListing, findListing, findPreset, loadPreset, compilePreset, presetNext, COMPILERS } from './presets.js';
 import { TOPICS, SECTIONED, helpText, jsonTopic } from './help.js';
 
 const versions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
@@ -86,7 +80,6 @@ export function parseTextArguments(args, properties) {
 }
 // pixel_help returns the short quick start by default; each topic is one longer document, read only when needed
 // (help.js, which `pixelbolt help <topic>` shares).
-const COMPILERS = { 'pixelforge-poses': compilePoses, 'pixelforge-autotile': compileAutotile, 'pixelforge-fx': compileEffects, 'pixelforge-fluid': compileFluid, 'pixelforge-wave': compileWaves, 'pixelforge-crystal': compileCrystals, 'pixelforge-powder': compilePowder, 'pixelforge-bodies': compileBodies, 'pixelforge-normals': compileNormals };
 
 const sequenceSummary = info => ({ directory: 'sequence', pattern: info.pattern, first: info.first, frames: info.frames, fps: info.fps.label, seconds: info.seconds, width: info.width, height: info.height, alpha: info.alpha, placement: info.placement, loop: info.loop, notes: info.notes, ffmpeg: info.commands });
 // An MCP call writes at most this much sequence: the studio's download cap. Longer or larger shots go through

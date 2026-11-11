@@ -13,6 +13,11 @@ Releases before 0.9.0 are described on [GitHub Releases](https://github.com/skul
 
 - `expect.sheet` checks the sprite sheet the user named: its `width` and `height` in pixels, or its `columns` and `rows` (`{"rows": 1}` for a one-row strip). A grid wraps at 8 columns unless the recipe sets `sheet.columns`, so a sheet of 10 or 12 frames came out in two rows while every other check passed (5 of 8 such requests in one benchmark). The fix names the `sheet.columns` that makes the asked sheet with the fewest empty cells, carrying the frame-size fix's scale when both miss, and turns `sheet.trim` off for a trimmed atlas. When the default grid wraps into more rows and nothing asked about the sheet, `delivered.sheet` says so.
 
+### MCP replies name this release
+
+- A bodies match too long for one call, and a `pixel_compile` with `sequence` stopped at the time or memory limit, now name the command line of the server that refused it, `npx -y pixelbolt@<its version> sequence …`, not an unpinned `npx -y pixelbolt`, which fetched whatever npm's latest was. `createBodiesSequence` takes the command as an option; library callers keep the plain one.
+- `pixel_help`'s description names the `powder` schema topic, which it served but never listed.
+
 ## 0.15.0 (2026-11-10)
 
 ### Found by the review before this release
